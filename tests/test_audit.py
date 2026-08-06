@@ -215,6 +215,52 @@ class ActionTypeTest(unittest.TestCase):
             )
 
 
+class RepositoryContractTest(unittest.TestCase):
+    """Implementations must agree on search().
+
+    The in-memory repository once accepted **filters and treated `limit` as a
+    column name, so every search returned nothing - silently, because an empty
+    audit result looks exactly like "no matching actions".
+    """
+
+    def test_search_signatures_match(self):
+        import inspect
+
+        from tms.core.audit import AuditRepository
+
+        expected = set(inspect.signature(AuditRepository.search).parameters)
+        actual = set(inspect.signature(InMemoryAuditRepository.search).parameters)
+        self.assertEqual(expected, actual)
+
+    def test_limit_is_honoured_not_treated_as_a_filter(self):
+        repository = InMemoryAuditRepository()
+        for index in range(5):
+            with AuditGuard(repository).action(
+                action_type=ACTION_QUERY_KILL,
+                target_kind=TARGET_QUERY,
+                target_id="q{}".format(index),
+                reason="cleanup",
+                **ACTOR
+            ):
+                pass
+        self.assertEqual(len(repository.search(limit=3)), 3)
+        self.assertEqual(len(repository.search()), 5)
+
+    def test_results_are_newest_first(self):
+        repository = InMemoryAuditRepository()
+        for index in range(3):
+            with AuditGuard(repository).action(
+                action_type=ACTION_QUERY_KILL,
+                target_kind=TARGET_QUERY,
+                target_id="q{}".format(index),
+                reason="cleanup",
+                **ACTOR
+            ):
+                pass
+        ids = [r.target_id for r in repository.search()]
+        self.assertEqual(ids[0], "q2")
+
+
 class RefusalTest(unittest.TestCase):
     def test_refusals_are_recorded(self):
         """AU5: 'why did nothing happen?' is an audit question."""

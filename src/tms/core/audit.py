@@ -120,7 +120,21 @@ class AuditRepository:
         """Checked before the action runs so AU1 can be honoured."""
         raise NotImplementedError
 
-    def search(self, **filters: Any) -> List[AuditRecord]:
+    def search(
+        self,
+        actor: Optional[str] = None,
+        action_type: Optional[str] = None,
+        target_kind: Optional[str] = None,
+        target_id: Optional[str] = None,
+        outcome: Optional[str] = None,
+        occurred_from: Optional[Any] = None,
+        occurred_to: Optional[Any] = None,
+        limit: int = 100,
+        **_ignored: Any
+    ) -> List[AuditRecord]:
+        """Newest first. Implementations must keep this signature: the in-memory
+        one silently returning nothing because it treated `limit` as a column
+        filter is a mistake worth only making once."""
         raise NotImplementedError
 
 
@@ -139,13 +153,34 @@ class InMemoryAuditRepository(AuditRepository):
     def is_writable(self) -> bool:
         return self.writable
 
-    def search(self, **filters: Any) -> List[AuditRecord]:
+    def search(
+        self,
+        actor: Optional[str] = None,
+        action_type: Optional[str] = None,
+        target_kind: Optional[str] = None,
+        target_id: Optional[str] = None,
+        outcome: Optional[str] = None,
+        occurred_from: Optional[Any] = None,
+        occurred_to: Optional[Any] = None,
+        limit: int = 100,
+        **_ignored: Any
+    ) -> List[AuditRecord]:
         results = list(self.records)
-        for key, value in filters.items():
-            if value is None:
-                continue
-            results = [r for r in results if getattr(r, key, None) == value]
-        return results
+        for attribute, value in (
+            ("actor", actor),
+            ("action_type", action_type),
+            ("target_kind", target_kind),
+            ("target_id", target_id),
+            ("outcome", outcome),
+        ):
+            if value is not None:
+                results = [r for r in results if getattr(r, attribute, None) == value]
+        if occurred_from is not None:
+            results = [r for r in results if r.occurred_at and r.occurred_at >= occurred_from]
+        if occurred_to is not None:
+            results = [r for r in results if r.occurred_at and r.occurred_at <= occurred_to]
+        results.sort(key=lambda r: r.occurred_at or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+        return results[: max(1, int(limit))]
 
 
 class _AuditedAction:

@@ -131,6 +131,55 @@ class PostgresSnapshotRepository(SnapshotRepository):
                     ),
                 )
 
+    # ------------------------------------------------------ health overrides
+
+    def save_health_override(
+        self,
+        cluster: str,
+        test_id: str,
+        enabled: Optional[bool],
+        thresholds: Optional[Dict[str, Any]],
+        updated_by: str,
+    ) -> None:
+        """Upsert an override. COALESCE keeps the untouched half intact so that
+        changing a threshold does not silently re-enable a disabled test."""
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO health_test_override
+                    (cluster, test_id, enabled, thresholds, updated_at, updated_by)
+                VALUES (%s, %s, COALESCE(%s, TRUE), %s, now(), %s)
+                ON CONFLICT (cluster, test_id) DO UPDATE SET
+                    enabled = COALESCE(%s, health_test_override.enabled),
+                    thresholds = COALESCE(%s, health_test_override.thresholds),
+                    updated_at = now(),
+                    updated_by = EXCLUDED.updated_by
+                """,
+                (
+                    cluster,
+                    test_id,
+                    enabled,
+                    json.dumps(thresholds) if thresholds else None,
+                    updated_by,
+                    enabled,
+                    json.dumps(thresholds) if thresholds else None,
+                ),
+            )
+
+    def load_health_overrides(self, cluster: str) -> Dict[str, Dict[str, Any]]:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT test_id, enabled, thresholds FROM health_test_override WHERE cluster = %s",
+                (cluster,),
+            )
+            rows = cursor.fetchall()
+        overrides: Dict[str, Dict[str, Any]] = {}
+        for test_id, enabled, thresholds in rows:
+            if isinstance(thresholds, str):
+                thresholds = json.loads(thresholds)
+            overrides[test_id] = {"enabled": enabled, "thresholds": thresholds or {}}
+        return overrides
+
     def close(self) -> None:
         try:
             self._connection.close()

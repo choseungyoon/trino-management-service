@@ -23,9 +23,11 @@ from typing import List, Optional
 from tms.clients.circuit import CircuitBreaker
 from tms.clients.transport import HttpxTransport
 from tms.clients.trino import TrinoClient
+from tms.collector.health_writer import HealthWriter
 from tms.collector.poller import ClusterPoller
 from tms.collector.postgres import PostgresSnapshotRepository
 from tms.core.config import Config, load_config
+from tms.health.engine import HealthEngine
 
 log = logging.getLogger("tms.collector")
 
@@ -35,11 +37,43 @@ MIN_TICK_SLEEP_SECONDS = 0.2
 
 
 class CollectorService:
-    def __init__(self, config: Config, repository, pollers: List[ClusterPoller]) -> None:
+    def __init__(
+        self,
+        config: Config,
+        repository,
+        pollers: List[ClusterPoller],
+        health_writer=None,
+    ) -> None:
         self.config = config
         self.repository = repository
         self.pollers = pollers
+        # Health evaluation runs here rather than in the API because the engine
+        # carries state (OOM counters, stabilisation counts) and the collector is
+        # the only single-instance process.
+        self.health_writer = health_writer
         self._stopping = False
+
+    def _expected_workers(self, cluster_name: str) -> int:
+        if self.config is None:
+            return 0
+        try:
+            return self.config.cluster(cluster_name).expected_workers
+        except KeyError:
+            return 0
+
+    def _evaluate_health(self, cluster_name: str) -> None:
+        if self.health_writer is None:
+            return
+        try:
+            overrides = self.repository.load_health_overrides(cluster_name)
+        except Exception:  # noqa: BLE001 - overrides are optional
+            log.exception("failed to load health overrides for %s", cluster_name)
+            overrides = {}
+        self.health_writer.evaluate(
+            cluster_name=cluster_name,
+            expected_workers=self._expected_workers(cluster_name),
+            overrides=overrides,
+        )
 
     def request_stop(self, *_args) -> None:
         log.info("shutdown requested, finishing the current tick")
@@ -56,7 +90,9 @@ class CollectorService:
                 if self._stopping:
                     break
                 try:
-                    poller.tick()
+                    produced = poller.tick()
+                    if produced:
+                        self._evaluate_health(poller.cluster_name)
                 except Exception:  # noqa: BLE001 - one cluster must not stop the rest
                     log.exception("unhandled error polling %s", poller.cluster_name)
             if self._stopping:
@@ -137,7 +173,21 @@ def run(argv: Optional[List[str]] = None) -> int:
         repository.close()
         return 4
 
-    service = CollectorService(config, repository, build_pollers(config, repository))
+    health_writer = HealthWriter(
+        engine=HealthEngine(
+            stabilization_polls=config.health.stabilization_polls,
+            gateway_enabled=config.gateway.enabled,
+        ),
+        repository=repository,
+        stale_threshold_seconds=config.collector.stale_threshold_seconds,
+        thresholds=config.health.thresholds,
+        coordinator_counted_in_active_nodes=(
+            config.trino_facts.coordinator_counted_in_active_nodes
+        ),
+    )
+    service = CollectorService(
+        config, repository, build_pollers(config, repository), health_writer=health_writer
+    )
     signal.signal(signal.SIGTERM, service.request_stop)
     signal.signal(signal.SIGINT, service.request_stop)
     try:

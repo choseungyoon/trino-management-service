@@ -63,6 +63,23 @@ class SnapshotRepository:
     def record_health_events(self, events: List[Dict[str, Any]]) -> None:
         raise NotImplementedError
 
+    def save_health_override(
+        self,
+        cluster: str,
+        test_id: str,
+        enabled: Optional[bool],
+        thresholds: Optional[Dict[str, Any]],
+        updated_by: str,
+    ) -> None:
+        """Persist an operator override (FR-CH-03/04/05).
+
+        `test_id` of "*" addresses the roll-up rather than a single test.
+        """
+        raise NotImplementedError
+
+    def load_health_overrides(self, cluster: str) -> Dict[str, Dict[str, Any]]:
+        raise NotImplementedError
+
 
 class InMemorySnapshotRepository(SnapshotRepository):
     """Used by tests and by a dry-run mode. Not for production."""
@@ -70,6 +87,7 @@ class InMemorySnapshotRepository(SnapshotRepository):
     def __init__(self) -> None:
         self.snapshots: Dict[str, Snapshot] = {}
         self.health_events: List[Dict[str, Any]] = []
+        self.overrides: Dict[str, Dict[str, Dict[str, Any]]] = {}
 
     @staticmethod
     def _key(cluster: str, kind: str) -> str:
@@ -83,3 +101,21 @@ class InMemorySnapshotRepository(SnapshotRepository):
 
     def record_health_events(self, events: List[Dict[str, Any]]) -> None:
         self.health_events.extend(events)
+
+    def save_health_override(
+        self,
+        cluster: str,
+        test_id: str,
+        enabled: Optional[bool],
+        thresholds: Optional[Dict[str, Any]],
+        updated_by: str,
+    ) -> None:
+        entry = self.overrides.setdefault(cluster, {}).setdefault(test_id, {})
+        if enabled is not None:
+            entry["enabled"] = enabled
+        if thresholds:
+            entry["thresholds"] = dict(thresholds)
+        entry["updated_by"] = updated_by
+
+    def load_health_overrides(self, cluster: str) -> Dict[str, Dict[str, Any]]:
+        return dict(self.overrides.get(cluster, {}))

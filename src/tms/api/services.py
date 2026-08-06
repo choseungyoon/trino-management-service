@@ -1,0 +1,543 @@
+"""Endpoint logic, independent of the web framework.
+
+FastAPI wiring lives in main.py and stays thin. Everything that can go wrong -
+permissions, staleness, audit enforcement, upstream failures - is decided here,
+where it can be tested without an HTTP server.
+
+Reads come from collector snapshots, never from a live coordinator call. That is
+what keeps the API horizontally scalable without multiplying load on Trino
+(ARCHITECTURE.md principle A3). The single exception is query detail, which a
+user opens deliberately.
+
+Python 3.9 compatible.
+"""
+
+import logging
+from datetime import datetime
+from typing import Any, Callable, Dict, List, Optional
+
+from tms.api.deeplinks import build_grafana_url, build_log_url, build_query_history_url
+from tms.api.errors import (
+    AuditUnavailableError,
+    Forbidden,
+    InvalidRequest,
+    NotFound,
+    ReasonRequiredError,
+    UpstreamUnavailable,
+)
+from tms.api.permissions import (
+    EXPORT_AUDIT,
+    KILL_QUERY,
+    MANAGE_HEALTH,
+    VIEW_AUDIT,
+    VIEW_HEALTH,
+    VIEW_QUERIES,
+    Principal,
+)
+from tms.clients.errors import TrinoClientError, TrinoNotFound
+from tms.clients.trino import build_kill_message
+from tms.collector.snapshot import KIND_HEALTH, KIND_QUERIES, Snapshot, utcnow
+from tms.core.audit import (
+    ACTION_AUDIT_EXPORT,
+    ACTION_HEALTH_ROLLUP_TOGGLE,
+    ACTION_HEALTH_TEST_TOGGLE,
+    ACTION_HEALTH_THRESHOLD_CHANGE,
+    ACTION_QUERY_KILL,
+    TARGET_CLUSTER,
+    TARGET_HEALTH_TEST,
+    TARGET_QUERY,
+    AuditGuard,
+    AuditUnavailable,
+    ReasonRequired,
+)
+
+log = logging.getLogger(__name__)
+
+MAX_PAGE_SIZE = 500
+
+
+def require(principal: Principal, capability: str) -> None:
+    if not principal.can(capability):
+        raise Forbidden(
+            "{} 권한이 없다 (역할: {})".format(capability, ", ".join(principal.roles) or "없음")
+        )
+
+
+def envelope(snapshot: Optional[Snapshot], data: Any, stale_threshold: float) -> Dict[str, Any]:
+    """Wrap a read response with freshness metadata.
+
+    The server decides staleness rather than shipping a timestamp and hoping the
+    client compares it correctly. A client that forgets renders stale data as
+    current, which is the failure this whole design avoids.
+    """
+    if snapshot is None:
+        return {"collected_at": None, "stale": True, "data": data}
+    now = utcnow()
+    return {
+        "collected_at": snapshot.collected_at.isoformat(),
+        "stale": snapshot.is_stale(now, stale_threshold),
+        "data": data,
+    }
+
+
+class TmsService:
+    def __init__(
+        self,
+        config,
+        repository,
+        audit_guard: AuditGuard,
+        audit_repository,
+        trino_clients: Dict[str, Any],
+        clock: Optional[Callable[[], datetime]] = None,
+    ) -> None:
+        self.config = config
+        self.repository = repository
+        self.audit = audit_guard
+        self.audit_repository = audit_repository
+        self.trino_clients = trino_clients
+        self._clock = clock or utcnow
+
+    @property
+    def _stale_threshold(self) -> float:
+        return self.config.collector.stale_threshold_seconds
+
+    def _cluster_or_404(self, cluster: str):
+        try:
+            return self.config.cluster(cluster)
+        except KeyError:
+            raise NotFound("알 수 없는 클러스터: {}".format(cluster))
+
+    def _client_or_503(self, cluster: str):
+        client = self.trino_clients.get(cluster)
+        if client is None:
+            raise UpstreamUnavailable("클러스터 {} 의 클라이언트가 없다".format(cluster))
+        return client
+
+    # ------------------------------------------------------------ FR-PORTAL
+
+    def me(self, principal: Principal) -> Dict[str, Any]:
+        return {
+            "user": principal.username,
+            "roles": principal.roles,
+            "capabilities": principal.capabilities,
+        }
+
+    def links(self, principal: Principal) -> Dict[str, Any]:
+        """Link hub. Entries with no configured URL are omitted entirely."""
+        deeplinks = self.config.deeplinks
+        candidates = [
+            ("grafana", "Grafana", build_grafana_url(deeplinks.grafana_cluster_dashboard, "")),
+            ("superset", "Superset", deeplinks.superset_url),
+            ("query_history", "쿼리 히스토리", deeplinks.query_history_home_url),
+        ]
+        if self.config.gateway.enabled and self.config.gateway.base_url:
+            candidates.append(("gateway_ui", "Trino Gateway", self.config.gateway.base_url))
+        for cluster in self.config.clusters:
+            if cluster.trino_ui_url:
+                candidates.append(
+                    ("trino_ui_" + cluster.name, "Trino UI ({})".format(cluster.name), cluster.trino_ui_url)
+                )
+        return {
+            "links": [
+                {"id": link_id, "label": label, "url": url}
+                for link_id, label, url in candidates
+                if url
+            ]
+        }
+
+    # -------------------------------------------------------- FR-QUERY-LIVE
+
+    def list_queries(
+        self,
+        principal: Principal,
+        cluster: str,
+        state: Optional[List[str]] = None,
+        user: Optional[str] = None,
+        min_elapsed_seconds: Optional[float] = None,
+        resource_group: Optional[str] = None,
+        limit: int = 100,
+    ) -> Dict[str, Any]:
+        require(principal, VIEW_QUERIES)
+        self._cluster_or_404(cluster)
+        snapshot = self.repository.load(cluster, KIND_QUERIES)
+        if snapshot is None:
+            return envelope(None, {"summary": {}, "queries": [], "unavailable_reason": "아직 수집된 데이터가 없다."}, self._stale_threshold)
+
+        if not snapshot.trustworthy:
+            # An empty list under a denied `queries` rule is indistinguishable
+            # from an idle cluster, so refuse to present it as data.
+            return envelope(
+                snapshot,
+                {
+                    "summary": {},
+                    "queries": [],
+                    "unavailable_reason": snapshot.collection_error,
+                    "advice": snapshot.advice,
+                },
+                self._stale_threshold,
+            )
+
+        queries = list(snapshot.payload.get("queries") or [])
+        if state:
+            wanted = set(state)
+            queries = [q for q in queries if q.get("state") in wanted]
+        if user:
+            queries = [q for q in queries if q.get("user") == user]
+        if resource_group:
+            queries = [
+                q
+                for q in queries
+                if resource_group in (q.get("resource_group_id") or [])
+            ]
+        if min_elapsed_seconds is not None:
+            floor_ms = min_elapsed_seconds * 1000.0
+            queries = [
+                q for q in queries if (q.get("elapsed_ms") or 0) >= floor_ms
+            ]
+
+        limit = max(1, min(int(limit), MAX_PAGE_SIZE))
+        truncated = len(queries) > limit
+        queries = queries[:limit]
+
+        for query in queries:
+            query["links"] = self._query_links(cluster, query)
+
+        return envelope(
+            snapshot,
+            {
+                "summary": snapshot.payload.get("summary") or {},
+                "queries": queries,
+                "truncated": truncated,
+            },
+            self._stale_threshold,
+        )
+
+    def _query_links(self, cluster: str, query: Dict[str, Any]) -> Dict[str, str]:
+        deeplinks = self.config.deeplinks
+        links: Dict[str, str] = {}
+        log_url = build_log_url(
+            deeplinks.log_template,
+            query_id=query.get("query_id"),
+            cluster=cluster,
+            padding_seconds=deeplinks.log_padding_seconds,
+        )
+        if log_url:
+            links["logs"] = log_url
+        history_url = build_query_history_url(
+            deeplinks.query_history_url_template, query.get("query_id") or ""
+        )
+        if history_url:
+            links["history"] = history_url
+        return links
+
+    def get_query(self, principal: Principal, cluster: str, query_id: str) -> Dict[str, Any]:
+        """Full detail including complete SQL.
+
+        The only read that calls a coordinator directly. It happens when a user
+        opens a query, not on a timer, so it does not affect the polling budget.
+        """
+        require(principal, VIEW_QUERIES)
+        self._cluster_or_404(cluster)
+        client = self._client_or_503(cluster)
+        try:
+            detail = client.get_query(query_id)
+        except TrinoNotFound as exc:
+            raise NotFound("쿼리를 찾을 수 없다: {}".format(query_id), advice=exc.advice)
+        except TrinoClientError as exc:
+            raise UpstreamUnavailable(str(exc), advice=exc.advice)
+        return {"collected_at": self._clock().isoformat(), "stale": False, "data": detail}
+
+    def kill_query(
+        self,
+        principal: Principal,
+        cluster: str,
+        query_id: str,
+        reason: Optional[str],
+        request_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """FR-QL-04. Permission, then audit, then the action - in that order."""
+        self._cluster_or_404(cluster)
+
+        if not principal.can(KILL_QUERY):
+            # AU5: record the refusal. "Why did nothing happen?" is auditable.
+            self.audit.record_refusal(
+                actor=principal.username,
+                roles=principal.roles,
+                action_type=ACTION_QUERY_KILL,
+                target_kind=TARGET_QUERY,
+                target_id=query_id,
+                target_cluster=cluster,
+                reason=reason,
+                error_message="403: {} lacks kill_query".format(principal.username),
+                actor_ip=principal.ip,
+            )
+            raise Forbidden("쿼리 kill 권한이 없다")
+
+        client = self._client_or_503(cluster)
+        try:
+            with self.audit.action(
+                actor=principal.username,
+                roles=principal.roles,
+                action_type=ACTION_QUERY_KILL,
+                target_kind=TARGET_QUERY,
+                target_id=query_id,
+                target_cluster=cluster,
+                reason=reason,
+                actor_ip=principal.ip,
+                request_id=request_id,
+            ) as audited:
+                message = build_kill_message(
+                    principal.username, audited.record.reason, audited.request_id
+                )
+                client.kill_query(query_id, message)
+                audited.details["cluster"] = cluster
+                return {"killed": True, "request_id": audited.request_id}
+        except ReasonRequired as exc:
+            raise ReasonRequiredError(str(exc))
+        except AuditUnavailable as exc:
+            # Nothing was attempted against the cluster.
+            raise AuditUnavailableError(str(exc))
+        except TrinoNotFound as exc:
+            raise NotFound("쿼리를 찾을 수 없다: {}".format(query_id), advice=exc.advice)
+        except TrinoClientError as exc:
+            raise UpstreamUnavailable(str(exc), advice=exc.advice)
+
+    # ---------------------------------------------------- FR-CLUSTER-HEALTH
+
+    def list_clusters(self, principal: Principal) -> Dict[str, Any]:
+        require(principal, VIEW_HEALTH)
+        now = self._clock()
+        rows = []
+        oldest: Optional[Snapshot] = None
+        for cluster in self.config.clusters:
+            snapshot = self.repository.load(cluster.name, KIND_HEALTH)
+            if snapshot is not None and (
+                oldest is None or snapshot.collected_at < oldest.collected_at
+            ):
+                oldest = snapshot
+            payload = (snapshot.payload if snapshot else {}) or {}
+            tests = payload.get("tests") or []
+            rows.append(
+                {
+                    "name": cluster.name,
+                    "rollup_state": payload.get("rollup_state", "UNKNOWN"),
+                    "bad": sum(1 for t in tests if t.get("state") == "BAD"),
+                    "concerning": sum(1 for t in tests if t.get("state") == "CONCERNING"),
+                    "unknown": sum(1 for t in tests if t.get("state") == "UNKNOWN"),
+                    "stale": snapshot.is_stale(now, self._stale_threshold)
+                    if snapshot
+                    else True,
+                }
+            )
+        return envelope(oldest, rows, self._stale_threshold)
+
+    def get_health(self, principal: Principal, cluster: str) -> Dict[str, Any]:
+        require(principal, VIEW_HEALTH)
+        self._cluster_or_404(cluster)
+        snapshot = self.repository.load(cluster, KIND_HEALTH)
+        if snapshot is None:
+            return envelope(
+                None,
+                {"rollup_state": "UNKNOWN", "rollup_enabled": True, "tests": []},
+                self._stale_threshold,
+            )
+        payload = dict(snapshot.payload or {})
+        for test in payload.get("tests") or []:
+            links = {}
+            log_url = build_log_url(
+                self.config.deeplinks.log_template,
+                cluster=cluster,
+                padding_seconds=self.config.deeplinks.log_padding_seconds,
+            )
+            if log_url and test.get("state") in ("BAD", "CONCERNING"):
+                links["logs"] = log_url
+            if links:
+                test["links"] = links
+        return envelope(snapshot, payload, self._stale_threshold)
+
+    def update_health_test(
+        self,
+        principal: Principal,
+        cluster: str,
+        test_id: str,
+        reason: Optional[str],
+        enabled: Optional[bool] = None,
+        thresholds: Optional[Dict[str, float]] = None,
+        request_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """FR-CH-03 / FR-CH-05. Admin only, audited.
+
+        Disabling a health test narrows what operators can see, so it leaves a
+        trace with a mandatory reason like any other write.
+        """
+        self._cluster_or_404(cluster)
+        if enabled is None and not thresholds:
+            raise InvalidRequest("enabled 또는 thresholds 중 하나는 지정해야 한다")
+
+        action_type = (
+            ACTION_HEALTH_THRESHOLD_CHANGE if thresholds else ACTION_HEALTH_TEST_TOGGLE
+        )
+        if not principal.can(MANAGE_HEALTH):
+            self.audit.record_refusal(
+                actor=principal.username,
+                roles=principal.roles,
+                action_type=action_type,
+                target_kind=TARGET_HEALTH_TEST,
+                target_id=test_id,
+                target_cluster=cluster,
+                reason=reason,
+                error_message="403: {} lacks manage_health".format(principal.username),
+                actor_ip=principal.ip,
+            )
+            raise Forbidden("헬스 테스트 변경 권한이 없다")
+
+        try:
+            with self.audit.action(
+                actor=principal.username,
+                roles=principal.roles,
+                action_type=action_type,
+                target_kind=TARGET_HEALTH_TEST,
+                target_id=test_id,
+                target_cluster=cluster,
+                reason=reason,
+                actor_ip=principal.ip,
+                request_id=request_id,
+            ) as audited:
+                audited.details = {"enabled": enabled, "thresholds": thresholds}
+                self.repository.save_health_override(
+                    cluster=cluster,
+                    test_id=test_id,
+                    enabled=enabled,
+                    thresholds=thresholds,
+                    updated_by=principal.username,
+                )
+                return {"updated": True, "request_id": audited.request_id}
+        except ReasonRequired as exc:
+            raise ReasonRequiredError(str(exc))
+        except AuditUnavailable as exc:
+            raise AuditUnavailableError(str(exc))
+
+    def update_health_rollup(
+        self,
+        principal: Principal,
+        cluster: str,
+        enabled: bool,
+        reason: Optional[str],
+        request_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """FR-CH-04. The roll-up can be silenced separately from its tests."""
+        self._cluster_or_404(cluster)
+        if not principal.can(MANAGE_HEALTH):
+            self.audit.record_refusal(
+                actor=principal.username,
+                roles=principal.roles,
+                action_type=ACTION_HEALTH_ROLLUP_TOGGLE,
+                target_kind=TARGET_CLUSTER,
+                target_id=cluster,
+                target_cluster=cluster,
+                reason=reason,
+                error_message="403: {} lacks manage_health".format(principal.username),
+                actor_ip=principal.ip,
+            )
+            raise Forbidden("roll-up 변경 권한이 없다")
+
+        try:
+            with self.audit.action(
+                actor=principal.username,
+                roles=principal.roles,
+                action_type=ACTION_HEALTH_ROLLUP_TOGGLE,
+                target_kind=TARGET_CLUSTER,
+                target_id=cluster,
+                target_cluster=cluster,
+                reason=reason,
+                actor_ip=principal.ip,
+                request_id=request_id,
+            ) as audited:
+                audited.details = {"enabled": enabled}
+                self.repository.save_health_override(
+                    cluster=cluster,
+                    test_id="*",
+                    enabled=enabled,
+                    thresholds=None,
+                    updated_by=principal.username,
+                )
+                return {"updated": True, "request_id": audited.request_id}
+        except ReasonRequired as exc:
+            raise ReasonRequiredError(str(exc))
+        except AuditUnavailable as exc:
+            raise AuditUnavailableError(str(exc))
+
+    # ----------------------------------------------------- FR-AUDIT-ACTION
+
+    def search_audit(self, principal: Principal, **filters: Any) -> Dict[str, Any]:
+        require(principal, VIEW_AUDIT)
+        limit = max(1, min(int(filters.pop("limit", 100) or 100), MAX_PAGE_SIZE))
+        records = self.audit_repository.search(limit=limit, **filters)
+        return {
+            "records": [self._audit_row(r) for r in records],
+            "count": len(records),
+        }
+
+    def export_audit(
+        self,
+        principal: Principal,
+        reason: Optional[str],
+        request_id: Optional[str] = None,
+        **filters: Any
+    ) -> Dict[str, Any]:
+        """FR-AA-05. Exporting the audit log is itself an audited action.
+
+        If nobody records who pulled the whole log, it is not an audit system.
+        """
+        if not principal.can(EXPORT_AUDIT):
+            self.audit.record_refusal(
+                actor=principal.username,
+                roles=principal.roles,
+                action_type=ACTION_AUDIT_EXPORT,
+                target_kind=TARGET_CLUSTER,
+                target_id="*",
+                reason=reason,
+                error_message="403: {} lacks export_audit".format(principal.username),
+                actor_ip=principal.ip,
+            )
+            raise Forbidden("감사 로그 내보내기 권한이 없다")
+
+        try:
+            with self.audit.action(
+                actor=principal.username,
+                roles=principal.roles,
+                action_type=ACTION_AUDIT_EXPORT,
+                target_kind=TARGET_CLUSTER,
+                target_id="*",
+                reason=reason,
+                actor_ip=principal.ip,
+                request_id=request_id,
+            ) as audited:
+                limit = max(1, min(int(filters.pop("limit", MAX_PAGE_SIZE) or MAX_PAGE_SIZE), MAX_PAGE_SIZE))
+                records = self.audit_repository.search(limit=limit, **filters)
+                audited.details = {"exported_rows": len(records)}
+                return {
+                    "rows": [self._audit_row(r) for r in records],
+                    "request_id": audited.request_id,
+                }
+        except ReasonRequired as exc:
+            raise ReasonRequiredError(str(exc))
+        except AuditUnavailable as exc:
+            raise AuditUnavailableError(str(exc))
+
+    @staticmethod
+    def _audit_row(record) -> Dict[str, Any]:
+        return {
+            "occurred_at": record.occurred_at.isoformat() if record.occurred_at else None,
+            "actor": record.actor,
+            "actor_roles": record.actor_roles,
+            "actor_ip": record.actor_ip,
+            "action_type": record.action_type,
+            "target_kind": record.target_kind,
+            "target_id": record.target_id,
+            "target_cluster": record.target_cluster,
+            "reason": record.reason,
+            "outcome": record.outcome,
+            "error_message": record.error_message,
+            "request_id": record.request_id,
+        }
