@@ -141,7 +141,7 @@
 | ID | 기능 | 출처 |
 |---|---|---|
 | FR-PORTAL | SSO 포털 + 도구 딥링크 허브 | 기존 |
-| FR-QUERY-HISTORY | 완료 쿼리 히스토리/감사 | 기존 + 사용자 8-2 |
+| ~~FR-QUERY-HISTORY~~ | ~~완료 쿼리 히스토리/감사~~ → **R1 제외. 별도 프로젝트로 이미 구현됨. 추후 통합** (2026-08-06 인간 결정) | 기존 + 사용자 8-2 |
 | FR-QUERY-LIVE | 실행 중 쿼리 실시간 모니터링 | **사용자 8-1** |
 | FR-CLUSTER-HEALTH | 합성 헬스 체크 + 조치 조언 | 기존 + **사용자 2-1** |
 | FR-AUDIT-ACTION | 운영 액션 감사 (사유 필수) | 기존 |
@@ -189,7 +189,7 @@
 | ~~B1~~ | ~~Gateway charset 이슈 해소~~ | **해소 (조건부)** | 업스트림 수정 완료 — [#1032](https://github.com/trinodb/trino-gateway/issues/1032) → [PR #1054](https://github.com/trinodb/trino-gateway/pull/1054) → **Gateway 19 (2026-05-11)** 포함. **조치 = Gateway ≥19 업그레이드.** 업그레이드 시 파괴적 변경 2건 동반: ① 리소스 그룹 관리 기능 전면 제거([#656](https://github.com/trinodb/trino-gateway/issues/656)) ② `addXForwardedHeaders` → `forwardedHeadersEnabled` 개명([#1005](https://github.com/trinodb/trino-gateway/pull/1005)) |
 | ~~B2~~ | ~~`catalog.management` 동작 검증~~ | **해소** | `dynamic` 동작 확인. **단 `ALTER CATALOG` 부재** → 5-1b를 REJECT로 재판정. `catalog.store` 선택은 `[NEEDS-HUMAN-DECISION]` 유지(R4) |
 | ~~B3~~ | ~~가중치 라우팅 목적 확인~~ | **해소** | 목적=느린 클러스터 트래픽 감소 → least-loaded 라우터로 대체. **근본 원인 규명이 우선 과제** — 절차는 `BOLT_0_RESULT.md` §5에 체크리스트로 확정 |
-| **B4** | **히스토리 저장소 선정** | **미해소 — `[NEEDS-HUMAN-DECISION]`** | 워크로드 데이터 부재. `WORKLOAD_PROFILE.md`에 수집 절차·SQL·사이징 계산식 준비 완료. **R1 착수를 막고 있는 항목** |
+| ~~B4~~ | ~~히스토리 저장소 선정~~ | **R1 범위에서 이월** | **2026-08-06**: FR-QUERY-HISTORY가 별도 프로젝트로 이미 구현되어 R1에서 제외됨 → **B4는 더 이상 R1을 막지 않는다.** 두 프로젝트 통합 작업 시점으로 이월. `WORKLOAD_PROFILE.md`는 FR-SLO(R2) 목표값 근거로 여전히 필요 |
 | ~~B5~~ | ~~런타임 로그레벨 API 지원 여부~~ | **해소 — 사전 가정이 틀림** | **OSS Trino 477에 존재한다.** REST가 아니라 JMX MBean `io.airlift.log:name=Logging`(`setLevel`/`setRootLevel`). `Server.java`가 `LogJmxModule`을 무조건 등록. **→ FR-LOGLEVEL 폐기하지 않고 축소 존치.** 구현 방식은 D-2로 인간 결정 대기 |
 | **B6** | **운영 Gateway 버전 및 설정 확인 (신규)** | **미해소 — 사실 수집 필요** | 프로젝트 문서에 Gateway 버전 기록이 없다. `TRINO_VERIFIED.md` §2 전체와 B1 판정이 이 값에 의존. FR-GATEWAY/FR-ROUTING-VIEW 설계 전제 → **R1 착수 전 필수** |
 

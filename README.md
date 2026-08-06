@@ -7,14 +7,16 @@ Starburst Enterprise 사용 불가 환경에서 동등한 운영 역량(모니�
 
 ## 지금 할 일
 
-**Bolt 0 (검증 전용)** 부터 시작한다. **코드 작성은 아직 금지다.**
-
-Claude Code에서:
+**Bolt 0 (검증) 완료.** 결과는 `docs/TRINO_VERIFIED.md`, `docs/BOLT_0_RESULT.md`.
+현재 **Bolt 1 = R1 상세 설계** 단계다.
 
 ```
-Using AI-DLC, docs/BOLT_0.md를 읽고 Bolt 0을 수행한다.
-코드 작성 금지. 검증과 문서화만 수행한다.
+Using AI-DLC, Bolt 1(R1 상세 설계)를 수행한다.
+docs/TRINO_VERIFIED.md 에 없는 config property / API 경로 / SPI 시그니처는 사용하지 않는다.
 ```
+
+**R1 범위 (2026-08-06 갱신)** — FR-PORTAL, FR-QUERY-LIVE, FR-CLUSTER-HEALTH, FR-AUDIT-ACTION, FR-LOG-DEEPLINK
+**FR-QUERY-HISTORY는 R1에서 제외** — 별도 프로젝트로 이미 구현됨. 추후 통합.
 
 ---
 
@@ -91,7 +93,7 @@ Using AI-DLC, docs/BOLT_0.md를 읽고 Bolt 0을 수행한다.
 
 | R | 목표 | 주요 기능 |
 |---|---|---|
-| R1 | 지금 무슨 일이 일어나는가 | 포털, 쿼리 히스토리/실시간, 헬스, 감사, 로그 딥링크 |
+| R1 | 지금 무슨 일이 일어나는가 | 포털, **실행 중 쿼리**, 헬스, 감사, 로그 딥링크 (쿼리 히스토리는 별도 프로젝트) |
 | R2 | 측정하고 비교할 수 있다 | 워크로드 뷰, 라우팅 조회, Gateway 콘솔, SLO, 벤치마크 |
 | R3 | 안전하게 조작할 수 있다 | Fleet, 설정변경/재시작, drift 추적 |
 | R4 | 세밀하게 제어할 수 있다 | 카탈로그, OPA 가시성, 로그레벨, 라우팅 서비스 |
@@ -100,14 +102,17 @@ Using AI-DLC, docs/BOLT_0.md를 읽고 Bolt 0을 수행한다.
 
 ---
 
-## 미해소 Blocker
+## Blocker 현황 (2026-08-06)
 
-| # | 내용 | 해소 방법 |
+| # | 내용 | 상태 |
 |---|---|---|
-| B1 | Gateway charset 이슈 | Bolt 0에서 상태 확인 |
-| B2 | `catalog.management` 동작 | Bolt 0 T1-6 |
-| B4 | 히스토리 저장소 선정 | **인간 결정** (워크로드 특성화 후) |
-| B5 | 런타임 로그레벨 API 지원 여부 | Bolt 0 T1-3 (미지원 시 요구사항 폐기) |
+| ~~B1~~ | Gateway charset 이슈 | **해소** — 업스트림 수정됨(Gateway 19). 조치 = 업그레이드 |
+| ~~B2~~ | `catalog.management` 동작 | **해소** — `dynamic` 동작 확인. `ALTER CATALOG`는 477에 부재 |
+| ~~B4~~ | 히스토리 저장소 선정 | **R1 범위 밖으로 이월** — 별도 프로젝트가 이미 담당 |
+| ~~B5~~ | 런타임 로그레벨 API | **해소** — OSS 477에 존재(JMX MBean). REST 아님 → FR-LOGLEVEL 축소 존치 |
+| **B6** | **운영 Gateway 버전·설정 확인** | **미해소** — 플랫폼팀 확인 필요 |
+
+상세는 `docs/BOLT_0_RESULT.md` §2.
 
 ---
 
