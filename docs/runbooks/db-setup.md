@@ -36,10 +36,19 @@ CREATE ROLE tms_app   LOGIN PASSWORD '<app-password>';
 
 CREATE DATABASE tms OWNER tms_owner ENCODING 'UTF8' LC_COLLATE 'C' LC_CTYPE 'C' TEMPLATE template0;
 
--- public 스키마에 아무나 테이블을 만들지 못하게 한다 (PG 15+ 기본값이지만 명시).
 \connect tms
+
+-- public 스키마 소유권을 tms_owner 에게 넘긴다.
+-- ⚠️ 이 줄을 빼면 002_grants.sql 의 `GRANT USAGE ON SCHEMA public` 이
+--    "WARNING: no privileges were granted for public" 만 남기고 조용히 실패한다.
+--    tms_owner 가 자기 소유가 아닌 스키마의 권한을 재부여할 수 없기 때문이다.
+--    PG14 에서는 PUBLIC 의사 역할이 기본 USAGE 를 갖고 있어 우연히 동작하지만,
+--    보안 강화로 `REVOKE ALL ON SCHEMA public FROM PUBLIC` 을 적용하는 순간
+--    tms_app 이 모든 테이블에 접근하지 못한다. (2026-08-06 로컬 재현 확인)
+ALTER SCHEMA public OWNER TO tms_owner;
+
+-- public 스키마에 아무나 테이블을 만들지 못하게 한다.
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
-GRANT  CREATE, USAGE ON SCHEMA public TO tms_owner;
 ```
 
 > `LC_COLLATE 'C'`: 감사 로그 검색은 사용자명·액션 타입 같은 ASCII 정형 값이 대부분이라 `C` 콜레이션이 인덱스 성능에 유리하다. 한국어 정렬이 필요하면 바꿔도 되지만, 그 경우 인덱스를 재생성해야 한다.

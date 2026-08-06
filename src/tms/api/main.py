@@ -158,11 +158,27 @@ def create_app(config: Optional[Config] = None, service: Optional[TmsService] = 
 
     @app.middleware("http")
     async def slide_session(request: Request, call_next):
-        """Extend the idle window on activity, leaving the absolute deadline."""
+        """Extend the idle window on activity, leaving the absolute deadline.
+
+        Skips any response that already issued a session cookie. Without that
+        check this middleware overwrites the handler's cookie with one rebuilt
+        from the *request's* claims - so a successful password change was
+        immediately undone, leaving the caller stuck behind the
+        must_change_password gate forever. Found by running it, not by reading it.
+        """
         response = await call_next(request)
+        if codec is None or response.status_code >= 400:
+            return response
         claims = getattr(request.state, "session_claims", None)
-        if claims and codec is not None and response.status_code < 400:
-            _set_session_cookie(response, codec.refresh(claims))
+        if not claims:
+            return response
+        already_set = any(
+            value.startswith(SESSION_COOKIE + "=")
+            for value in response.headers.getlist("set-cookie")
+        )
+        if already_set:
+            return response
+        _set_session_cookie(response, codec.refresh(claims))
         return response
 
     # ------------------------------------------------------------ auth routes
