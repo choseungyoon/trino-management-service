@@ -12,7 +12,9 @@ Three behaviours here are not obvious and exist for specific reasons:
    not as an idle cluster. With `file` access control a denied `queries` rule
    filters the response to empty rather than returning 403, so without this
    cross-check TMS would confidently report "0 running queries" on a busy
-   cluster (health test H-09).
+   cluster (health test H-09). The cross-check only trusts a recent JMX
+   reading: queries are polled before JMX, so an unbounded one would compare
+   today's empty list against a RunningQueries count from a previous run.
 3. Oversized responses raise the poll interval instead of hammering the
    coordinator. Peak concurrency is still unmeasured (WORKLOAD_PROFILE.md W2),
    so the collector adapts rather than trusting a guess.
@@ -21,6 +23,7 @@ Python 3.9 compatible.
 """
 
 import logging
+from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 
 from tms.clients.errors import TrinoClientError
@@ -119,6 +122,8 @@ class ClusterPoller:
         response_backoff_bytes: int = 5_000_000,
         response_backoff_interval: float = 10.0,
         clock: Optional[Callable[[], float]] = None,
+        jmx_cross_check_max_age: Optional[float] = None,
+        wall_clock: Optional[Callable[[], datetime]] = None,
     ) -> None:
         self.cluster_name = cluster_name
         self.client = client
@@ -130,6 +135,14 @@ class ClusterPoller:
         self.long_running_seconds = long_running_seconds
         self.response_backoff_bytes = response_backoff_bytes
         self.response_backoff_interval = response_backoff_interval
+        # A JMX reading older than a few poll intervals says nothing about the
+        # query list we just fetched, so it must not be used to judge it.
+        self.jmx_cross_check_max_age = (
+            jmx_cross_check_max_age
+            if jmx_cross_check_max_age is not None
+            else jmx_interval * 3.0
+        )
+        self._wall_clock = wall_clock or utcnow
 
         if clock is None:
             import time
@@ -274,8 +287,8 @@ class ClusterPoller:
                 )
             )
             advice = (
-                "rules.json 에서 tms-svc 의 queries 권한(view)을 확인하라. "
-                "file 접근제어의 목록 거부는 403 이 아니라 빈 목록으로 나타난다."
+                "Check the tms-svc account's queries: view grant in rules.json. "
+                "With file access control a denied list arrives as an empty list, not a 403."
             )
             log.error("H-09 tripped for %s: %s", self.cluster_name, collection_error)
 
@@ -341,6 +354,17 @@ class ClusterPoller:
     def _last_jmx_running_queries(self) -> Optional[int]:
         snapshot = self.repository.load(self.cluster_name, KIND_JMX)
         if snapshot is None:
+            return None
+        if snapshot.is_stale(self._wall_clock(), self.jmx_cross_check_max_age):
+            # Queries are polled before JMX on every tick, so on the first tick
+            # after a restart the stored JMX snapshot can be arbitrarily old.
+            # Comparing a fresh empty list against yesterday's RunningQueries
+            # raises H-09 on a cluster that is merely idle now, which discredits
+            # the one alarm that catches genuinely silent filtering.
+            log.debug(
+                "%s: JMX snapshot too old for the H-09 cross-check, skipping",
+                self.cluster_name,
+            )
             return None
         value = _get(
             snapshot.payload, "mbeans", "trino.execution:name=QueryManager", "RunningQueries"

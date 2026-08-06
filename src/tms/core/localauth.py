@@ -94,7 +94,7 @@ class LocalAuthenticator:
     def authenticate(self, username: str, password: str) -> LocalUser:
         if self._is_locked(username):
             raise AccountLocked(
-                "계정이 잠겼다. {:.0f}초 후 다시 시도하라".format(
+                "Account is locked. Try again in {:.0f} seconds.".format(
                     self.seconds_until_unlock(username)
                 )
             )
@@ -105,12 +105,12 @@ class LocalAuthenticator:
             # not reveal which accounts exist.
             verify_password(password, hash_password("dummy-timing-equaliser"))
             self._record_failure(username)
-            raise InvalidCredentials("사용자명 또는 비밀번호가 올바르지 않다")
+            raise InvalidCredentials("Incorrect username or password.")
 
         if not verify_password(password, user.password_hash):
             self._record_failure(username)
             log.warning("failed login for %s", username)
-            raise InvalidCredentials("사용자명 또는 비밀번호가 올바르지 않다")
+            raise InvalidCredentials("Incorrect username or password.")
 
         self._failures.pop(username, None)
         return user
@@ -124,7 +124,7 @@ class LocalAuthenticator:
         """
         user = self.authenticate(username, current_password)
         if current_password == new_password:
-            raise PasswordError("새 비밀번호가 기존과 동일하다")
+            raise PasswordError("The new password must differ from the current one.")
         check_password_strength(new_password)
         new_hash = hash_password(new_password)
         user.password_hash = new_hash

@@ -190,6 +190,53 @@ class H09CrossCheckTest(unittest.TestCase):
         snapshot = [s for s in poller.tick() if s.kind == KIND_QUERIES][0]
         self.assertFalse(snapshot.trustworthy)
 
+    def test_stale_jmx_snapshot_does_not_trip_the_cross_check(self):
+        """Observed live: a first tick after restart raised H-09 on an idle cluster.
+
+        Queries are polled before JMX, so the stored JMX snapshot on that tick
+        was hours old and still said RunningQueries=1. A false "silent
+        filtering" alarm discredits the alarm.
+        """
+        now = utcnow()
+        repository = InMemorySnapshotRepository()
+        repository.save(
+            Snapshot(
+                cluster="prod-a",
+                kind=KIND_JMX,
+                collected_at=now - timedelta(hours=4),
+                payload={"mbeans": {QUERY_MANAGER: {"RunningQueries": 1}}},
+            )
+        )
+        poller = make_poller(
+            FakeClient(queries=[]),
+            repository=repository,
+            wall_clock=lambda: now,
+        )
+        snapshot = poller.poll_queries(poller._last_jmx_running_queries())
+        self.assertTrue(snapshot.trustworthy, snapshot.collection_error)
+
+    def test_recent_jmx_snapshot_still_trips_the_cross_check(self):
+        """The age bound must not disarm H-09 during normal polling."""
+        now = utcnow()
+        repository = InMemorySnapshotRepository()
+        repository.save(
+            Snapshot(
+                cluster="prod-a",
+                kind=KIND_JMX,
+                collected_at=now - timedelta(seconds=16),
+                payload={"mbeans": {QUERY_MANAGER: {"RunningQueries": 1}}},
+            )
+        )
+        poller = make_poller(
+            FakeClient(queries=[]),
+            repository=repository,
+            jmx_interval=15.0,
+            wall_clock=lambda: now,
+        )
+        snapshot = poller.poll_queries(poller._last_jmx_running_queries())
+        self.assertFalse(snapshot.trustworthy)
+        self.assertIn("filtered", snapshot.collection_error)
+
 
 class FailureIsolationTest(unittest.TestCase):
     def test_client_error_becomes_an_untrusted_snapshot_not_an_exception(self):

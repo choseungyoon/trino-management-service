@@ -119,7 +119,7 @@ class HealthEngine:
                     test_id,
                     test_id,
                     UNKNOWN,
-                    advice="헬스 테스트 실행 중 오류가 발생했다. TMS 로그를 확인하라.",
+                    advice="This health test raised an error. Check the TMS logs.",
                 )
             if stale:
                 # Never present an old reading as current.
@@ -129,7 +129,7 @@ class HealthEngine:
                     UNKNOWN,
                     result.observed_value,
                     result.threshold,
-                    "수집 데이터가 오래되었다(stale). collector 상태를 확인하라.",
+                    "Collected data is stale. Check that tms-collector is running.",
                 )
             self._check_advice(result)
             results.append(result)
@@ -162,7 +162,7 @@ class HealthEngine:
                 result.state,
             )
             result.advice = (
-                "조치 안내가 누락되었다(버그). 해당 테스트 구현을 확인하라."
+                "No remedy was supplied for this state (a bug). Check the test implementation."
             )
 
     def confirm_transitions(self, health: ClusterHealth) -> List[Dict[str, Any]]:

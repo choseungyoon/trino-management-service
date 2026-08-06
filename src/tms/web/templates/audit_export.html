@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% import "_icons.html" as ui %}
+{% block title %}Export audit log{% endblock %}
+{% block heading %}Export audit log{% endblock %}
+
+{% block content %}
+<section class="modal" style="margin:0;box-shadow:none;max-width:520px">
+  <div class="modal__head">
+    {{ ui.icon('download', 18, 2) }}
+    <h2 class="modal__title">Export audit log</h2>
+  </div>
+
+  <form class="modal__body" method="post" action="/audit/export">
+    {% if error %}<div class="field__error" role="alert">{{ error }}</div>{% endif %}
+    <div class="field">
+      <label for="reason">Reason <span class="req" aria-hidden="true">*</span></label>
+      <input id="reason" name="reason" required autofocus
+             value="{{ reason or '' }}" placeholder="Why this export is being taken">
+      <div class="field__hint">
+        {{ ui.icon('concerning', 12, 2) }}
+        {# The system's rules apply to the system. #}
+        <span>Exports are themselves recorded in this log.</span>
+      </div>
+    </div>
+    <div class="modal__foot" style="padding:0">
+      <a class="btn btn--ghost" href="/audit">Cancel</a>
+      <button class="btn btn--primary" type="submit">{{ ui.icon('download', 12) }}Export CSV</button>
+    </div>
+  </form>
+</section>
+{% endblock %}

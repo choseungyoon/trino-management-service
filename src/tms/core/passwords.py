@@ -79,7 +79,7 @@ def check_password_strength(password: str) -> None:
     """
     if len(password or "") < MIN_PASSWORD_LENGTH:
         raise PasswordError(
-            "비밀번호는 {}자 이상이어야 한다".format(MIN_PASSWORD_LENGTH)
+            "Password must be at least {} characters.".format(MIN_PASSWORD_LENGTH)
         )
     classes = 0
     for predicate in (str.islower, str.isupper, str.isdigit):
@@ -89,5 +89,5 @@ def check_password_strength(password: str) -> None:
         classes += 1
     if classes < 3:
         raise PasswordError(
-            "비밀번호는 소문자·대문자·숫자·기호 중 3종류 이상을 포함해야 한다"
+            "Password must contain at least 3 of: lowercase, uppercase, digit, symbol."
         )

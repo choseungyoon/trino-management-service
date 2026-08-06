@@ -80,6 +80,10 @@ class SnapshotRepository:
     def load_health_overrides(self, cluster: str) -> Dict[str, Dict[str, Any]]:
         raise NotImplementedError
 
+    def list_health_events(self, cluster: str, limit: int = 20) -> List[Dict[str, Any]]:
+        """Confirmed transitions, newest first (FR-CH-07 read side)."""
+        raise NotImplementedError
+
 
 class InMemorySnapshotRepository(SnapshotRepository):
     """Used by tests and by a dry-run mode. Not for production."""
@@ -119,3 +123,7 @@ class InMemorySnapshotRepository(SnapshotRepository):
 
     def load_health_overrides(self, cluster: str) -> Dict[str, Dict[str, Any]]:
         return dict(self.overrides.get(cluster, {}))
+
+    def list_health_events(self, cluster: str, limit: int = 20) -> List[Dict[str, Any]]:
+        matching = [e for e in self.health_events if e.get("cluster") == cluster]
+        return list(reversed(matching))[:limit]

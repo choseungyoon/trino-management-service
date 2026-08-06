@@ -119,7 +119,7 @@ def query_snapshot(cluster="prod-a", queries=None, error=None, age_seconds=0):
             "summary": {"running": len(queries or []), "queued": 0, "total": len(queries or [])},
         },
         collection_error=error,
-        advice="rules.json 확인" if error else None,
+        advice="Check rules.json" if error else None,
     )
 
 

@@ -1,0 +1,283 @@
+"""View-model builders: service output → template-ready shapes.
+
+Kept separate from the routes so the shaping is testable without an HTTP layer,
+and separate from the templates so the rules live in Python rather than in
+Jinja expressions nobody can unit-test.
+
+Two shaping rules carry real meaning:
+
+* `test_observed_text` turns a health test's raw observation into the sentence
+  an operator reads. H-03's dict of worker counts becomes "10 of 12 active ·
+  1 draining (planned) · 1 missing unplanned" — the planned/unplanned split is
+  the whole point of that test and must survive into the UI.
+* `cluster_summary` reports `active_workers` as workers, not nodes. The backend
+  counts the coordinator in ActiveNodeCount (verified: a 12-worker cluster
+  reports 13); showing 13/12 would look like a bug.
+
+Python 3.9 compatible.
+"""
+
+from typing import Any, Dict, List, Optional
+from urllib.parse import urlencode
+
+from markupsafe import Markup, escape
+
+from tms.web.formatting import integer, percent
+
+
+def _em(value: Any) -> Markup:
+    """Emphasised, escaped value. Built with Markup rather than returning a raw
+    string so the template can render it without `| safe` — an escape hatch that,
+    once opened for one field, gets copied to fields carrying operator input."""
+    return Markup("<b>{}</b>").format(value)
+
+
+def _mono(value: Any) -> Markup:
+    return Markup('<span class="mono num">{}</span>').format(value)
+
+# Link id → icon name in _icons.html. An unknown id still renders, with a
+# neutral glyph, rather than breaking the sidebar.
+LINK_ICONS = {
+    "grafana": "grafana",
+    "query_history": "history",
+    "superset": "superset",
+    "gateway_ui": "trino",
+}
+LINK_DESCRIPTIONS = {
+    "grafana": "Metrics & dashboards",
+    "query_history": "Completed queries",
+    "superset": "SQL Lab",
+    "gateway_ui": "Routing & backends",
+}
+
+QUERY_STATE_GROUPS = {
+    "running": ("RUNNING", "FINISHING"),
+    "queued": ("QUEUED", "WAITING_FOR_RESOURCES", "PLANNING", "STARTING", "DISPATCHING"),
+}
+
+
+def link_rows(links_payload: Dict[str, Any]) -> List[Dict[str, str]]:
+    rows = []
+    for link in links_payload.get("links") or []:
+        link_id = str(link.get("id") or "")
+        icon = LINK_ICONS.get(link_id)
+        if icon is None:
+            icon = "trino" if link_id.startswith("trino_ui") else "external"
+        description = LINK_DESCRIPTIONS.get(link_id, "")
+        if not description and link_id.startswith("trino_ui"):
+            description = "Coordinator web UI"
+        rows.append(
+            {
+                "id": link_id,
+                "label": link.get("label") or link_id,
+                "url": link.get("url") or "",
+                "icon": icon,
+                "description": description,
+            }
+        )
+    return rows
+
+
+def _mbean(health_payload: Dict[str, Any], test_id: str) -> Optional[Dict[str, Any]]:
+    for test in health_payload.get("tests") or []:
+        if test.get("id") == test_id:
+            return test
+    return None
+
+
+def cluster_summary(
+    name: str,
+    expected_workers: int,
+    health_envelope: Dict[str, Any],
+    queries_envelope: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """One Overview card."""
+    health = health_envelope.get("data") or {}
+    tests = health.get("tests") or []
+
+    active_workers: Optional[int] = None
+    planned_out = 0
+    h03 = _mbean(health, "H-03")
+    if h03 and isinstance(h03.get("observed_value"), dict):
+        observed = h03["observed_value"]
+        active_workers = observed.get("active_workers")
+        planned_out = observed.get("planned_out") or 0
+
+    failure_rate = None
+    h05 = _mbean(health, "H-05")
+    if h05 and isinstance(h05.get("observed_value"), (int, float)):
+        failure_rate = h05["observed_value"]
+
+    running = queued = 0
+    if queries_envelope:
+        summary = (queries_envelope.get("data") or {}).get("summary") or {}
+        running = summary.get("running") or 0
+        queued = summary.get("queued") or 0
+
+    return {
+        "name": name,
+        "expected_workers": expected_workers,
+        "active_workers": active_workers,
+        "planned_out": planned_out,
+        "running": running,
+        "queued": queued,
+        "failure_rate": failure_rate,
+        "rollup_state": health.get("rollup_state", "UNKNOWN"),
+        "stale": bool(health_envelope.get("stale", True)),
+        "collected_at": health_envelope.get("collected_at"),
+        "tests": [{"id": t.get("id"), "name": t.get("name"), "state": t.get("state")} for t in tests],
+    }
+
+
+def state_counts(tests: List[Dict[str, Any]]) -> Dict[str, int]:
+    counts = {"good": 0, "concerning": 0, "bad": 0, "unknown": 0}
+    for test in tests:
+        key = str(test.get("state", "UNKNOWN")).lower()
+        if key in counts:
+            counts[key] += 1
+    return counts
+
+
+def test_observed_text(test: Dict[str, Any]) -> Markup:
+    """The sentence under a health test's name.
+
+    Each test's observation has its own shape, so each gets its own phrasing
+    rather than a generic `str(value)` that would print a raw dict at an
+    operator mid-incident.
+    """
+    test_id = test.get("id")
+    observed = test.get("observed_value")
+    threshold = test.get("threshold")
+
+    if test_id == "H-03" and isinstance(observed, dict):
+        parts = [
+            _em("{} of {}".format(
+                integer(observed.get("active_workers")), integer(observed.get("expected_workers"))
+            )) + Markup(" workers active")
+        ]
+        # The planned/unplanned split is the whole point of H-03 and must
+        # survive into the sentence an operator reads.
+        if observed.get("planned_out"):
+            parts.append(_em(integer(observed["planned_out"])) + Markup(" draining (planned)"))
+        if observed.get("unplanned_missing"):
+            parts.append(_em(integer(observed["unplanned_missing"])) + Markup(" missing unplanned"))
+        return Markup(" · ").join(parts)
+
+    if test_id == "H-04" and isinstance(observed, (int, float)):
+        return (_em(percent(observed, 0)) + Markup(" of coordinator heap · threshold ")
+                + _mono(percent(threshold, 0)))
+
+    if test_id == "H-05" and isinstance(observed, (int, float)):
+        return _em(percent(observed)) + Markup(" of queries failed · last 5m")
+
+    if test_id == "H-06" and isinstance(observed, (int, float)):
+        return _em(integer(observed)) + Markup(" internal failures · last 5m")
+
+    if test_id == "H-07" and isinstance(observed, dict):
+        delta = observed.get("delta")
+        if delta is None:
+            return Markup("baseline recorded · total ") + _mono(integer(observed.get("total")))
+        return (_em(integer(delta)) + Markup(" new OOM kills since last poll · total ")
+                + _mono(integer(observed.get("total"))))
+
+    if isinstance(observed, dict):
+        return Markup(" · ").join(
+            escape(key) + Markup(" ") + _em(integer(value))
+            for key, value in sorted(observed.items())
+        )
+    if observed is None:
+        return Markup("no reading")
+    return escape(str(observed))
+
+
+def health_view(health_envelope: Dict[str, Any]) -> Dict[str, Any]:
+    health = dict(health_envelope.get("data") or {})
+    tests = []
+    for test in health.get("tests") or []:
+        row = dict(test)
+        row["observed_text"] = test_observed_text(test)
+        tests.append(row)
+    health["tests"] = tests
+    return health
+
+
+def query_chips(
+    summary: Dict[str, Any],
+    base_params: Dict[str, str],
+    active_state: Optional[str],
+    long_running_only: bool,
+) -> List[Dict[str, Any]]:
+    """Filter chips that are also the summary — the counts are the KPIs."""
+
+    def href(**overrides: Optional[str]) -> str:
+        params = {k: v for k, v in base_params.items() if v}
+        for key, value in overrides.items():
+            if value:
+                params[key] = value
+            else:
+                params.pop(key, None)
+        return "/queries" + ("?" + urlencode(params) if params else "")
+
+    return [
+        {
+            "label": "All",
+            "count": summary.get("total", 0),
+            "href": href(state=None, long_running=None),
+            "active": not active_state and not long_running_only,
+            "alert": False,
+        },
+        {
+            "label": "Running",
+            "count": summary.get("running", 0),
+            "href": href(state="running", long_running=None),
+            "active": active_state == "running",
+            "alert": False,
+        },
+        {
+            "label": "Queued",
+            "count": summary.get("queued", 0),
+            "href": href(state="queued", long_running=None),
+            "active": active_state == "queued",
+            "alert": False,
+        },
+        {
+            "label": "Long-running",
+            "count": summary.get("long_running", 0),
+            "href": href(state=None, long_running="1"),
+            "active": long_running_only,
+            "alert": bool(summary.get("long_running")),
+        },
+    ]
+
+
+def audit_chips(action_filter: Optional[str], counts: Dict[str, int]) -> List[Dict[str, Any]]:
+    def href(action: Optional[str]) -> str:
+        return "/audit" + ("?" + urlencode({"action_type": action}) if action else "")
+
+    return [
+        {"label": "All", "count": counts.get("all", 0), "href": href(None), "active": not action_filter},
+        {
+            "label": "Kills",
+            "count": counts.get("QUERY_KILL", 0),
+            "href": href("QUERY_KILL"),
+            "active": action_filter == "QUERY_KILL",
+        },
+        {
+            "label": "Health changes",
+            "count": counts.get("HEALTH_TEST_TOGGLE", 0) + counts.get("HEALTH_ROLLUP_TOGGLE", 0),
+            "href": href("HEALTH_TEST_TOGGLE"),
+            "active": action_filter == "HEALTH_TEST_TOGGLE",
+        },
+        {
+            "label": "Exports",
+            "count": counts.get("AUDIT_EXPORT", 0),
+            "href": href("AUDIT_EXPORT"),
+            "active": action_filter == "AUDIT_EXPORT",
+        },
+    ]
+
+
+def expand_state_filter(group: Optional[str]) -> Optional[List[str]]:
+    if not group:
+        return None
+    return list(QUERY_STATE_GROUPS.get(group, ()))or None

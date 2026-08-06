@@ -133,8 +133,7 @@ def _jmx_unavailable(test_id: str, name: str, ctx: HealthContext) -> HealthResul
         test_id,
         name,
         advice
-        or "JMX 지표를 읽지 못했다. tms-svc 의 system_information:read 권한과 "
-        "코디네이터 상태를 확인하라.",
+        or "Could not read the JMX metric. Check that tms-svc has system_information: read in rules.json, and that the coordinator is reachable.",
     )
 
 
@@ -143,9 +142,9 @@ def _jmx_unavailable(test_id: str, name: str, ctx: HealthContext) -> HealthResul
 def h01_coordinator_responsive(ctx: HealthContext) -> HealthResult:
     """GET /v1/info is PUBLIC, so this keeps answering when authorisation is
     broken. It is the last signal that a coordinator is alive."""
-    name = "코디네이터 응답성"
+    name = "Coordinator responsiveness"
     if ctx.info is None:
-        return _unknown("H-01", name, "아직 수집된 데이터가 없다.")
+        return _unknown("H-01", name, "No data collected yet.")
     if not ctx.info.trustworthy:
         return HealthResult(
             "H-01",
@@ -153,8 +152,7 @@ def h01_coordinator_responsive(ctx: HealthContext) -> HealthResult:
             BAD,
             observed_value="unreachable",
             advice=getattr(ctx.info, "advice", None)
-            or "코디네이터가 응답하지 않는다. systemd 유닛 상태와 코디네이터 로그를 "
-            "확인하라. 이 클러스터는 신규 쿼리를 받지 못한다.",
+            or "The coordinator is not responding. Check its systemd unit and logs — this cluster cannot accept new queries.",
         )
     return HealthResult("H-01", name, GOOD, observed_value="responsive")
 
@@ -163,20 +161,19 @@ def h01_coordinator_responsive(ctx: HealthContext) -> HealthResult:
 
 def h02_startup_complete(ctx: HealthContext) -> HealthResult:
     """`starting` is a boolean field on the ServerInfo record (verified @477)."""
-    name = "기동 완료"
+    name = "Startup complete"
     if ctx.info is None or not ctx.info.trustworthy:
-        return _unknown("H-02", name, "코디네이터 정보를 읽지 못했다.")
+        return _unknown("H-02", name, "Could not read coordinator info.")
     info = (ctx.info.payload or {}).get("info")
     if not isinstance(info, dict) or "starting" not in info:
-        return _unknown("H-02", name, "/v1/info 응답에 starting 필드가 없다.")
+        return _unknown("H-02", name, "The /v1/info response has no `starting` field.")
     if bool(info.get("starting")):
         return HealthResult(
             "H-02",
             name,
             CONCERNING,
             observed_value="starting",
-            advice="코디네이터가 아직 기동 중이다. 카탈로그 로딩이 끝나지 않았을 수 "
-            "있다. 수 분 후에도 지속되면 카탈로그 설정 오류를 의심하라.",
+            advice="The coordinator is still starting — catalogs may still be loading. If this persists for more than a few minutes, suspect a catalog configuration error.",
         )
     return HealthResult("H-02", name, GOOD, observed_value="started")
 
@@ -190,7 +187,7 @@ def h03_worker_registration(ctx: HealthContext) -> HealthResult:
     red while an operator shrinks the fleet on purpose is how a console loses
     its credibility - after that, nobody reads it during a real incident.
     """
-    name = "워커 등록 수"
+    name = "Worker registration"
     active = ctx.number(NODE_MANAGER_MBEAN, "ActiveNodeCount")
     if active is None:
         return _jmx_unavailable("H-03", name, ctx)
@@ -222,13 +219,13 @@ def h03_worker_registration(ctx: HealthContext) -> HealthResult:
         return HealthResult("H-03", name, GOOD, observed, expected)
 
     planned_note = (
-        " 이 중 {}대는 계획된 종료 절차 중이다.".format(planned) if planned else ""
+        " {} of those are in a planned shutdown.".format(planned) if planned else ""
     )
     capacity_pct = int(100 * active_workers / expected) if expected else 0
     advice = (
-        "워커 {expected}대 중 {active}대만 활성이다(예정 외 {unplanned}대 누락). "
-        "미조인 워커의 systemd 상태와 discovery 설정을 확인하라. "
-        "클러스터 용량이 {pct}%로 떨어져 있다.{planned}"
+        "Only {active} of {expected} workers are active ({unplanned} missing outside "
+        "any planned drain). Check the systemd unit and discovery config on the "
+        "workers that have not joined. Cluster capacity is at {pct}%.{planned}"
     ).format(
         expected=expected,
         active=active_workers,
@@ -243,16 +240,16 @@ def h03_worker_registration(ctx: HealthContext) -> HealthResult:
 # --------------------------------------------------------------------- H-04
 
 def h04_heap_usage(ctx: HealthContext) -> HealthResult:
-    name = "코디네이터 힙 사용률"
+    name = "Coordinator heap"
     usage = ctx.attribute(MEMORY_MBEAN, "HeapMemoryUsage")
     if not isinstance(usage, dict):
         return _jmx_unavailable("H-04", name, ctx)
     used = usage.get("used")
     maximum = usage.get("max")
     if not isinstance(used, (int, float)) or not isinstance(maximum, (int, float)):
-        return _unknown("H-04", name, "HeapMemoryUsage 에서 used/max 를 읽지 못했다.")
+        return _unknown("H-04", name, "Could not read used/max from HeapMemoryUsage.")
     if maximum <= 0:
-        return _unknown("H-04", name, "힙 최대값이 보고되지 않는다(-1). JVM 설정을 확인하라.")
+        return _unknown("H-04", name, "The JVM reports no heap maximum (-1). Check jvm.config.")
 
     pct = 100.0 * used / maximum
     concerning = ctx.threshold("heap_used_pct_concerning", 80.0)
@@ -267,9 +264,9 @@ def h04_heap_usage(ctx: HealthContext) -> HealthResult:
     advice = ""
     if state != GOOD:
         advice = (
-            "코디네이터 힙이 {:.0f}%다. GC 부하로 전체 쿼리가 느려진다. 동시 실행 "
-            "쿼리 수를 확인하고, 지속되면 리소스 그룹 동시성 제한 또는 힙 증설을 "
-            "검토하라."
+            "Coordinator heap is at {:.0f}%. GC pressure slows every query. Check "
+            "concurrent query count; if this persists, consider a resource-group "
+            "concurrency limit or more heap."
         ).format(pct)
     return HealthResult("H-04", name, state, round(pct, 1), bad, advice)
 
@@ -277,7 +274,7 @@ def h04_heap_usage(ctx: HealthContext) -> HealthResult:
 # --------------------------------------------------------------------- H-05
 
 def h05_query_failure_rate(ctx: HealthContext) -> HealthResult:
-    name = "쿼리 실패율 (5분)"
+    name = "Query failure rate (5m)"
     failed = ctx.number(QUERY_MANAGER_MBEAN, "FailedQueries.FiveMinute.Count")
     started = ctx.number(QUERY_MANAGER_MBEAN, "StartedQueries.FiveMinute.Count")
     if failed is None or started is None:
@@ -287,8 +284,8 @@ def h05_query_failure_rate(ctx: HealthContext) -> HealthResult:
         return _unknown(
             "H-05",
             name,
-            "최근 5분간 시작된 쿼리가 없어 실패율을 계산할 수 없다. "
-            "유입이 끊긴 것 자체가 이상 신호일 수 있다.",
+            "No queries started in the last 5 minutes, so there is no failure rate "
+            "to compute. Traffic stopping is itself worth investigating.",
         )
 
     pct = 100.0 * failed / started
@@ -304,8 +301,8 @@ def h05_query_failure_rate(ctx: HealthContext) -> HealthResult:
     advice = ""
     if state != GOOD:
         advice = (
-            "최근 5분 쿼리 실패율 {:.1f}%. 사용자 오류(문법)와 시스템 오류를 "
-            "구분하려면 H-06(내부 실패)을 함께 보라."
+            "{:.1f}% of queries failed in the last 5 minutes. Read this with H-06 "
+            "(internal failures) to tell user SQL errors from engine problems."
         ).format(pct)
     return HealthResult("H-05", name, state, round(pct, 1), bad, advice)
 
@@ -318,7 +315,7 @@ def h06_internal_failures(ctx: HealthContext) -> HealthResult:
     Any number of user syntax errors leaves the cluster healthy. A single
     internal failure does not.
     """
-    name = "내부(시스템) 실패 (5분)"
+    name = "Internal failures (5m)"
     internal = ctx.number(QUERY_MANAGER_MBEAN, "InternalFailures.FiveMinute.Count")
     if internal is None:
         return _jmx_unavailable("H-06", name, ctx)
@@ -336,8 +333,8 @@ def h06_internal_failures(ctx: HealthContext) -> HealthResult:
     advice = ""
     if state != GOOD:
         advice = (
-            "최근 5분간 내부 오류 {}건. 사용자 SQL 문제가 아니라 엔진/인프라 "
-            "문제다. 코디네이터·워커 로그를 확인하라."
+            "{} internal errors in the last 5 minutes. These are engine or "
+            "infrastructure faults, not user SQL. Check coordinator and worker logs."
         ).format(count)
     return HealthResult("H-06", name, state, count, bad, advice)
 
@@ -350,7 +347,7 @@ def h07_oom_kills(ctx: HealthContext) -> HealthResult:
     Reading the absolute value would leave the cluster permanently BAD after the
     first OOM until the next coordinator restart.
     """
-    name = "메모리 부족 강제 종료"
+    name = "Out-of-memory kills"
     total = ctx.number(CLUSTER_MEMORY_MBEAN, "QueriesKilledDueToOutOfMemory")
     if total is None:
         return _jmx_unavailable("H-07", name, ctx)
@@ -374,8 +371,8 @@ def h07_oom_kills(ctx: HealthContext) -> HealthResult:
     advice = ""
     if state != GOOD:
         advice = (
-            "메모리 부족으로 쿼리 {}건이 강제 종료됐다. 대용량 쿼리가 클러스터를 "
-            "압박하고 있다. 실행 중 쿼리 화면에서 메모리 상위 쿼리를 확인하라."
+            "{} queries were killed for running out of memory. Something large is "
+            "squeezing the cluster — check the top memory consumers in Live Queries."
         ).format(delta)
     return HealthResult(
         "H-07", name, state, {"total": current, "delta": delta}, bad, advice
@@ -387,9 +384,9 @@ def h07_oom_kills(ctx: HealthContext) -> HealthResult:
 def h08_gateway_registration(ctx: HealthContext) -> HealthResult:
     """Optional. Removed from the catalogue entirely when the Gateway adapter is
     disabled - a test that is permanently UNKNOWN is noise, not information."""
-    name = "Gateway 백엔드 등록 상태"
+    name = "Gateway backend registration"
     if ctx.gateway_backends is None:
-        return _unknown("H-08", name, "Gateway 정보를 읽지 못했다.")
+        return _unknown("H-08", name, "Could not read Gateway backend list.")
 
     entry = None
     for backend in ctx.gateway_backends:
@@ -403,8 +400,8 @@ def h08_gateway_registration(ctx: HealthContext) -> HealthResult:
             name,
             BAD,
             observed_value="not registered",
-            advice="이 클러스터가 Gateway 백엔드 목록에 없다. 신규 쿼리가 이 "
-            "클러스터로 오지 않는다. Gateway 설정을 확인하라.",
+            advice="This cluster is not in the Gateway backend list, so no new "
+            "queries will be routed to it. Check the Gateway configuration.",
         )
     if not entry.get("active"):
         return HealthResult(
@@ -412,8 +409,8 @@ def h08_gateway_registration(ctx: HealthContext) -> HealthResult:
             name,
             CONCERNING,
             observed_value="inactive",
-            advice="이 클러스터가 Gateway 에서 비활성 상태다. 의도한 것이라면"
-            "(작업 중) 무시하라. 아니라면 신규 쿼리가 이 클러스터로 오지 않는다.",
+            advice="This cluster is deactivated in the Gateway. Ignore this if it "
+            "is deliberate (maintenance); otherwise no new queries reach it.",
         )
     return HealthResult("H-08", name, GOOD, observed_value="active")
 
@@ -429,9 +426,9 @@ def h09_permission_self_check(ctx: HealthContext) -> HealthResult:
     this test surfaces it rather than letting TMS report "0 running queries" on
     a busy cluster.
     """
-    name = "쿼리 조회 권한 자가진단"
+    name = "Query-list permission"
     if ctx.queries is None:
-        return _unknown("H-09", name, "아직 수집된 쿼리 스냅샷이 없다.")
+        return _unknown("H-09", name, "No query snapshot collected yet.")
     if ctx.queries.trustworthy:
         return HealthResult("H-09", name, GOOD, observed_value="consistent")
     return HealthResult(
@@ -440,8 +437,8 @@ def h09_permission_self_check(ctx: HealthContext) -> HealthResult:
         UNKNOWN,
         observed_value=ctx.queries.collection_error,
         advice=getattr(ctx.queries, "advice", None)
-        or "쿼리 목록을 신뢰할 수 없다. rules.json 에서 tms-svc 의 queries 권한을 "
-        "확인하라.",
+        or "The query list cannot be trusted. Check the tms-svc account's queries "
+        "grant in rules.json.",
     )
 
 

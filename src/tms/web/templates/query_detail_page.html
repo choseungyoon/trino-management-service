@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}{{ query.query_id }}{% endblock %}
+{% block heading %}Query detail{% endblock %}
+
+{# The drawer's full-page twin: same fragment, reachable by direct link and
+   without JavaScript. #}
+
+{% block content %}
+<div class="panel" style="overflow:hidden">
+  {% include "query_detail.html" %}
+</div>
+<a class="btn btn--ghost" href="/clusters/{{ cluster | urlencode }}/queries">← Back to live queries</a>
+{% endblock %}

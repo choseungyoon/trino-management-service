@@ -1,0 +1,592 @@
+"""Server-rendered UI routes.
+
+These render the same TmsService the JSON API uses, so a screen can never show
+something the API would refuse. Every write goes through the service's audit
+guard — there is no UI-only path to a kill.
+
+Server-rendered rather than a SPA because the operator value here is a fast,
+dense, link-shareable page, and because the whole thing must keep working when
+a coordinator is down. JavaScript upgrades the experience (drawer, auto-refresh)
+and never gates it: every action is a real form post to a real URL.
+
+Python 3.9 compatible.
+"""
+
+import logging
+import os
+from typing import Any, Dict, List, Optional
+
+from tms.api.errors import ApiError, Forbidden, NotFound, Unauthenticated
+from tms.api.permissions import (
+    EXPORT_AUDIT,
+    KILL_QUERY,
+    MANAGE_HEALTH,
+    VIEW_AUDIT,
+    Principal,
+)
+from tms.web import views
+from tms.web.formatting import FILTERS
+
+log = logging.getLogger("tms.web")
+
+TEMPLATE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
+STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+
+THEME_COOKIE = "tms_theme"
+# Pages a user with an unchanged temporary password may still reach.
+TEMP_PASSWORD_ALLOWED = ("/account", "/account/password", "/logout", "/ui/theme")
+
+
+def build_templates():
+    from fastapi.templating import Jinja2Templates
+
+    templates = Jinja2Templates(directory=TEMPLATE_DIR)
+    templates.env.filters.update(FILTERS)
+    templates.env.trim_blocks = True
+    templates.env.lstrip_blocks = True
+    return templates
+
+
+def register(app, service, config, authenticator, codec, session_cookie: str) -> None:
+    """Mount the UI on an existing FastAPI app."""
+    from fastapi import Form, Request
+    from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
+    from fastapi.staticfiles import StaticFiles
+
+    from tms.core.localauth import AccountLocked, AuthError
+    from tms.core.passwords import PasswordError
+    from tms.core.sessions import SessionError, SessionExpired
+
+    templates = build_templates()
+    app.mount("/ui/static", StaticFiles(directory=STATIC_DIR), name="web_static")
+
+    cluster_names = config.cluster_names
+    environment = os.environ.get("TMS_ENVIRONMENT", "")
+
+    # ── session helpers ────────────────────────────────────────────────
+
+    def session_claims(request: Request) -> Optional[Dict[str, Any]]:
+        if codec is None:
+            return None
+        token = request.cookies.get(session_cookie)
+        if not token:
+            return None
+        try:
+            return codec.verify(token)
+        except (SessionExpired, SessionError):
+            return None
+
+    def principal_or_redirect(request: Request):
+        """Returns (principal, claims) or a RedirectResponse to /login."""
+        claims = session_claims(request)
+        if claims is None:
+            target = request.url.path
+            if request.url.query:
+                target += "?" + request.url.query
+            return RedirectResponse("/login?next=" + _quote(target), status_code=303), None
+        principal = Principal(
+            claims["username"],
+            claims["roles"],
+            ip=request.client.host if request.client else None,
+        )
+        return principal, claims
+
+    def theme_of(request: Request) -> str:
+        return "light" if request.cookies.get(THEME_COOKIE) == "light" else "dark"
+
+    def base_context(request: Request, principal: Principal, page: str) -> Dict[str, Any]:
+        try:
+            links = views.link_rows(service.links(principal))
+        except ApiError:
+            links = []
+        return {
+            "request": request,
+            "principal": {"user": principal.username, "roles": principal.roles,
+                          "capabilities": principal.capabilities},
+            "page": page,
+            "theme": theme_of(request),
+            "environment": environment,
+            "links": links,
+            "cluster_names": cluster_names,
+            "flash": _take_flash(request),
+        }
+
+    def render(name: str, context: Dict[str, Any], status_code: int = 200) -> HTMLResponse:
+        # Starlette takes the request first now; the legacy (name, context) form
+        # silently binds the template name to the request slot and fails deep in
+        # Jinja with "unhashable type: dict".
+        request = context.get("request")
+        return templates.TemplateResponse(request, name, context, status_code=status_code)
+
+    def _issue_session(response, username: str, roles: List[str], must_change: bool) -> None:
+        response.set_cookie(
+            session_cookie,
+            codec.issue(username, roles, must_change_password=must_change),
+            httponly=True, samesite="strict", secure=True, path="/",
+            max_age=config.portal.session_absolute_timeout_hours * 3600,
+        )
+
+    def _flash(response, level: str, message: str) -> None:
+        response.set_cookie("tms_flash", "{}|{}".format(level, message),
+                            max_age=15, path="/", samesite="strict")
+
+    def _take_flash(request: Request) -> Optional[Dict[str, str]]:
+        raw = request.cookies.get("tms_flash")
+        if not raw or "|" not in raw:
+            return None
+        level, message = raw.split("|", 1)
+        return {"level": level, "message": message}
+
+    # ── auth ───────────────────────────────────────────────────────────
+
+    @app.get("/login", response_class=HTMLResponse, include_in_schema=False)
+    def login_form(request: Request, next: str = "/"):
+        if session_claims(request) is not None:
+            return RedirectResponse(next or "/", status_code=303)
+        return render("login.html", {"request": request, "theme": theme_of(request),
+                                     "environment": environment, "next_url": next,
+                                     "error": None, "username": ""})
+
+    @app.post("/login", include_in_schema=False)
+    def login_submit(request: Request, username: str = Form(""), password: str = Form(""),
+                     next: str = Form("/")):
+        if codec is None:
+            return render("login.html", {"request": request, "theme": theme_of(request),
+                                         "environment": environment, "next_url": next,
+                                         "error": "Local accounts are not configured.",
+                                         "username": username}, status_code=503)
+        try:
+            user = authenticator.authenticate(username, password)
+        except AccountLocked as exc:
+            return render("login.html", {"request": request, "theme": theme_of(request),
+                                         "environment": environment, "next_url": next,
+                                         "error": str(exc), "username": username},
+                          status_code=429)
+        except AuthError:
+            log.warning("failed UI login for %r from %s", username,
+                        request.client.host if request.client else "unknown")
+            # Deliberately identical for unknown user and wrong password.
+            return render("login.html", {"request": request, "theme": theme_of(request),
+                                         "environment": environment, "next_url": next,
+                                         "error": "Incorrect username or password.",
+                                         "username": username}, status_code=401)
+
+        destination = "/account" if user.must_change_password else (next or "/")
+        response = RedirectResponse(destination, status_code=303)
+        _issue_session(response, user.username, user.roles, user.must_change_password)
+        return response
+
+    @app.get("/logout", include_in_schema=False)
+    @app.post("/logout", include_in_schema=False)
+    def logout():
+        response = RedirectResponse("/login", status_code=303)
+        response.delete_cookie(session_cookie, path="/")
+        return response
+
+    @app.post("/ui/theme", include_in_schema=False)
+    def toggle_theme(request: Request, next: str = Form("/")):
+        response = RedirectResponse(next or "/", status_code=303)
+        response.set_cookie(THEME_COOKIE, "light" if theme_of(request) == "dark" else "dark",
+                            max_age=60 * 60 * 24 * 365, path="/", samesite="strict")
+        return response
+
+    # ── temp-password gate ─────────────────────────────────────────────
+
+    @app.middleware("http")
+    async def temp_password_gate(request: Request, call_next):
+        """A temporary password may only be used to replace itself.
+
+        Without this the word "temporary" means nothing: the holder browses
+        indefinitely on a credential someone else generated for them.
+        """
+        path = request.url.path
+        if path.startswith(("/ui/static", "/api/", "/login", "/health", "/ready", "/metrics")):
+            return await call_next(request)
+        claims = session_claims(request)
+        if claims and claims.get("must_change_password") and path not in TEMP_PASSWORD_ALLOWED:
+            return RedirectResponse("/account", status_code=303)
+        return await call_next(request)
+
+    # ── account ────────────────────────────────────────────────────────
+
+    @app.get("/account", response_class=HTMLResponse, include_in_schema=False)
+    def account(request: Request):
+        principal, claims = principal_or_redirect(request)
+        if claims is None:
+            return principal
+        context = base_context(request, principal, "account")
+        context.update({"must_change": bool(claims.get("must_change_password")),
+                        "error": None, "new_hash": None})
+        return render("account.html", context)
+
+    @app.post("/account/password", response_class=HTMLResponse, include_in_schema=False)
+    def change_password(request: Request, current_password: str = Form(""),
+                        new_password: str = Form("")):
+        principal, claims = principal_or_redirect(request)
+        if claims is None:
+            return principal
+        context = base_context(request, principal, "account")
+        context.update({"must_change": bool(claims.get("must_change_password")),
+                        "error": None, "new_hash": None})
+        try:
+            new_hash = authenticator.change_password(principal.username, current_password,
+                                                     new_password)
+        except AuthError:
+            context["error"] = "Current password is incorrect."
+            return render("account.html", context, status_code=401)
+        except PasswordError as exc:
+            context["error"] = str(exc)
+            return render("account.html", context, status_code=400)
+
+        context["new_hash"] = new_hash
+        context["must_change"] = False
+        response = render("account.html", context)
+        _issue_session(response, principal.username, principal.roles, must_change=False)
+        return response
+
+    # ── overview ───────────────────────────────────────────────────────
+
+    @app.get("/", response_class=HTMLResponse, include_in_schema=False)
+    def overview(request: Request):
+        principal, claims = principal_or_redirect(request)
+        if claims is None:
+            return principal
+
+        clusters = []
+        oldest: Optional[str] = None
+        any_stale = False
+        for cluster in config.clusters:
+            health_env = service.get_health(principal, cluster.name)
+            try:
+                queries_env = service.list_queries(principal, cluster.name, limit=1)
+            except ApiError:
+                queries_env = None
+            summary = views.cluster_summary(cluster.name, cluster.expected_workers,
+                                            health_env, queries_env)
+            clusters.append(summary)
+            any_stale = any_stale or summary["stale"]
+            collected = health_env.get("collected_at")
+            if collected and (oldest is None or collected < oldest):
+                oldest = collected
+
+        context = base_context(request, principal, "overview")
+        context.update({"clusters": clusters,
+                        "envelope": {"collected_at": oldest, "stale": any_stale}})
+        return render("overview.html", context)
+
+    # ── live queries ───────────────────────────────────────────────────
+
+    @app.get("/clusters/{cluster}/queries", response_class=HTMLResponse, include_in_schema=False)
+    def cluster_queries(request: Request, cluster: str, state: Optional[str] = None,
+                        user: Optional[str] = None, long_running: Optional[str] = None):
+        return queries(request, cluster=cluster, state=state, user=user,
+                       long_running=long_running)
+
+    @app.get("/queries", response_class=HTMLResponse, include_in_schema=False)
+    def queries(request: Request, cluster: Optional[str] = None, state: Optional[str] = None,
+                user: Optional[str] = None, long_running: Optional[str] = None):
+        principal, claims = principal_or_redirect(request)
+        if claims is None:
+            return principal
+
+        states = views.expand_state_filter(state)
+        min_elapsed = None
+        if long_running:
+            min_elapsed = config.health.long_running_query_seconds
+
+        try:
+            if cluster:
+                envelope = service.list_queries(principal, cluster, state=states, user=user,
+                                                min_elapsed_seconds=min_elapsed, limit=200)
+                data = envelope.get("data") or {}
+                for row in data.get("queries") or []:
+                    row["cluster"] = cluster
+                degraded = ([{"name": cluster,
+                              "unavailable_reason": data.get("unavailable_reason"),
+                              "advice": data.get("advice")}]
+                            if data.get("unavailable_reason") else [])
+                any_trustworthy = not data.get("unavailable_reason")
+            else:
+                envelope = service.list_queries_all(principal, state=states, user=user,
+                                                    min_elapsed_seconds=min_elapsed, limit=200)
+                data = envelope.get("data") or {}
+                degraded = [c for c in data.get("clusters") or [] if c.get("unavailable_reason")]
+                any_trustworthy = any(
+                    not c.get("unavailable_reason") for c in data.get("clusters") or []
+                )
+        except NotFound as exc:
+            return _error_page(request, principal, exc)
+        except Forbidden as exc:
+            return _error_page(request, principal, exc)
+
+        base_params = {"cluster": cluster or "", "user": user or ""}
+        context = base_context(request, principal, "queries")
+        context.update({
+            "envelope": envelope,
+            "queries": data.get("queries") or [],
+            "truncated": data.get("truncated"),
+            "degraded_clusters": degraded,
+            "any_trustworthy": any_trustworthy,
+            "selected_cluster": cluster,
+            "active_state": state,
+            "user_filter": user,
+            "chips": views.query_chips(data.get("summary") or {}, base_params, state,
+                                       bool(long_running)),
+            "can_kill": principal.can(KILL_QUERY),
+            "running_counter": None,
+        })
+        return render("queries.html", context)
+
+    @app.get("/clusters/{cluster}/queries/{query_id}", response_class=HTMLResponse,
+             include_in_schema=False)
+    def query_detail(request: Request, cluster: str, query_id: str, fragment: int = 0):
+        principal, claims = principal_or_redirect(request)
+        if claims is None:
+            return principal
+        try:
+            row = _query_row(principal, cluster, query_id)
+        except ApiError as exc:
+            return _error_page(request, principal, exc)
+
+        context = {"request": request, "cluster": cluster, "query": row,
+                   "can_kill": principal.can(KILL_QUERY)}
+        if fragment:
+            return render("query_detail.html", context)
+        page = base_context(request, principal, "queries")
+        page.update(context)
+        page["envelope"] = None
+        return render("query_detail_page.html", page)
+
+    @app.get("/clusters/{cluster}/queries/{query_id}/kill", response_class=HTMLResponse,
+             include_in_schema=False)
+    def kill_form(request: Request, cluster: str, query_id: str):
+        principal, claims = principal_or_redirect(request)
+        if claims is None:
+            return principal
+        if not principal.can(KILL_QUERY):
+            return _error_page(request, principal, Forbidden("You cannot kill queries."))
+        try:
+            row = _query_row(principal, cluster, query_id)
+        except ApiError as exc:
+            return _error_page(request, principal, exc)
+        context = base_context(request, principal, "queries")
+        context.update({"cluster": cluster, "query": row, "error": None, "reason": "",
+                        "envelope": None,
+                        "back_url": "/clusters/" + _quote(cluster) + "/queries"})
+        return render("kill_query.html", context)
+
+    @app.post("/clusters/{cluster}/queries/{query_id}/kill", include_in_schema=False)
+    def kill_submit(request: Request, cluster: str, query_id: str, reason: str = Form("")):
+        principal, claims = principal_or_redirect(request)
+        if claims is None:
+            return principal
+        try:
+            service.kill_query(principal, cluster, query_id, reason=reason)
+        except ApiError as exc:
+            try:
+                row = _query_row(principal, cluster, query_id)
+            except ApiError:
+                row = {"query_id": query_id}
+            context = base_context(request, principal, "queries")
+            context.update({"cluster": cluster, "query": row, "error": exc.message,
+                            "reason": reason, "envelope": None,
+                            "back_url": "/clusters/" + _quote(cluster) + "/queries"})
+            return render("kill_query.html", context, status_code=exc.status)
+
+        response = RedirectResponse("/clusters/" + _quote(cluster) + "/queries", status_code=303)
+        _flash(response, "good", "Query {} killed. The reason was delivered to its owner.".format(query_id))
+        return response
+
+    def _query_row(principal: Principal, cluster: str, query_id: str) -> Dict[str, Any]:
+        """Snapshot row (fast, has our derived fields) enriched with live SQL."""
+        row: Dict[str, Any] = {"query_id": query_id}
+        envelope = service.list_queries(principal, cluster, limit=500)
+        for candidate in (envelope.get("data") or {}).get("queries") or []:
+            if candidate.get("query_id") == query_id:
+                row = dict(candidate)
+                break
+        try:
+            detail = (service.get_query(principal, cluster, query_id).get("data") or {})
+            row["sql"] = detail.get("query")
+            row.setdefault("state", detail.get("state"))
+        except ApiError:
+            # A finished query is gone from the coordinator; the snapshot row is
+            # still worth showing.
+            row.setdefault("sql", row.get("query_preview"))
+        row.setdefault("cluster", cluster)
+        return row
+
+    # ── health ─────────────────────────────────────────────────────────
+
+    @app.get("/clusters", response_class=HTMLResponse, include_in_schema=False)
+    def clusters_redirect():
+        return RedirectResponse("/", status_code=303)
+
+    @app.get("/clusters/{cluster}/health", response_class=HTMLResponse, include_in_schema=False)
+    def health(request: Request, cluster: str):
+        principal, claims = principal_or_redirect(request)
+        if claims is None:
+            return principal
+        selected = cluster
+        try:
+            envelope = service.get_health(principal, selected)
+        except ApiError as exc:
+            return _error_page(request, principal, exc)
+
+        data = views.health_view(envelope)
+        try:
+            events = service.list_health_events(principal, selected, limit=8)
+        except (ApiError, AttributeError):
+            events = []
+
+        context = base_context(request, principal, "health")
+        context.update({
+            "envelope": envelope,
+            "health": data,
+            "counts": views.state_counts(data.get("tests") or []),
+            "events": events,
+            "selected_cluster": selected,
+            "can_manage": principal.can(MANAGE_HEALTH),
+            "stabilization_polls": config.health.stabilization_polls,
+        })
+        return render("health.html", context)
+
+    @app.get("/clusters/{cluster}/health/tests/{test_id}", response_class=HTMLResponse,
+             include_in_schema=False)
+    def health_test_form(request: Request, cluster: str, test_id: str, enable: int = 0):
+        principal, claims = principal_or_redirect(request)
+        if claims is None:
+            return principal
+        if not principal.can(MANAGE_HEALTH):
+            return _error_page(request, principal, Forbidden("You cannot change health tests."))
+        context = base_context(request, principal, "health")
+        context.update({"cluster": cluster, "test_id": test_id, "test_name": None,
+                        "enable": bool(enable), "error": None, "reason": "", "envelope": None})
+        return render("health_test.html", context)
+
+    @app.post("/clusters/{cluster}/health/tests/{test_id}", include_in_schema=False)
+    def health_test_submit(request: Request, cluster: str, test_id: str,
+                           enabled: str = Form("false"), reason: str = Form("")):
+        principal, claims = principal_or_redirect(request)
+        if claims is None:
+            return principal
+        enable = enabled.lower() == "true"
+        try:
+            service.update_health_test(principal, cluster, test_id, reason=reason, enabled=enable)
+        except ApiError as exc:
+            context = base_context(request, principal, "health")
+            context.update({"cluster": cluster, "test_id": test_id, "test_name": None,
+                            "enable": enable, "error": exc.message, "reason": reason,
+                            "envelope": None})
+            return render("health_test.html", context, status_code=exc.status)
+        response = RedirectResponse("/clusters/" + _quote(cluster) + "/health", status_code=303)
+        _flash(response, "good", "{} {} for {}.".format(
+            test_id, "enabled" if enable else "disabled", cluster))
+        return response
+
+    @app.post("/clusters/{cluster}/health/rollup", include_in_schema=False)
+    def health_rollup(request: Request, cluster: str, enabled: str = Form("true")):
+        principal, claims = principal_or_redirect(request)
+        if claims is None:
+            return principal
+        # The roll-up toggle is a write like any other; send it through the form
+        # so it carries a reason rather than firing from a bare switch.
+        return RedirectResponse(
+            "/clusters/{}/health/tests/{}?enable={}".format(_quote(cluster), "*",
+                                                   1 if enabled.lower() == "true" else 0),
+            status_code=303,
+        )
+
+    # ── audit ──────────────────────────────────────────────────────────
+
+    @app.get("/audit", response_class=HTMLResponse, include_in_schema=False)
+    def audit(request: Request, action_type: Optional[str] = None, actor: Optional[str] = None):
+        principal, claims = principal_or_redirect(request)
+        if claims is None:
+            return principal
+        if not principal.can(VIEW_AUDIT):
+            return _error_page(request, principal, Forbidden("You cannot view the audit log."))
+
+        result = service.search_audit(principal, action_type=action_type, actor=actor, limit=200)
+        everything = service.search_audit(principal, limit=500)["records"]
+        counts: Dict[str, int] = {"all": len(everything)}
+        for record in everything:
+            counts[record["action_type"]] = counts.get(record["action_type"], 0) + 1
+
+        context = base_context(request, principal, "audit")
+        context.update({
+            "records": result["records"],
+            "chips": views.audit_chips(action_type, counts),
+            "action_filter": action_type,
+            "actor_filter": actor,
+            "can_export": principal.can(EXPORT_AUDIT),
+            "envelope": None,
+        })
+        return render("audit.html", context)
+
+    @app.get("/audit/export", response_class=HTMLResponse, include_in_schema=False)
+    def audit_export_form(request: Request):
+        principal, claims = principal_or_redirect(request)
+        if claims is None:
+            return principal
+        if not principal.can(EXPORT_AUDIT):
+            return _error_page(request, principal, Forbidden("You cannot export the audit log."))
+        context = base_context(request, principal, "audit")
+        context.update({"error": None, "reason": "", "envelope": None})
+        return render("audit_export.html", context)
+
+    @app.post("/audit/export", include_in_schema=False)
+    def audit_export_submit(request: Request, reason: str = Form("")):
+        principal, claims = principal_or_redirect(request)
+        if claims is None:
+            return principal
+        try:
+            result = service.export_audit(principal, reason=reason, limit=500)
+        except ApiError as exc:
+            context = base_context(request, principal, "audit")
+            context.update({"error": exc.message, "reason": reason, "envelope": None})
+            return render("audit_export.html", context, status_code=exc.status)
+
+        return PlainTextResponse(
+            _to_csv(result.get("rows") or []),
+            media_type="text/csv",
+            headers={"Content-Disposition": 'attachment; filename="tms-audit.csv"'},
+        )
+
+    # ── errors ─────────────────────────────────────────────────────────
+
+    def _error_page(request: Request, principal: Principal, exc: ApiError):
+        context = base_context(request, principal, "")
+        context.update({"envelope": None, "error": exc})
+        return render("error.html", context, status_code=exc.status)
+
+    @app.exception_handler(Unauthenticated)
+    async def _unauthenticated(request: Request, exc: Unauthenticated):
+        if request.url.path.startswith("/api/"):
+            raise exc
+        return RedirectResponse("/login", status_code=303)
+
+
+def _quote(value: str) -> str:
+    from urllib.parse import quote
+
+    return quote(value, safe="")
+
+
+def _to_csv(rows: List[Dict[str, Any]]) -> str:
+    import csv
+    import io
+
+    if not rows:
+        return ""
+    columns = ["occurred_at", "actor", "actor_roles", "actor_ip", "action_type", "target_kind",
+               "target_id", "target_cluster", "reason", "outcome", "error_message", "request_id"]
+    buffer = io.StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=columns, extrasaction="ignore")
+    writer.writeheader()
+    for row in rows:
+        flat = dict(row)
+        if isinstance(flat.get("actor_roles"), list):
+            flat["actor_roles"] = ",".join(flat["actor_roles"])
+        writer.writerow(flat)
+    return buffer.getvalue()

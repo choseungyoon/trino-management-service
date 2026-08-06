@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+{% import "_icons.html" as ui %}
+{% block title %}Live Queries{% endblock %}
+{% block heading %}Live Queries{% endblock %}
+
+{% block topbar_extra %}
+{# All is first and default: during an incident you do not yet know which
+   cluster the hog is on. #}
+<nav class="segmented" aria-label="Cluster">
+  <a href="/queries" {% if not selected_cluster %}aria-current="page"{% endif %}>All</a>
+  {% for name in cluster_names %}
+  <a href="/clusters/{{ name | urlencode }}/queries"
+     {% if selected_cluster == name %}aria-current="page"{% endif %}>{{ name }}</a>
+  {% endfor %}
+</nav>
+{% endblock %}
+
+{% block freshness_label %}
+  {%- if selected_cluster -%}
+    updated {{ envelope.collected_at | relative_time }}
+  {%- else -%}
+    {# A merged list is only as fresh as its worst source. #}
+    updated {{ envelope.collected_at | relative_time }} · oldest of {{ cluster_names | length }} clusters
+  {%- endif -%}
+{% endblock %}
+
+{% block content %}
+{% for entry in degraded_clusters %}
+<div class="banner banner--{{ 'unknown' if entry.advice else 'concerning' }}" role="status">
+  {{ ui.icon('unknown' if entry.advice else 'clock', 15, 2) }}
+  <div>
+    <b>{{ entry.name }}: {{ entry.unavailable_reason }}</b>
+    {% if entry.advice %} {{ entry.advice }}{% endif %}
+    {% if cluster_names | length > 1 and not selected_cluster %}
+    Other clusters below are unaffected.
+    {% endif %}
+  </div>
+</div>
+{% endfor %}
+
+<div class="filters">
+  {% for chip in chips %}
+  <a class="chip {% if chip.alert %}chip--alert{% endif %}" href="{{ chip.href }}"
+     aria-pressed="{{ 'true' if chip.active else 'false' }}">
+    {{ chip.label }} <span class="chip__n">{{ chip.count | integer }}</span>
+  </a>
+  {% endfor %}
+  <span class="filters__sep" aria-hidden="true"></span>
+  <form class="search" method="get" action="/queries" role="search">
+    {% if selected_cluster %}<input type="hidden" name="cluster" value="{{ selected_cluster }}">{% endif %}
+    {% if active_state %}<input type="hidden" name="state" value="{{ active_state }}">{% endif %}
+    {{ ui.icon('search', 12, 2) }}
+    <label class="sr-only" for="q">Filter by user</label>
+    <input id="q" name="user" value="{{ user_filter or '' }}" placeholder="Filter by user…">
+  </form>
+</div>
+
+<section class="panel" style="overflow:hidden">
+  {% if queries %}
+  <div class="table-scroll">
+    <table class="table">
+      <thead>
+        <tr>
+          <th scope="col">Query</th>
+          {% if not selected_cluster %}<th scope="col">Cluster</th>{% endif %}
+          <th scope="col">User</th>
+          <th scope="col">Source</th>
+          <th scope="col">State</th>
+          <th scope="col">Resource group</th>
+          <th scope="col">Elapsed</th>
+          <th scope="col">CPU</th>
+          <th scope="col">Peak mem</th>
+          <th scope="col">Progress</th>
+          <th scope="col"><span class="sr-only">Actions</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for q in queries %}
+        <tr class="{% if q.long_running %}is-long{% endif %}">
+          <td>
+            <a class="mono dim" href="/clusters/{{ q.cluster | urlencode }}/queries/{{ q.query_id | urlencode }}"
+               data-drawer="/clusters/{{ q.cluster | urlencode }}/queries/{{ q.query_id | urlencode }}?fragment=1">{{ q.query_id }}</a>
+          </td>
+          {% if not selected_cluster %}<td class="dim">{{ q.cluster }}</td>{% endif %}
+          <td class="strong">{{ q.user or '—' }}</td>
+          <td class="dim">{{ q.source or '—' }}</td>
+          <td>{{ ui.status(q.state) }}</td>
+          <td><span class="tag">{{ q.resource_group_id | resource_group }}</span></td>
+          <td class="mono num {% if q.long_running %}elapsed--long{% endif %}">{{ q.elapsed_ms | duration }}</td>
+          <td class="mono num">{{ q.total_cpu_ms | duration }}</td>
+          <td class="mono num">{{ q.peak_user_memory_bytes | data_size }}</td>
+          <td>
+            {% if q.progress_percentage is not none %}
+            <div class="progress" title="{{ q.progress_percentage | percent(0) }}">
+              <i style="width:{{ q.progress_percentage | round | int }}%"></i>
+            </div>
+            {% else %}<span class="dim">—</span>{% endif %}
+          </td>
+          <td>
+            <div class="row-actions">
+              {% if q.links and q.links.logs %}
+              <a class="row-btn" href="{{ q.links.logs }}" target="_blank" rel="noopener noreferrer"
+                 title="Logs around this query">{{ ui.icon('logs', 13) }}</a>
+              {% endif %}
+              {% if q.links and q.links.history %}
+              <a class="row-btn" href="{{ q.links.history }}" target="_blank" rel="noopener noreferrer"
+                 title="View in Query History">{{ ui.icon('history', 13) }}</a>
+              {% endif %}
+              {% if can_kill %}
+              <a class="row-btn row-btn--kill"
+                 href="/clusters/{{ q.cluster | urlencode }}/queries/{{ q.query_id | urlencode }}/kill"
+                 title="Kill query">{{ ui.icon('bad', 13, 2) }}</a>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if truncated %}
+  <div class="event"><span class="muted">Showing the {{ queries | length }} longest-running queries.
+    Narrow the filters to see the rest.</span></div>
+  {% endif %}
+
+  {% elif degraded_clusters and not any_trustworthy %}
+  <div class="empty">
+    {{ ui.icon('unknown', 20, 1.6) }}
+    <div class="empty__title">Query list unavailable</div>
+    <div class="empty__desc">No cluster returned a list we can trust. See the notice above.</div>
+  </div>
+
+  {% else %}
+  {# An empty list is only reported as idle once H-09 has cleared it. #}
+  <div class="empty">
+    {{ ui.icon('good', 20, 1.6) }}
+    <div class="empty__title">No queries running</div>
+    <div class="empty__desc">
+      Cross-checked against JMX{% if running_counter is not none %} (RunningQueries = {{ running_counter }}){% endif %} —
+      {{ selected_cluster or 'every cluster' }} is genuinely idle, not permission-filtered.
+    </div>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}
+
+{% block overlays %}
+<dialog id="drawer" class="drawer-host" aria-label="Query detail"></dialog>
+{% endblock %}

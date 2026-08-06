@@ -59,7 +59,8 @@ MAX_PAGE_SIZE = 500
 def require(principal: Principal, capability: str) -> None:
     if not principal.can(capability):
         raise Forbidden(
-            "{} 권한이 없다 (역할: {})".format(capability, ", ".join(principal.roles) or "없음")
+            "Your role does not include {} (roles: {}).".format(
+                capability, ", ".join(principal.roles) or "none")
         )
 
 
@@ -105,12 +106,12 @@ class TmsService:
         try:
             return self.config.cluster(cluster)
         except KeyError:
-            raise NotFound("알 수 없는 클러스터: {}".format(cluster))
+            raise NotFound("Unknown cluster: {}".format(cluster))
 
     def _client_or_503(self, cluster: str):
         client = self.trino_clients.get(cluster)
         if client is None:
-            raise UpstreamUnavailable("클러스터 {} 의 클라이언트가 없다".format(cluster))
+            raise UpstreamUnavailable("No client configured for cluster {}".format(cluster))
         return client
 
     # ------------------------------------------------------------ FR-PORTAL
@@ -128,7 +129,7 @@ class TmsService:
         candidates = [
             ("grafana", "Grafana", build_grafana_url(deeplinks.grafana_cluster_dashboard, "")),
             ("superset", "Superset", deeplinks.superset_url),
-            ("query_history", "쿼리 히스토리", deeplinks.query_history_home_url),
+            ("query_history", "Query History", deeplinks.query_history_home_url),
         ]
         if self.config.gateway.enabled and self.config.gateway.base_url:
             candidates.append(("gateway_ui", "Trino Gateway", self.config.gateway.base_url))
@@ -161,7 +162,7 @@ class TmsService:
         self._cluster_or_404(cluster)
         snapshot = self.repository.load(cluster, KIND_QUERIES)
         if snapshot is None:
-            return envelope(None, {"summary": {}, "queries": [], "unavailable_reason": "아직 수집된 데이터가 없다."}, self._stale_threshold)
+            return envelope(None, {"summary": {}, "queries": [], "unavailable_reason": "No data collected yet."}, self._stale_threshold)
 
         if not snapshot.trustworthy:
             # An empty list under a denied `queries` rule is indistinguishable
@@ -212,6 +213,111 @@ class TmsService:
             self._stale_threshold,
         )
 
+    def list_queries_all(
+        self,
+        principal: Principal,
+        state: Optional[List[str]] = None,
+        user: Optional[str] = None,
+        min_elapsed_seconds: Optional[float] = None,
+        resource_group: Optional[str] = None,
+        limit: int = 200,
+    ) -> Dict[str, Any]:
+        """Every cluster's live queries in one list (FR-QL-01, All view).
+
+        Fans out over the per-cluster snapshots rather than adding a second
+        source of truth. Two rules make the merged view honest:
+
+        * Freshness is the *oldest* contributing snapshot. A merged list is only
+          as current as its worst source, and showing the newest would flatter it.
+        * One cluster degrading degrades alone. Its rows drop out and it is named
+          in `clusters` with its reason, while every other cluster keeps
+          rendering — a single permission failure must not blank the page.
+        """
+        require(principal, VIEW_QUERIES)
+
+        merged: List[Dict[str, Any]] = []
+        per_cluster: List[Dict[str, Any]] = []
+        summary = {"running": 0, "queued": 0, "long_running": 0, "total": 0}
+        oldest: Optional[Snapshot] = None
+        any_stale = False
+        now = self._clock()
+
+        for cluster in self.config.clusters:
+            snapshot = self.repository.load(cluster.name, KIND_QUERIES)
+            stale = True
+            if snapshot is not None:
+                stale = snapshot.is_stale(now, self._stale_threshold)
+                if oldest is None or snapshot.collected_at < oldest.collected_at:
+                    oldest = snapshot
+            any_stale = any_stale or stale
+
+            entry = {
+                "name": cluster.name,
+                "stale": stale,
+                "collected_at": snapshot.collected_at.isoformat() if snapshot else None,
+                "unavailable_reason": None,
+                "advice": None,
+            }
+
+            if snapshot is None:
+                entry["unavailable_reason"] = "No data collected yet."
+            elif not snapshot.trustworthy:
+                entry["unavailable_reason"] = snapshot.collection_error
+                entry["advice"] = snapshot.advice
+            else:
+                for raw in snapshot.payload.get("queries") or []:
+                    row = dict(raw)
+                    row["cluster"] = cluster.name
+                    row["links"] = self._query_links(cluster.name, row)
+                    merged.append(row)
+                for key in summary:
+                    summary[key] += int((snapshot.payload.get("summary") or {}).get(key, 0))
+            per_cluster.append(entry)
+
+        merged = self._filter_queries(
+            merged, state, user, min_elapsed_seconds, resource_group
+        )
+        # Worst first: the query an operator is looking for during an incident is
+        # the one that has been running longest.
+        merged.sort(key=lambda q: q.get("elapsed_ms") or 0, reverse=True)
+
+        limit = max(1, min(int(limit), MAX_PAGE_SIZE))
+        truncated = len(merged) > limit
+
+        return {
+            "collected_at": oldest.collected_at.isoformat() if oldest else None,
+            "stale": any_stale,
+            "data": {
+                "summary": summary,
+                "queries": merged[:limit],
+                "truncated": truncated,
+                "clusters": per_cluster,
+            },
+        }
+
+    @staticmethod
+    def _filter_queries(
+        queries: List[Dict[str, Any]],
+        state: Optional[List[str]],
+        user: Optional[str],
+        min_elapsed_seconds: Optional[float],
+        resource_group: Optional[str],
+    ) -> List[Dict[str, Any]]:
+        if state:
+            wanted = set(state)
+            queries = [q for q in queries if q.get("state") in wanted]
+        if user:
+            needle = user.lower()
+            queries = [q for q in queries if needle in str(q.get("user") or "").lower()]
+        if resource_group:
+            queries = [
+                q for q in queries if resource_group in (q.get("resource_group_id") or [])
+            ]
+        if min_elapsed_seconds is not None:
+            floor_ms = min_elapsed_seconds * 1000.0
+            queries = [q for q in queries if (q.get("elapsed_ms") or 0) >= floor_ms]
+        return queries
+
     def _query_links(self, cluster: str, query: Dict[str, Any]) -> Dict[str, str]:
         deeplinks = self.config.deeplinks
         links: Dict[str, str] = {}
@@ -242,7 +348,7 @@ class TmsService:
         try:
             detail = client.get_query(query_id)
         except TrinoNotFound as exc:
-            raise NotFound("쿼리를 찾을 수 없다: {}".format(query_id), advice=exc.advice)
+            raise NotFound("Query not found: {}".format(query_id), advice=exc.advice)
         except TrinoClientError as exc:
             raise UpstreamUnavailable(str(exc), advice=exc.advice)
         return {"collected_at": self._clock().isoformat(), "stale": False, "data": detail}
@@ -271,7 +377,7 @@ class TmsService:
                 error_message="403: {} lacks kill_query".format(principal.username),
                 actor_ip=principal.ip,
             )
-            raise Forbidden("쿼리 kill 권한이 없다")
+            raise Forbidden("You do not have permission to kill queries.")
 
         client = self._client_or_503(cluster)
         try:
@@ -298,7 +404,7 @@ class TmsService:
             # Nothing was attempted against the cluster.
             raise AuditUnavailableError(str(exc))
         except TrinoNotFound as exc:
-            raise NotFound("쿼리를 찾을 수 없다: {}".format(query_id), advice=exc.advice)
+            raise NotFound("Query not found: {}".format(query_id), advice=exc.advice)
         except TrinoClientError as exc:
             raise UpstreamUnavailable(str(exc), advice=exc.advice)
 
@@ -355,6 +461,25 @@ class TmsService:
                 test["links"] = links
         return envelope(snapshot, payload, self._stale_threshold)
 
+    def list_health_events(
+        self, principal: Principal, cluster: str, limit: int = 20
+    ) -> List[Dict[str, Any]]:
+        """Confirmed state transitions (FR-CH-07), newest first.
+
+        Only debounced transitions reach the store, so this is an event log an
+        operator can actually read rather than a spike feed.
+        """
+        require(principal, VIEW_HEALTH)
+        self._cluster_or_404(cluster)
+        reader = getattr(self.repository, "list_health_events", None)
+        if reader is None:
+            return []
+        try:
+            return reader(cluster, max(1, min(int(limit), 200)))
+        except Exception:  # noqa: BLE001 - an unreadable log must not blank the page
+            log.exception("failed to read health events for %s", cluster)
+            return []
+
     def update_health_test(
         self,
         principal: Principal,
@@ -372,7 +497,7 @@ class TmsService:
         """
         self._cluster_or_404(cluster)
         if enabled is None and not thresholds:
-            raise InvalidRequest("enabled 또는 thresholds 중 하나는 지정해야 한다")
+            raise InvalidRequest("Specify either enabled or thresholds.")
 
         action_type = (
             ACTION_HEALTH_THRESHOLD_CHANGE if thresholds else ACTION_HEALTH_TEST_TOGGLE
@@ -389,7 +514,7 @@ class TmsService:
                 error_message="403: {} lacks manage_health".format(principal.username),
                 actor_ip=principal.ip,
             )
-            raise Forbidden("헬스 테스트 변경 권한이 없다")
+            raise Forbidden("You do not have permission to change health tests.")
 
         try:
             with self.audit.action(
@@ -439,7 +564,7 @@ class TmsService:
                 error_message="403: {} lacks manage_health".format(principal.username),
                 actor_ip=principal.ip,
             )
-            raise Forbidden("roll-up 변경 권한이 없다")
+            raise Forbidden("You do not have permission to change the roll-up.")
 
         try:
             with self.audit.action(
@@ -500,7 +625,7 @@ class TmsService:
                 error_message="403: {} lacks export_audit".format(principal.username),
                 actor_ip=principal.ip,
             )
-            raise Forbidden("감사 로그 내보내기 권한이 없다")
+            raise Forbidden("You do not have permission to export the audit log.")
 
         try:
             with self.audit.action(

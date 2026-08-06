@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% import "_icons.html" as ui %}
+{% block title %}Audit Log{% endblock %}
+{% block heading %}Audit Log{% endblock %}
+
+{% block topbar_extra %}
+<span class="spacer"></span>
+{% if can_export %}
+<a class="btn btn--sm" href="/audit/export">{{ ui.icon('download', 12) }}Export CSV</a>
+{% endif %}
+{% endblock %}
+
+{% block content %}
+<div class="filters">
+  {% for chip in chips %}
+  <a class="chip" href="{{ chip.href }}" aria-pressed="{{ 'true' if chip.active else 'false' }}">
+    {{ chip.label }} <span class="chip__n">{{ chip.count | integer }}</span>
+  </a>
+  {% endfor %}
+  <span class="filters__sep" aria-hidden="true"></span>
+  <form class="search" method="get" action="/audit" role="search">
+    {% if action_filter %}<input type="hidden" name="action_type" value="{{ action_filter }}">{% endif %}
+    {{ ui.icon('search', 12, 2) }}
+    <label class="sr-only" for="actor">Filter by actor</label>
+    <input id="actor" name="actor" value="{{ actor_filter or '' }}" placeholder="Filter by actor…">
+  </form>
+</div>
+
+<section class="panel" style="overflow:hidden">
+  {% if records %}
+  <div class="table-scroll">
+    <table class="table">
+      <thead>
+        <tr>
+          <th scope="col">Time</th><th scope="col">Actor</th><th scope="col">Action</th>
+          <th scope="col">Target</th><th scope="col">Reason</th><th scope="col">Outcome</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in records %}
+        <tr>
+          <td class="mono num dim">{{ r.occurred_at | clock }}</td>
+          <td>
+            <span class="strong">{{ r.actor }}</span>
+            {% if r.actor_ip %}<span class="mono dim">{{ r.actor_ip }}</span>{% endif %}
+          </td>
+          <td><span class="action-badge">{{ r.action_type }}</span></td>
+          <td class="mono dim">{{ r.target_id | truncate_sql(38) }}{% if r.target_cluster %} · {{ r.target_cluster }}{% endif %}</td>
+          {# The reason is the payload, not metadata — it gets the wide column. #}
+          <td class="wrap">{{ r.reason }}</td>
+          <td>
+            {% if r.outcome == 'SUCCESS' %}
+            <span class="outcome outcome--success">SUCCESS</span>
+            {% else %}
+            <span class="outcome outcome--failure">FAILED</span>
+            {% if r.error_message %}<div class="dim" style="white-space:normal">{{ r.error_message | truncate_sql(60) }}</div>{% endif %}
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty">
+    {{ ui.icon('audit', 20, 1.6) }}
+    <div class="empty__title">No matching actions</div>
+    <div class="empty__desc">Write actions — kills, health overrides, exports — appear here with
+      who performed them and why. Nothing matches the current filters.</div>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}

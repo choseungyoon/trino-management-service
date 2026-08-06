@@ -1,0 +1,104 @@
+{% import "_icons.html" as ui %}<!doctype html>
+<html lang="en" data-theme="{{ theme }}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}TMS{% endblock %} · TMS</title>
+<link rel="stylesheet" href="{{ url_for('web_static', path='tms.css') }}">
+{#
+  Applied before first paint so a dark-mode operator never gets a white flash.
+  The server already rendered the stored preference into data-theme; this only
+  corrects the case where the cookie is absent and the OS says otherwise.
+#}
+<script>
+  (function () {
+    try {
+      var stored = document.cookie.match(/(?:^|;\s*)tms_theme=(dark|light)/);
+      if (stored) { document.documentElement.dataset.theme = stored[1]; return; }
+      if (window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches) {
+        document.documentElement.dataset.theme = "light";
+      }
+    } catch (e) { /* theme is cosmetic; never block the page */ }
+  })();
+</script>
+</head>
+<body{% if refresh_seconds %} data-refresh="{{ refresh_seconds }}"{% endif %}>
+<a class="skip" href="#main">Skip to content</a>
+
+<div class="app">
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <div class="brand__glyph" aria-hidden="true">T</div>
+      <div class="brand__name">TMS</div>
+      {% if environment %}<span class="brand__env">{{ environment }}</span>{% endif %}
+    </div>
+
+    <nav class="nav" aria-label="Main">
+      <a href="/" {% if page == 'overview' %}aria-current="page"{% endif %}>{{ ui.icon('overview') }}Overview</a>
+      <a href="/queries" {% if page == 'queries' %}aria-current="page"{% endif %}>{{ ui.icon('queries') }}Live Queries</a>
+      <a href="/clusters/{{ cluster_names[0] }}/health" {% if page == 'health' %}aria-current="page"{% endif %}>{{ ui.icon('health') }}Health</a>
+      {% if 'view_audit' in principal.capabilities %}
+      <a href="/audit" {% if page == 'audit' %}aria-current="page"{% endif %}>{{ ui.icon('audit') }}Audit Log</a>
+      {% endif %}
+    </nav>
+
+    {% if links %}
+    <div class="nav-group">TOOLS</div>
+    <nav class="nav nav--external" aria-label="External tools">
+      {% for link in links %}
+      <a href="{{ link.url }}" target="_blank" rel="noopener noreferrer">
+        {{ ui.icon(link.icon, 14) }}{{ link.label }}
+        <span class="ext-mark">{{ ui.icon('external', 11, 2) }}</span>
+      </a>
+      {% endfor %}
+    </nav>
+    {% endif %}
+
+    <div class="sidebar__foot">
+      <div class="avatar" aria-hidden="true">{{ principal.user[:2] | upper }}</div>
+      <div class="whoami">
+        <div class="whoami__user">{{ principal.user }}</div>
+        <div class="whoami__role">{{ principal.roles | join(', ') }}</div>
+      </div>
+      <form method="post" action="/ui/theme" style="margin-left:auto">
+        <input type="hidden" name="next" value="{{ request.url.path }}">
+        <button class="icon-btn" type="submit"
+                title="Switch to {{ 'light' if theme == 'dark' else 'dark' }} theme"
+                aria-label="Switch to {{ 'light' if theme == 'dark' else 'dark' }} theme">
+          {{ ui.icon('sun' if theme == 'dark' else 'moon', 13) }}
+        </button>
+      </form>
+    </div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <button class="icon-btn" id="menu-toggle" aria-label="Toggle navigation"
+              aria-controls="sidebar" aria-expanded="false">{{ ui.icon('menu', 14) }}</button>
+      <span class="topbar__title">{% block heading %}{% endblock %}</span>
+      {% block topbar_extra %}{% endblock %}
+      {% if envelope is defined and envelope %}
+      <div class="freshness" data-stale="{{ 'true' if envelope.stale else 'false' }}">
+        <span class="freshness__dot" aria-hidden="true"></span>
+        <span data-collected-at="{{ envelope.collected_at }}" data-suffix="{{ freshness_suffix or '' }}">{% block freshness_label %}updated {{ envelope.collected_at | relative_time }}{% endblock %}</span>
+      </div>
+      {% endif %}
+    </header>
+
+    <main class="content" id="main">
+      {% if flash %}
+      <div class="banner banner--{{ flash.level }}" role="status">
+        {{ ui.icon(flash.level if flash.level in ('bad','concerning') else 'good', 15, 2) }}
+        <div>{{ flash.message }}</div>
+      </div>
+      {% endif %}
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+</div>
+
+{% block overlays %}{% endblock %}
+<script src="{{ url_for('web_static', path='tms.js') }}"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

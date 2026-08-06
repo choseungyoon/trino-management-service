@@ -1,0 +1,53 @@
+{% import "_icons.html" as ui %}<!doctype html>
+<html lang="en" data-theme="{{ theme }}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in · TMS</title>
+<link rel="stylesheet" href="{{ url_for('web_static', path='tms.css') }}">
+<script>
+  (function () {
+    try {
+      var stored = document.cookie.match(/(?:^|;\s*)tms_theme=(dark|light)/);
+      if (stored) { document.documentElement.dataset.theme = stored[1]; return; }
+      if (window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches) {
+        document.documentElement.dataset.theme = "light";
+      }
+    } catch (e) {}
+  })();
+</script>
+</head>
+<body>
+<main class="auth-screen">
+  <div class="auth-card">
+    <div class="brand">
+      <div class="brand__glyph" aria-hidden="true">T</div>
+      <div class="brand__name">TMS</div>
+      {% if environment %}<span class="brand__env">{{ environment }}</span>{% endif %}
+    </div>
+
+    <h1>Sign in</h1>
+    <p class="auth-card__sub">Trino Management Service — platform operators only.</p>
+
+    <form method="post" action="/login">
+      <input type="hidden" name="next" value="{{ next_url }}">
+      {% if error %}<div class="field__error" role="alert">{{ error }}</div>{% endif %}
+
+      <div class="field">
+        <label for="username">Username</label>
+        <input id="username" name="username" autocomplete="username" required autofocus
+               value="{{ username or '' }}">
+      </div>
+      <div class="field">
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required>
+      </div>
+      <button class="btn btn--primary btn--block" type="submit">Sign in</button>
+    </form>
+
+    <p class="auth-card__note">Temporary passwords must be changed at first sign-in before any
+      other action.</p>
+  </div>
+</main>
+</body>
+</html>

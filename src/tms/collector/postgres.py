@@ -180,6 +180,33 @@ class PostgresSnapshotRepository(SnapshotRepository):
             overrides[test_id] = {"enabled": enabled, "thresholds": thresholds or {}}
         return overrides
 
+    def list_health_events(self, cluster: str, limit: int = 20) -> List[Dict[str, Any]]:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT occurred_at, test_id, from_state, to_state, observed_value, threshold, advice
+                FROM health_event
+                WHERE cluster = %s
+                ORDER BY occurred_at DESC, id DESC
+                LIMIT %s
+                """,
+                (cluster, max(1, min(int(limit), 200))),
+            )
+            rows = cursor.fetchall()
+        return [
+            {
+                "cluster": cluster,
+                "occurred_at": row[0],
+                "test_id": row[1],
+                "from_state": row[2],
+                "to_state": row[3],
+                "observed_value": row[4],
+                "threshold": row[5],
+                "advice": row[6],
+            }
+            for row in rows
+        ]
+
     def close(self) -> None:
         try:
             self._connection.close()

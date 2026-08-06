@@ -115,18 +115,18 @@ def create_app(config: Optional[Config] = None, service: Optional[TmsService] = 
 
         if codec is None:
             raise Unauthenticated(
-                "인증이 구성되지 않았다. portal.local_users 를 설정하라"
+                "Authentication is not configured. Set portal.local_users."
             )
 
         token = request.cookies.get(SESSION_COOKIE)
         if not token:
-            raise Unauthenticated("로그인이 필요하다")
+            raise Unauthenticated("Sign in required.")
         try:
             claims = codec.verify(token)
         except SessionExpired as exc:
-            raise Unauthenticated("세션이 만료되었다: {}".format(exc))
+            raise Unauthenticated("Session expired: {}".format(exc))
         except SessionError:
-            raise Unauthenticated("세션이 올바르지 않다")
+            raise Unauthenticated("Invalid session.")
 
         if claims.get("must_change_password") and request.url.path not in (
             "/api/v1/password",
@@ -135,7 +135,7 @@ def create_app(config: Optional[Config] = None, service: Optional[TmsService] = 
         ):
             # A temporary password must be replaced before it can be used to do
             # anything, otherwise "temporary" means "permanent in practice".
-            raise Forbidden("임시 비밀번호를 먼저 변경해야 한다 (PUT /api/v1/password)")
+            raise Forbidden("Change your temporary password first (PUT /api/v1/password).")
 
         request.state.session_claims = claims
         return Principal(
@@ -186,7 +186,7 @@ def create_app(config: Optional[Config] = None, service: Optional[TmsService] = 
     @app.post("/api/v1/login")
     def login(response: Response, request: Request, body: dict = Body(...)):
         if codec is None:
-            raise Unauthenticated("인증이 구성되지 않았다")
+            raise Unauthenticated("Authentication is not configured.")
         username = str(body.get("username") or "")
         password = str(body.get("password") or "")
         try:
@@ -225,7 +225,7 @@ def create_app(config: Optional[Config] = None, service: Optional[TmsService] = 
         principal: Principal = Depends(current_principal),
     ):
         if codec is None:
-            raise Unauthenticated("인증이 구성되지 않았다")
+            raise Unauthenticated("Authentication is not configured.")
         try:
             new_hash = authenticator.change_password(
                 principal.username,
@@ -247,8 +247,8 @@ def create_app(config: Optional[Config] = None, service: Optional[TmsService] = 
             "changed": True,
             "password_hash": new_hash,
             "persist_note": (
-                "config.secret.yaml 의 portal.local_users.{}.password_hash 를 이 값으로 "
-                "교체하고 must_change_password 를 제거하라. 재시작 전까지만 유효하다."
+                "Replace portal.local_users.{}.password_hash in config.secret.yaml with "
+                "this value and remove must_change_password. Valid only until restart."
             ).format(principal.username),
         }
 
@@ -363,7 +363,7 @@ def create_app(config: Optional[Config] = None, service: Optional[TmsService] = 
 
     @app.get("/api/v1/audit/export")
     def audit_export(
-        reason: str = Query(..., description="내보내기 사유. 이 호출도 감사된다"),
+        reason: str = Query(..., description="Reason for the export. This call is itself audited."),
         limit: int = 500,
         principal: Principal = Depends(current_principal),
     ):
@@ -378,6 +378,14 @@ def create_app(config: Optional[Config] = None, service: Optional[TmsService] = 
     @app.get("/ready")
     def tms_ready():
         return {"status": "ready"}
+
+    # The operator console. Mounted last so its catch-all page routes never
+    # shadow an /api/ path, and skipped entirely when local accounts are off —
+    # a UI with no way to sign in is worse than no UI.
+    if codec is not None:
+        from tms.web.routes import register as register_web
+
+        register_web(app, service, config, authenticator, codec, SESSION_COOKIE)
 
     return app
 

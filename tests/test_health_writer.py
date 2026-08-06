@@ -124,7 +124,7 @@ class HealthWriterTest(unittest.TestCase):
                 utcnow(),
                 payload={},
                 collection_error="unreachable",
-                advice="코디네이터가 응답하지 않는다.",
+                advice="The coordinator is not responding.",
             )
         )
         for _ in range(2):

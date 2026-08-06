@@ -54,7 +54,7 @@ def info_snapshot(starting=False, ok=True):
     if not ok:
         return Snapshot(
             "prod-a", KIND_INFO, NOW, payload={}, collection_error="unreachable",
-            advice="코디네이터가 응답하지 않는다.",
+            advice="The coordinator is not responding.",
         )
     return Snapshot("prod-a", KIND_INFO, NOW, payload={"info": {"starting": starting}})
 
@@ -105,7 +105,7 @@ class H01H02Test(unittest.TestCase):
     def test_starting_coordinator_is_concerning(self):
         result = h02_startup_complete(context(info=info_snapshot(starting=True)))
         self.assertEqual(result.state, CONCERNING)
-        self.assertIn("기동", result.advice)
+        self.assertIn("still starting", result.advice)
 
     def test_started_coordinator_is_good(self):
         self.assertEqual(h02_startup_complete(context(info=info_snapshot())).state, GOOD)
@@ -183,7 +183,7 @@ class H03WorkerRegistrationTest(unittest.TestCase):
         )
         result = h03_worker_registration(ctx)
         self.assertEqual(result.observed_value["unplanned_missing"], 2)
-        self.assertIn("계획된 종료 절차", result.advice)
+        self.assertIn("planned shutdown", result.advice)
 
     def test_missing_mbean_is_unknown_with_advice(self):
         result = h03_worker_registration(context(jmx=jmx_snapshot()))
@@ -229,7 +229,7 @@ class H05H06Test(unittest.TestCase):
         """Zero queries is not health - it may be the incident."""
         result = h05_query_failure_rate(self._ctx(failed=0, started=0))
         self.assertEqual(result.state, UNKNOWN)
-        self.assertIn("유입", result.advice)
+        self.assertIn("No queries started", result.advice)
 
     def test_internal_failures_are_stricter_than_user_errors(self):
         """One internal failure already matters; user syntax errors do not."""
@@ -277,7 +277,7 @@ class H09PermissionTest(unittest.TestCase):
             NOW,
             payload={},
             collection_error="query list is empty but JMX reports 7 running queries",
-            advice="rules.json 에서 tms-svc 의 queries 권한(view)을 확인하라.",
+            advice="Check the tms-svc account's queries: view grant in rules.json.",
         )
         result = h09_permission_self_check(context(queries=snapshot))
         self.assertEqual(result.state, UNKNOWN)

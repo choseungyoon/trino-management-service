@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% import "_icons.html" as ui %}
+{% block title %}Kill query{% endblock %}
+{% block heading %}Kill query{% endblock %}
+
+{#
+  A real page rather than a JS-only modal: the write ceremony must survive a
+  refresh, a direct link, and a browser with scripting off. tms.js upgrades the
+  row action into a dialog; this is what it loads.
+#}
+
+{% block content %}
+<section class="modal" style="margin:0;box-shadow:none;max-width:560px">
+  <div class="modal__head">
+    {{ ui.icon('bad', 18, 2) }}
+    <h2 class="modal__title">Kill query</h2>
+  </div>
+
+  <form class="modal__body" method="post"
+        action="/clusters/{{ cluster | urlencode }}/queries/{{ query.query_id | urlencode }}/kill">
+    <div class="target-card">
+      <div class="target-card__row"><span class="target-card__key">Query</span>
+        <span class="target-card__val">{{ query.query_id }}</span></div>
+      <div class="target-card__row"><span class="target-card__key">User</span>
+        <span class="target-card__val">{{ query.user or '—' }}{% if query.source %} · {{ query.source }}{% endif %}</span></div>
+      <div class="target-card__row"><span class="target-card__key">Cluster</span>
+        <span class="target-card__val">{{ cluster }} · running {{ query.elapsed_ms | duration }} · {{ query.peak_user_memory_bytes | data_size }} peak</span></div>
+    </div>
+
+    {% if error %}<div class="field__error" role="alert">{{ error }}</div>{% endif %}
+
+    <div class="field">
+      <label for="reason">Reason <span class="req" aria-hidden="true">*</span></label>
+      <textarea id="reason" name="reason" required autofocus
+                placeholder="Why this query is being killed">{{ reason or '' }}</textarea>
+      <div class="field__hint">
+        {{ ui.icon('concerning', 12, 2) }}
+        <span>This reason is delivered to <b>{{ query.user or 'the query owner' }}</b> in their query's
+        error message, and recorded in the audit log.</span>
+      </div>
+    </div>
+
+    <div class="modal__foot" style="padding:0">
+      <a class="btn btn--ghost" href="{{ back_url }}">Cancel</a>
+      <button class="btn btn--danger" type="submit">{{ ui.icon('bad', 12, 2) }}Kill query</button>
+    </div>
+  </form>
+</section>
+{% endblock %}
