@@ -420,7 +420,8 @@ MBean 이름은 쿼리에서 큰따옴표로 감싸고, 설정 파일에서는 �
 | 보안 | **`MANAGEMENT_READ`** — Trino 477 `ServerSecurityModule` 이 `MBeanResource` 와 **동일하게** `managementReadResource(MetricsResource.class)` 로 바인딩 |
 
 > **`/metrics` 와 `/v1/jmx/mbean` 은 권한 요건이 완전히 같다** (둘 다 `checkCanReadSystemInformation`). 어느 쪽을 쓰든 `system_information: read` 가 필요하다.
-> **⚠️ 설계 검토 대상 (Bolt 2)**: `/metrics?name[]=A&name[]=B…` 로 **여러 지표를 요청 1건에 묶을 수 있다.** MBean 7종을 개별 조회하는 현재 설계(0.47 req/s)를 1건(0.07 req/s)으로 줄일 여지가 있다. 단 **MBean 이름 → OpenMetrics 지표명 매핑은 확인 불가** — 실환경 응답으로 확정해야 한다.
+> **⛔ 검토 결과: 채택하지 않는다 (2026-08-06 실측).** `/metrics` 는 요청 수를 줄이지만 CPU 는 늘린다 — 전체 10.5 CPU ms(1MB), `?name[]=` 로 2개만 필터해도 5.4 CPU ms 로 MBean 4종 개별 조회(5.6 CPU ms, 76KB)보다 이득이 없다. 필터링해도 서버가 **전체 MBean 레지스트리를 순회**해 지표를 만들기 때문이다. 응답 크기만 줄고 CPU 는 그대로다.
+> **속성 단위 조회(`/v1/jmx/mbean/{obj}/{attr}`)도 반박됐다** — `QueryManager` 전체 1회 1.52 CPU ms vs 필요한 4개 속성 개별 3.11 CPU ms(+104%). **요청당 고정비용(TLS·인증·접근제어)이 페이로드 비용을 압도한다.** 상세: `docs/PERF_MEASUREMENT.md` §4
 
 ---
 

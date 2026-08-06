@@ -165,7 +165,7 @@ FR-QUERY-HISTORY가 빠지면서 B4(대용량 히스토리 저장소)는 이월�
 | ~~V8~~ | ✅ **완료** — 딥링크 생성기 (V7 에 포함) | `src/tms/api/deeplinks.py` | — |
 | ~~V9~~ | ✅ **완료(축소)** — 로컬 계정 인증 + 세션 (D-007). **AD 연동은 이월** | `src/tms/core/{passwords,sessions,localauth}.py` | 30 tests |
 | V10 | UI | `src/tms/web/` | 차트 자체 구현 금지 |
-| V11 | 테스트 — 핵심 로직 80% | `tests/` | TEAMS.md §4-3 |
+| V11 | 테스트 — 핵심 로직 80% + **NFR-PERF-03 실측 ✅(로컬)** | `tests/`, `docs/PERF_MEASUREMENT.md` | 프로덕션 재측정 필요 |
 
 ### §V1 — 실환경 연결 검증 (코드 작성 전 선행)
 
