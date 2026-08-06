@@ -161,7 +161,7 @@ FR-QUERY-HISTORY가 빠지면서 B4(대용량 히스토리 저장소)는 이월�
 | **V1** | **실환경 연결 검증 (최우선, 코드 이전)** | `TRINO_VERIFIED.md` 갱신 | 아래 §V1 |
 | ~~V2~~ | ✅ **완료** — `pyproject`, `config.yaml`, 설정 로더, systemd 유닛 2종, DB 마이그레이션 | `src/tms/core/config.py`, `migrations/001_init.sql`, `ops/systemd/` | 19 tests |
 | ~~V3~~ | ✅ **완료** — Trino 클라이언트 (REST + JMX), 오류 분류, 서킷브레이커, transport 추상화 | `src/tms/clients/` | 34 tests |
-| V4 | `tms-collector` — 폴링 루프, 스냅샷 기록, stale 판정 | `src/tms/collector/` | 단일 인스턴스 |
+| ~~V4~~ | ✅ **완료** — 폴링 루프, 스냅샷 기록, stale 판정, **H-09 교차검증 상시화**, 적응형 백오프, advisory lock 단일 인스턴스 강제 | `src/tms/collector/` | 43 tests |
 | V5 | 헬스 엔진 — H-01~H-09 (구현 가능한 것만) | `src/tms/health/` | `HEALTH_TESTS.md` |
 | V6 | 감사 미들웨어 + 저장소 | `src/tms/core/audit.py` | `AUDIT_MODEL.md` |
 | V7 | API 라우트 — `API_R1.md` 전량 | `src/tms/api/` | 쓰기 4개 포함 |
