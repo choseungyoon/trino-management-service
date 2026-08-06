@@ -34,3 +34,11 @@ build/
 
 # Local agent state (shared config under .claude/ is tracked)
 .claude/settings.local.json
+
+# Third-party design skills — reproducible, keep 7MB of vendored files out of
+# the repo. Reinstall: `npx skills add Leonxlnx/taste-skill` + `npx impeccable install`
+.claude/skills/
+.agents/
+.codex/
+.impeccable/
+PRODUCT.md.tmp
