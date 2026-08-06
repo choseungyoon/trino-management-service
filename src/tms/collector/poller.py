@@ -124,6 +124,7 @@ class ClusterPoller:
         clock: Optional[Callable[[], float]] = None,
         jmx_cross_check_max_age: Optional[float] = None,
         wall_clock: Optional[Callable[[], datetime]] = None,
+        h09_confirm_polls: int = 2,
     ) -> None:
         self.cluster_name = cluster_name
         self.client = client
@@ -135,14 +136,24 @@ class ClusterPoller:
         self.long_running_seconds = long_running_seconds
         self.response_backoff_bytes = response_backoff_bytes
         self.response_backoff_interval = response_backoff_interval
-        # A JMX reading older than a few poll intervals says nothing about the
-        # query list we just fetched, so it must not be used to judge it.
+        # The cross-check needs a *contemporaneous* JMX reading, not merely a
+        # recent one. Queries are polled far more often than JMX (3s vs 15s by
+        # default), so on most ticks the stored JMX snapshot predates the query
+        # list by most of a JMX interval - long enough for queries to start and
+        # finish in between, which is indistinguishable from filtering. Bound
+        # the age to one query interval: the cross-check then runs only on the
+        # ticks that just refreshed JMX, and simply abstains on the rest.
+        # Abstaining costs nothing, because a denied `queries` rule persists
+        # and will still be caught on the next JMX-bearing tick.
         self.jmx_cross_check_max_age = (
             jmx_cross_check_max_age
             if jmx_cross_check_max_age is not None
-            else jmx_interval * 3.0
+            else max(query_interval, 1.0)
         )
         self._wall_clock = wall_clock or utcnow
+        # Consecutive suspicious polls required before H-09 is believed.
+        self.h09_confirm_polls = max(1, h09_confirm_polls)
+        self._suspicious_polls = 0
 
         if clock is None:
             import time
@@ -162,9 +173,16 @@ class ClusterPoller:
 
     # ----------------------------------------------------------- scheduling
 
+    # JMX is polled before queries so the H-09 cross-check compares readings
+    # taken one HTTP round trip apart rather than up to a full jmx_interval
+    # apart. Observed live: with queries first, a short query that ended
+    # between the two reads made the list look "filtered" and H-09 flapped
+    # GOOD -> UNKNOWN -> GOOD on a perfectly healthy cluster.
+    _POLL_ORDER = (KIND_JMX, KIND_QUERIES, KIND_INFO)
+
     def due_kinds(self) -> List[str]:
         now = self._clock()
-        return [kind for kind, due_at in self._next_due.items() if now >= due_at]
+        return [kind for kind in self._POLL_ORDER if now >= self._next_due[kind]]
 
     def _reschedule(self, kind: str) -> None:
         interval = {
@@ -279,18 +297,35 @@ class ClusterPoller:
         collection_error = None
         advice = None
         if not queries and jmx_running_queries:
-            # H-09. Do not let this pass as an idle cluster.
-            collection_error = (
-                "query list is empty but JMX reports {} running queries - "
-                "the list is most likely being filtered by access control".format(
-                    jmx_running_queries
+            # H-09 candidate. The two readings are taken microseconds apart but
+            # not atomically, so a query that ends in between looks exactly like
+            # a filtered list. Measured live: that race alone tripped H-09 three
+            # times in three minutes on a healthy cluster. Require the condition
+            # to persist - a race clears on the next poll, a denied `queries`
+            # rule never does.
+            self._suspicious_polls += 1
+            if self._suspicious_polls >= self.h09_confirm_polls:
+                collection_error = (
+                    "query list is empty but JMX reports {} running queries - "
+                    "the list is most likely being filtered by access control".format(
+                        jmx_running_queries
+                    )
                 )
-            )
-            advice = (
-                "Check the tms-svc account's queries: view grant in rules.json. "
-                "With file access control a denied list arrives as an empty list, not a 403."
-            )
-            log.error("H-09 tripped for %s: %s", self.cluster_name, collection_error)
+                advice = (
+                    "Check the tms-svc account's queries: view grant in rules.json. "
+                    "With file access control a denied list arrives as an empty list, "
+                    "not a 403."
+                )
+                log.error("H-09 tripped for %s: %s", self.cluster_name, collection_error)
+            else:
+                log.debug(
+                    "%s: possible H-09 (%d/%d) - waiting for it to persist",
+                    self.cluster_name,
+                    self._suspicious_polls,
+                    self.h09_confirm_polls,
+                )
+        else:
+            self._suspicious_polls = 0
 
         self._adapt_interval(result.response_bytes)
         if collection_error is None:

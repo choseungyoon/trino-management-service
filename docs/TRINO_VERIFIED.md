@@ -936,6 +936,32 @@ security.config-file=etc/rules.json
 
 ---
 
+### T3-7. `QueryManager` 쿼리 카운터의 의미 — **실측 확인 (로컬 Trino 477, 2026-08-07)**
+
+`trino.execution:name=QueryManager` 의 누적 카운터는 서로 다른 생애 단계를 센다. **`FailedQueries` 는 `StartedQueries` 의 부분집합이 아니다.**
+
+| 카운터 | 증가 시점 |
+|---|---|
+| `SubmittedQueries` | 코디네이터가 쿼리를 접수할 때 |
+| `StartedQueries` | **실행이 시작될 때** |
+| `CompletedQueries` | 종료 상태에 도달할 때 (성공·실패·취소 모두) |
+| `FailedQueries` | 종료 상태가 실패일 때 |
+
+**실측 방법**: 분석(analysis) 단계에서 실패하는 쿼리(`SELECT * FROM does_not_exist.a.b`) 10건을 클라이언트 프로토콜로 종료까지 구동한 뒤 누적 카운터 델타를 측정했다.
+
+```
+submitted +12   completed +12   failed +11   started +1
+                                             ^^^^^^^^^^ (배경 트래픽 1건뿐)
+```
+
+즉 **실행 전에 거부된 쿼리는 `Failed` 와 `Completed` 를 올리지만 `Started` 는 올리지 않는다.** 같은 서버에서 누적값이 `Failed=73 > Started=64` 인 상태도 관측했다.
+
+> **⛔ 함의**: 실패율의 분모로 `StartedQueries` 를 쓰면 **100%를 초과한다**. 실제로 UI에 `120.5%` 가 표시됐다. 카탈로그 오설정이나 권한 거부처럼 "실행 전 실패"가 많은 상황 — 즉 헬스 체크가 가장 필요한 순간 — 에 오차가 최대가 된다. **분모는 `CompletedQueries` 를 쓴다** (H-05). 정의상 `Failed ⊆ Completed` 이므로 100%를 넘을 수 없다.
+
+**주의**: `POST /v1/statement` 는 쿼리를 `QUEUED` 로 만들 뿐이다. 클라이언트가 `nextUri` 를 따라가야 실제로 디스패치되어 카운터에 반영된다. 카운터 실험 시 반드시 종료까지 구동할 것.
+
+---
+
 ## 4. 검증 결과가 무효화 / 변경한 요구사항
 
 | 요구사항 | 검증 결과에 따른 변경 | 근거 |

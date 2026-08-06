@@ -149,10 +149,27 @@ class H09CrossCheckTest(unittest.TestCase):
 
     def test_empty_list_with_running_queries_is_flagged(self):
         poller = make_poller(FakeClient(queries=[]))
-        snapshot = poller.poll_queries(jmx_running_queries=7)
+        poller.poll_queries(jmx_running_queries=7)  # first sighting
+        snapshot = poller.poll_queries(jmx_running_queries=7)  # it persisted
         self.assertFalse(snapshot.trustworthy)
         self.assertIn("filtered", snapshot.collection_error)
         self.assertIn("rules.json", snapshot.advice)
+
+    def test_a_single_suspicious_poll_is_not_enough(self):
+        """The list and the JMX read are not atomic. A query ending between the
+        two looks identical to filtering - measured live, three false trips in
+        three minutes. Only a condition that persists is believed."""
+        poller = make_poller(FakeClient(queries=[]))
+        snapshot = poller.poll_queries(jmx_running_queries=7)
+        self.assertTrue(snapshot.trustworthy, snapshot.collection_error)
+
+    def test_the_streak_resets_when_the_cluster_looks_normal(self):
+        """Two isolated races must not add up to a false alarm."""
+        poller = make_poller(FakeClient(queries=[]))
+        poller.poll_queries(jmx_running_queries=7)
+        poller.poll_queries(jmx_running_queries=0)  # normal poll clears it
+        snapshot = poller.poll_queries(jmx_running_queries=7)
+        self.assertTrue(snapshot.trustworthy, snapshot.collection_error)
 
     def test_empty_list_with_no_running_queries_is_trusted(self):
         poller = make_poller(FakeClient(queries=[]))
@@ -170,12 +187,41 @@ class H09CrossCheckTest(unittest.TestCase):
         self.assertTrue(poller.poll_queries(jmx_running_queries=1).trustworthy)
 
     def test_flagged_poll_does_not_count_as_success(self):
-        """Otherwise the freshness metric would hide a permission outage."""
-        poller = make_poller(FakeClient(queries=[]))
-        poller.poll_queries(jmx_running_queries=7)
-        self.assertIsNone(poller.last_success[KIND_QUERIES])
+        """Otherwise the freshness metric would hide a permission outage.
 
-    def test_cross_check_reads_running_queries_from_stored_jmx_snapshot(self):
+        The first suspicious poll is still a success - nothing is wrong yet as
+        far as we know. What must not happen is freshness continuing to advance
+        once the condition is confirmed.
+        """
+        clock = FakeClock()
+        poller = make_poller(FakeClient(queries=[]), clock=clock)
+        poller.poll_queries(jmx_running_queries=7)
+        first = poller.last_success[KIND_QUERIES]
+        self.assertIsNotNone(first)
+
+        clock.advance(60)
+        poller.poll_queries(jmx_running_queries=7)  # confirmed - now flagged
+        self.assertEqual(poller.last_success[KIND_QUERIES], first)
+
+        clock.advance(60)
+        poller.poll_queries(jmx_running_queries=7)  # stays flagged
+        self.assertEqual(poller.last_success[KIND_QUERIES], first)
+
+    def test_cross_check_uses_this_tick_s_jmx_reading(self):
+        """The JMX poll in the same tick must be what the query poll is judged
+        against - that is the whole point of polling JMX first."""
+        client = FakeClient(queries=[], mbeans={QUERY_MANAGER: {"RunningQueries": 9}})
+        repository = InMemorySnapshotRepository()
+        poller = make_poller(client, repository=repository, clock=FakeClock())
+        poller.tick()
+        poller._next_due = {k: 0.0 for k in poller._next_due}  # make everything due again
+        snapshot = [s for s in poller.tick() if s.kind == KIND_QUERIES][0]
+        self.assertFalse(snapshot.trustworthy)
+        self.assertIn("filtered", snapshot.collection_error)
+
+    def test_a_stale_stored_reading_is_not_what_gets_used(self):
+        """A leftover snapshot claiming running queries must not, on its own,
+        condemn a fresh empty list - the current JMX poll overrides it."""
         repository = InMemorySnapshotRepository()
         repository.save(
             Snapshot(
@@ -185,10 +231,17 @@ class H09CrossCheckTest(unittest.TestCase):
                 payload={"mbeans": {QUERY_MANAGER: {"RunningQueries": 9}}},
             )
         )
-        clock = FakeClock()
-        poller = make_poller(FakeClient(queries=[]), repository=repository, clock=clock)
+        # This tick's JMX read says the cluster is idle, and it wins.
+        client = FakeClient(queries=[], mbeans={QUERY_MANAGER: {"RunningQueries": 0}})
+        poller = make_poller(client, repository=repository, clock=FakeClock())
         snapshot = [s for s in poller.tick() if s.kind == KIND_QUERIES][0]
-        self.assertFalse(snapshot.trustworthy)
+        self.assertTrue(snapshot.trustworthy, snapshot.collection_error)
+
+    def test_jmx_is_polled_before_queries(self):
+        """Order is load-bearing: it bounds the skew the cross-check sees."""
+        poller = make_poller(FakeClient(queries=[]))
+        due = poller.due_kinds()
+        self.assertLess(due.index(KIND_JMX), due.index(KIND_QUERIES))
 
     def test_stale_jmx_snapshot_does_not_trip_the_cross_check(self):
         """Observed live: a first tick after restart raised H-09 on an idle cluster.
@@ -215,27 +268,43 @@ class H09CrossCheckTest(unittest.TestCase):
         snapshot = poller.poll_queries(poller._last_jmx_running_queries())
         self.assertTrue(snapshot.trustworthy, snapshot.collection_error)
 
-    def test_recent_jmx_snapshot_still_trips_the_cross_check(self):
-        """The age bound must not disarm H-09 during normal polling."""
-        now = utcnow()
+    def _poller_with_jmx_age(self, age_seconds, now):
         repository = InMemorySnapshotRepository()
         repository.save(
             Snapshot(
                 cluster="prod-a",
                 kind=KIND_JMX,
-                collected_at=now - timedelta(seconds=16),
+                collected_at=now - timedelta(seconds=age_seconds),
                 payload={"mbeans": {QUERY_MANAGER: {"RunningQueries": 1}}},
             )
         )
-        poller = make_poller(
+        return make_poller(
             FakeClient(queries=[]),
             repository=repository,
+            query_interval=3.0,
             jmx_interval=15.0,
             wall_clock=lambda: now,
         )
+
+    def test_a_contemporaneous_jmx_reading_still_trips_the_cross_check(self):
+        """The age bound must not disarm H-09 on the ticks that can judge."""
+        now = utcnow()
+        poller = self._poller_with_jmx_age(0.5, now)
+        poller.poll_queries(poller._last_jmx_running_queries())
         snapshot = poller.poll_queries(poller._last_jmx_running_queries())
         self.assertFalse(snapshot.trustworthy)
         self.assertIn("filtered", snapshot.collection_error)
+
+    def test_a_jmx_reading_from_a_previous_tick_abstains(self):
+        """Queries are polled every 3s and JMX every 15s, so most query polls
+        have no contemporaneous JMX reading. Judging against a 10s-old count is
+        what produced the live false alarms - abstain instead. Genuine
+        filtering persists and is caught on the next JMX-bearing tick."""
+        now = utcnow()
+        poller = self._poller_with_jmx_age(10.0, now)
+        poller.poll_queries(poller._last_jmx_running_queries())
+        snapshot = poller.poll_queries(poller._last_jmx_running_queries())
+        self.assertTrue(snapshot.trustworthy, snapshot.collection_error)
 
 
 class FailureIsolationTest(unittest.TestCase):

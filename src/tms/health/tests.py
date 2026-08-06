@@ -15,9 +15,12 @@ Two rules hold for every test in here:
 Python 3.9 compatible.
 """
 
+import logging
 from typing import Any, Callable, Dict, List, Optional
 
 from tms.health.states import BAD, CONCERNING, GOOD, UNKNOWN
+
+log = logging.getLogger(__name__)
 
 QUERY_MANAGER_MBEAN = "trino.execution:name=QueryManager"
 MEMORY_MBEAN = "java.lang:type=Memory"
@@ -274,21 +277,40 @@ def h04_heap_usage(ctx: HealthContext) -> HealthResult:
 # --------------------------------------------------------------------- H-05
 
 def h05_query_failure_rate(ctx: HealthContext) -> HealthResult:
+    """Failures as a share of queries that reached a terminal state.
+
+    The denominator is CompletedQueries, not StartedQueries. Measured on 477
+    (TRINO_VERIFIED.md T3-7): a query rejected during analysis increments
+    Submitted, Completed and Failed but never Started, so failed/started
+    exceeds 100% on any cluster where queries fail before execution begins -
+    which is exactly what a bad catalog or a permission problem produces. A
+    health page that reports "120% of queries failed" teaches operators to
+    stop believing it.
+    """
     name = "Query failure rate (5m)"
     failed = ctx.number(QUERY_MANAGER_MBEAN, "FailedQueries.FiveMinute.Count")
-    started = ctx.number(QUERY_MANAGER_MBEAN, "StartedQueries.FiveMinute.Count")
-    if failed is None or started is None:
+    completed = ctx.number(QUERY_MANAGER_MBEAN, "CompletedQueries.FiveMinute.Count")
+    if failed is None or completed is None:
         return _jmx_unavailable("H-05", name, ctx)
-    if started <= 0:
+    if completed <= 0:
         # No traffic is not health. It may itself be the incident.
         return _unknown(
             "H-05",
             name,
-            "No queries started in the last 5 minutes, so there is no failure rate "
-            "to compute. Traffic stopping is itself worth investigating.",
+            "No queries completed in the last 5 minutes, so there is no failure "
+            "rate to compute. Traffic stopping is itself worth investigating.",
         )
 
-    pct = 100.0 * failed / started
+    pct = 100.0 * failed / completed
+    if pct > 100.0:
+        # Cannot happen once the denominator is right, but a health page must
+        # never render an impossible number, so clamp loudly instead.
+        log.warning(
+            "H-05: failed (%s) exceeds completed (%s) - clamping to 100%%",
+            failed,
+            completed,
+        )
+        pct = 100.0
     concerning = ctx.threshold("failure_rate_pct_concerning", 5.0)
     bad = ctx.threshold("failure_rate_pct_bad", 20.0)
     if pct >= bad:

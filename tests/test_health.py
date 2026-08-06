@@ -207,29 +207,54 @@ class H04HeapTest(unittest.TestCase):
 
 
 class H05H06Test(unittest.TestCase):
-    def _ctx(self, failed=0, started=100, internal=0):
-        return context(
-            jmx=jmx_snapshot(
-                **{
-                    QUERY_MANAGER_MBEAN: {
-                        "FailedQueries.FiveMinute.Count": failed,
-                        "StartedQueries.FiveMinute.Count": started,
-                        "InternalFailures.FiveMinute.Count": internal,
-                    }
-                }
-            )
-        )
+    def _ctx(self, failed=0, completed=100, internal=0, started=None):
+        mbean = {
+            "FailedQueries.FiveMinute.Count": failed,
+            "CompletedQueries.FiveMinute.Count": completed,
+            "InternalFailures.FiveMinute.Count": internal,
+        }
+        if started is not None:
+            mbean["StartedQueries.FiveMinute.Count"] = started
+        return context(jmx=jmx_snapshot(**{QUERY_MANAGER_MBEAN: mbean}))
 
     def test_failure_rate_thresholds(self):
         self.assertEqual(h05_query_failure_rate(self._ctx(failed=1)).state, GOOD)
         self.assertEqual(h05_query_failure_rate(self._ctx(failed=10)).state, CONCERNING)
         self.assertEqual(h05_query_failure_rate(self._ctx(failed=30)).state, BAD)
 
+    def test_rate_is_measured_against_completed_not_started(self):
+        """Observed live on 477: the UI showed a 120.5% failure rate.
+
+        A query rejected during analysis increments Failed and Completed but
+        never Started, so failed/started can exceed 100% (measured: 10 such
+        queries gave completed +12, failed +11, started +1). Only the
+        completed-based denominator is bounded.
+        """
+        ctx = context(
+            jmx=jmx_snapshot(
+                **{
+                    QUERY_MANAGER_MBEAN: {
+                        "FailedQueries.FiveMinute.Count": 41.4,
+                        "StartedQueries.FiveMinute.Count": 33.4,  # the old, wrong one
+                        "CompletedQueries.FiveMinute.Count": 74.8,
+                    }
+                }
+            )
+        )
+        result = h05_query_failure_rate(ctx)
+        self.assertLessEqual(result.observed_value, 100.0)
+        self.assertAlmostEqual(result.observed_value, 55.3, places=1)
+
+    def test_impossible_ratio_is_clamped_never_rendered(self):
+        """Belt and braces: a health page must not show 120%."""
+        result = h05_query_failure_rate(self._ctx(failed=120, completed=100))
+        self.assertEqual(result.observed_value, 100.0)
+
     def test_no_traffic_is_unknown_not_good(self):
         """Zero queries is not health - it may be the incident."""
-        result = h05_query_failure_rate(self._ctx(failed=0, started=0))
+        result = h05_query_failure_rate(self._ctx(failed=0, completed=0))
         self.assertEqual(result.state, UNKNOWN)
-        self.assertIn("No queries started", result.advice)
+        self.assertIn("No queries completed", result.advice)
 
     def test_internal_failures_are_stricter_than_user_errors(self):
         """One internal failure already matters; user syntax errors do not."""
@@ -295,6 +320,7 @@ class EngineTest(unittest.TestCase):
                     QUERY_MANAGER_MBEAN: {
                         "FailedQueries.FiveMinute.Count": 0,
                         "StartedQueries.FiveMinute.Count": 100,
+                        "CompletedQueries.FiveMinute.Count": 100,
                         "InternalFailures.FiveMinute.Count": 0,
                     },
                     CLUSTER_MEMORY_MBEAN: {"QueriesKilledDueToOutOfMemory": 0},

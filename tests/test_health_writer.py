@@ -60,6 +60,7 @@ def healthy_snapshots(repository, cluster="prod-a", age_seconds=0):
                     QUERY_MANAGER_MBEAN: {
                         "FailedQueries.FiveMinute.Count": 0,
                         "StartedQueries.FiveMinute.Count": 100,
+                        "CompletedQueries.FiveMinute.Count": 100,
                         "InternalFailures.FiveMinute.Count": 0,
                     },
                     CLUSTER_MEMORY_MBEAN: {"QueriesKilledDueToOutOfMemory": 0},
