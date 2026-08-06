@@ -428,7 +428,7 @@ finish review, the verdict, and DESIGN.md
     <tr><th>#</th><th>Screen</th><th>Route</th><th>Answers</th><th>Backed by</th></tr>
     <tr><td>1</td><td>Login</td><td class="rt">/login</td><td>Who are you? (temp-password gate included)</td><td class="rt">POST /login · PUT /password</td></tr>
     <tr><td>2</td><td>Overview</td><td class="rt">/</td><td>Can both clusters take queries right now? Where do I go next?</td><td class="rt">GET /clusters · /links</td></tr>
-    <tr><td>3</td><td>Live Queries</td><td class="rt">/clusters/:c/queries</td><td>Who is running what, what's stuck, what do I kill?</td><td class="rt">GET …/queries</td></tr>
+    <tr><td>3</td><td>Live Queries</td><td class="rt">/queries · ?cluster=…</td><td>Who is running what — across all clusters or one — and what do I kill?</td><td class="rt">GET /clusters/:c/queries ×N</td></tr>
     <tr><td>4</td><td>Cluster Health</td><td class="rt">/clusters/:c/health</td><td>Which test is failing and what do I do about it?</td><td class="rt">GET …/health · /health/events</td></tr>
     <tr><td>5</td><td>Audit Log</td><td class="rt">/audit</td><td>Who did what, why, and did it work?</td><td class="rt">GET /audit · /audit/export</td></tr>
     <tr><td>6</td><td>Account</td><td class="rt">/account</td><td>Password change (forced for temp passwords)</td><td class="rt">PUT /password</td></tr>
@@ -600,12 +600,13 @@ finish review, the verdict, and DESIGN.md
 <!-- ═══ 4. LIVE QUERIES ═══ -->
 <section class="doc-s">
   <h2>Screen 3 · Live Queries</h2>
-  <p class="lead">The incident screen. Filter chips double as the summary — the counts <em>are</em> the KPIs,
-  attached to the controls that act on them. Long-running rows get an amber wash; kill is one deliberate
-  click away, never accidental.</p>
+  <p class="lead">The incident screen — and it opens on <b>All clusters</b>, because during an incident you
+  don't yet know which cluster the hog is on. Filter chips double as the summary — the counts <em>are</em>
+  the KPIs, attached to the controls that act on them. Long-running rows get an amber wash; kill is one
+  deliberate click away, never accidental.</p>
 
   <div class="frame">
-    <div class="bar"><span class="t">Live Queries — prod-a</span><span class="u">tms.internal/clusters/prod-a/queries</span></div>
+    <div class="bar"><span class="t">Live Queries — All clusters (default)</span><span class="u">tms.internal/queries</span></div>
     <div class="vp"><div class="mk">
       <aside class="sb">
         <div class="logo"><div class="gl">T</div><div class="nm">TMS</div><span class="env">PROD</span></div>
@@ -620,23 +621,24 @@ finish review, the verdict, and DESIGN.md
       <div class="mn">
         <div class="tb">
           <span class="ttl">Live Queries</span>
-          <div class="ctx"><a class="on" href="#">prod-a</a><a href="#">prod-b</a></div>
-          <div class="fresh"><span class="dot"></span>updated 4s ago · poll 5s</div>
+          <div class="ctx"><a class="on" href="#">All</a><a href="#">prod-a</a><a href="#">prod-b</a></div>
+          <div class="fresh"><span class="dot"></span>updated 4s ago · oldest of 2 clusters</div>
         </div>
         <div class="bd">
           <div class="fbar">
-            <span class="fc on">All <span class="n">49</span></span>
-            <span class="fc">Running <span class="n">42</span></span>
-            <span class="fc">Queued <span class="n">7</span></span>
-            <span class="fc hot">Long-running <span class="n">3</span></span>
+            <span class="fc on">All <span class="n">108</span></span>
+            <span class="fc">Running <span class="n">80</span></span>
+            <span class="fc">Queued <span class="n">28</span></span>
+            <span class="fc hot">Long-running <span class="n">5</span></span>
             <span class="sep"></span>
             <div class="search"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>user, query ID, resource group…</div>
           </div>
           <div class="pn" style="overflow:hidden">
             <div style="overflow-x:auto"><table class="tbl">
-              <tr><th>Query</th><th>User</th><th>Source</th><th>State</th><th>Resource group</th><th>Elapsed</th><th>CPU</th><th>Peak mem</th><th>Progress</th><th></th></tr>
+              <tr><th>Query</th><th>Cluster</th><th>User</th><th>Source</th><th>State</th><th>Resource group</th><th>Elapsed</th><th>CPU</th><th>Peak mem</th><th>Progress</th><th></th></tr>
               <tr class="rw longrun">
                 <td class="mono id">20260806_142250_00184_wzn2d</td>
+                <td class="src">prod-a</td>
                 <td><span class="usr">bi_batch</span></td><td class="src">superset</td>
                 <td><span class="st run">RUNNING</span></td>
                 <td><span class="rg">global.bi</span></td>
@@ -649,6 +651,7 @@ finish review, the verdict, and DESIGN.md
               </tr>
               <tr class="rw">
                 <td class="mono id">20260806_142418_00185_wzn2d</td>
+                <td class="src">prod-a</td>
                 <td><span class="usr">analyst.kim</span></td><td class="src">trino-cli</td>
                 <td><span class="st run">RUNNING</span></td>
                 <td><span class="rg">global.adhoc</span></td>
@@ -660,7 +663,8 @@ finish review, the verdict, and DESIGN.md
                 </div></td>
               </tr>
               <tr class="rw">
-                <td class="mono id">20260806_142431_00186_wzn2d</td>
+                <td class="mono id">20260806_142431_00109_kx8fq</td>
+                <td class="src">prod-b</td>
                 <td><span class="usr">svc.etl</span></td><td class="src">airflow</td>
                 <td><span class="st run">FINISHING</span></td>
                 <td><span class="rg">global.etl</span></td>
@@ -672,7 +676,8 @@ finish review, the verdict, and DESIGN.md
                 </div></td>
               </tr>
               <tr class="rw">
-                <td class="mono id">20260806_142445_00187_wzn2d</td>
+                <td class="mono id">20260806_142445_00110_kx8fq</td>
+                <td class="src">prod-b</td>
                 <td><span class="usr">analyst.park</span></td><td class="src">superset</td>
                 <td><span class="st q">QUEUED</span></td>
                 <td><span class="rg">global.bi</span></td>
@@ -691,12 +696,24 @@ finish review, the verdict, and DESIGN.md
   </div>
 
   <ul class="notes">
+    <li><b>All is the default tab.</b> The Cluster column appears only in the All view — switching to
+      prod-a/prod-b drops it and the table tightens. Query IDs already betray their coordinator
+      (<code>…_wzn2d</code> vs <code>…_kx8fq</code>), and the column makes it legible.</li>
+    <li><b>Freshness in All view shows the oldest cluster snapshot</b> ("oldest of 2 clusters") —
+      the merged list is only as fresh as its worst source.</li>
+    <li><b>Per-cluster degradation degrades alone</b>: if one cluster's snapshot goes stale or
+      untrusted (H-09), an inline strip names that cluster and its remedy while the other cluster's
+      rows keep rendering. All-view never turns one cluster's problem into a blank page.</li>
     <li><b>Chips are both summary and filter</b> — no separate KPI card row to scan past.
-      The long-running chip glows amber when its count is non-zero.</li>
+      The long-running chip glows amber when its count is non-zero. In All view the counts aggregate
+      and match Overview's per-cluster numbers.</li>
     <li><b>Long-running rows</b>: amber wash + 2px inset edge + bold elapsed. Loud enough to find,
       quiet enough to coexist with 200 rows.</li>
-    <li><b>Kill is an icon that turns red only on hover</b>, and it never fires directly — it opens the ceremony (O2).</li>
+    <li><b>Kill is an icon that turns red only on hover</b>, and it never fires directly — it opens the
+      ceremony (O2), which always names the cluster.</li>
     <li><b>SQL preview lives in the drawer</b>, not the table — rows stay one line tall at any width.</li>
+    <li><b>Health keeps per-cluster tabs only</b> — the all-clusters health view already exists:
+      it's the Overview screen.</li>
   </ul>
 
   <h3>Overlay O1 · Query Detail drawer</h3>
@@ -714,6 +731,7 @@ finish review, the verdict, and DESIGN.md
         <div class="dh">
           <span class="st run">RUNNING</span>
           <span class="mono qid">20260806_142250_00184_wzn2d</span>
+          <span class="rg">prod-a</span>
           <span class="ib x"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 6 12 12M18 6 6 18"/></svg></span>
         </div>
         <div class="db">
@@ -1064,6 +1082,9 @@ finish review, the verdict, and DESIGN.md
   <ul class="notes">
     <li><b>Implementation</b>: server-rendered pages under <code>src/tms/web/</code> against the existing
       FastAPI API — this design system as one small CSS token file, no heavy framework.</li>
+    <li><b>All-clusters view</b>: served by fanning out the existing per-cluster endpoint
+      (<code>GET /clusters/:c/queries</code> × N) and merging — or a thin aggregate endpoint if the
+      fan-out proves awkward. Small backend addition, tracked for the build.</li>
     <li><b>Production font</b>: self-hosted <code>Geist</code>/<code>Geist Mono</code> (or IBM Plex) replaces
       the system stack; everything else carries over unchanged.</li>
     <li><b>English advice strings</b>: backend health advice is currently Korean — English equivalents
