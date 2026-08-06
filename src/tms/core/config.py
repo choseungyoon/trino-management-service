@@ -28,6 +28,7 @@ ENV_OVERRIDES = {
     "TMS_TRINO_PASSWORD": ("trino", "password"),
     "TMS_DATABASE_URL": ("database", "url"),
     "TMS_LDAP_BIND_PASSWORD": ("ldap", "bind_password"),
+    "TMS_SESSION_SECRET": ("portal", "session_secret"),
 }
 
 
@@ -146,6 +147,12 @@ class ServerConfig:
 class PortalConfig:
     session_idle_timeout_minutes: int = 30
     session_absolute_timeout_hours: int = 12
+    # Signs session tokens. Must be identical on every tms-api replica, or a
+    # user's session breaks whenever the load balancer moves them.
+    session_secret: Secret = field(default_factory=lambda: Secret(""))
+    # Temporary local accounts until AD integration (D-007). Values are
+    # {username: {password_hash, roles, must_change_password}}.
+    local_users: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -337,6 +344,8 @@ def build_config(raw: Dict[str, Any], where: str = "config.secret.yaml") -> Conf
             session_absolute_timeout_hours=int(
                 portal_raw.get("session_absolute_timeout_hours", 12)
             ),
+            session_secret=Secret(str(portal_raw.get("session_secret") or "")),
+            local_users=dict(portal_raw.get("local_users") or {}),
         ),
         server=ServerConfig(
             host=str(server_raw.get("host") or "127.0.0.1"),

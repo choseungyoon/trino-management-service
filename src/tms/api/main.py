@@ -16,9 +16,18 @@ import os
 import sys
 from typing import Any, List, Optional
 
-from tms.api.errors import ApiError, Unauthenticated
+from tms.api.errors import (
+    ApiError,
+    Forbidden,
+    InvalidRequest,
+    TooManyAttempts,
+    Unauthenticated,
+)
 from tms.api.permissions import Principal
 from tms.api.services import TmsService
+from tms.core.localauth import AccountLocked, AuthError, LocalAuthenticator, build_users
+from tms.core.passwords import PasswordError
+from tms.core.sessions import SessionCodec, SessionError, SessionExpired
 from tms.clients.circuit import CircuitBreaker
 from tms.clients.transport import HttpxTransport
 from tms.clients.trino import TrinoClient
@@ -53,12 +62,31 @@ def build_trino_clients(config: Config) -> dict:
     return clients
 
 
+SESSION_COOKIE = "tms_session"
+
+
 def create_app(config: Optional[Config] = None, service: Optional[TmsService] = None):
-    from fastapi import Body, Depends, FastAPI, Query, Request
+    from fastapi import Body, Depends, FastAPI, Query, Request, Response
     from fastapi.responses import JSONResponse
 
     if config is None:
         config = load_config(os.environ.get("TMS_CONFIG", DEFAULT_CONFIG_PATH))
+
+    authenticator = LocalAuthenticator(build_users(config.portal.local_users))
+    codec = None
+    if authenticator.enabled:
+        # Fail fast rather than minting an ephemeral secret: an ephemeral one
+        # breaks login on every restart and across replicas, silently.
+        codec = SessionCodec(
+            secret=config.portal.session_secret.reveal(),
+            idle_timeout_seconds=config.portal.session_idle_timeout_minutes * 60,
+            absolute_timeout_seconds=config.portal.session_absolute_timeout_hours * 3600,
+        )
+        log.warning(
+            "local account authentication is enabled (%d account(s)). This is a "
+            "temporary mode - see DECISIONS.md D-007. Replace it with AD.",
+            len(authenticator.users),
+        )
 
     if service is None:
         snapshots = PostgresSnapshotRepository(config.database_url.reveal())
@@ -76,21 +104,137 @@ def create_app(config: Optional[Config] = None, service: Optional[TmsService] = 
     # ------------------------------------------------------------- identity
 
     def current_principal(request: Request) -> Principal:
-        """Resolve the caller.
+        """Resolve the caller from the session cookie.
 
-        Real authentication (LDAP/AD, sessions) is V9. Until then the identity
-        comes from the reverse proxy, and an unauthenticated request is refused
-        rather than defaulted to a role - defaulting is how a read-only console
-        acquires write access by accident.
+        An unauthenticated request is refused, never defaulted to a role.
+        Defaulting is how a read-only console acquires write access by accident.
         """
         principal = getattr(request.state, "principal", None)
         if principal is not None:
             return principal
-        username = request.headers.get("X-Auth-User")
-        roles = [r for r in (request.headers.get("X-Auth-Roles") or "").split(",") if r]
-        if not username or not roles:
-            raise Unauthenticated("인증 정보가 없다")
-        return Principal(username, roles, ip=request.client.host if request.client else None)
+
+        if codec is None:
+            raise Unauthenticated(
+                "인증이 구성되지 않았다. portal.local_users 를 설정하라"
+            )
+
+        token = request.cookies.get(SESSION_COOKIE)
+        if not token:
+            raise Unauthenticated("로그인이 필요하다")
+        try:
+            claims = codec.verify(token)
+        except SessionExpired as exc:
+            raise Unauthenticated("세션이 만료되었다: {}".format(exc))
+        except SessionError:
+            raise Unauthenticated("세션이 올바르지 않다")
+
+        if claims.get("must_change_password") and request.url.path not in (
+            "/api/v1/password",
+            "/api/v1/logout",
+            "/api/v1/me",
+        ):
+            # A temporary password must be replaced before it can be used to do
+            # anything, otherwise "temporary" means "permanent in practice".
+            raise Forbidden("임시 비밀번호를 먼저 변경해야 한다 (PUT /api/v1/password)")
+
+        request.state.session_claims = claims
+        return Principal(
+            claims["username"],
+            claims["roles"],
+            ip=request.client.host if request.client else None,
+        )
+
+    def _set_session_cookie(response: Response, token: str) -> None:
+        response.set_cookie(
+            SESSION_COOKIE,
+            token,
+            httponly=True,
+            samesite="strict",
+            # TLS is mandatory (NFR-SEC-01), so the cookie is never sent in clear.
+            secure=True,
+            max_age=config.portal.session_absolute_timeout_hours * 3600,
+            path="/",
+        )
+
+    @app.middleware("http")
+    async def slide_session(request: Request, call_next):
+        """Extend the idle window on activity, leaving the absolute deadline."""
+        response = await call_next(request)
+        claims = getattr(request.state, "session_claims", None)
+        if claims and codec is not None and response.status_code < 400:
+            _set_session_cookie(response, codec.refresh(claims))
+        return response
+
+    # ------------------------------------------------------------ auth routes
+
+    @app.post("/api/v1/login")
+    def login(response: Response, request: Request, body: dict = Body(...)):
+        if codec is None:
+            raise Unauthenticated("인증이 구성되지 않았다")
+        username = str(body.get("username") or "")
+        password = str(body.get("password") or "")
+        try:
+            user = authenticator.authenticate(username, password)
+        except AccountLocked as exc:
+            raise TooManyAttempts(str(exc))
+        except AuthError as exc:
+            log.warning(
+                "failed login for %r from %s",
+                username,
+                request.client.host if request.client else "unknown",
+            )
+            raise Unauthenticated(str(exc))
+
+        token = codec.issue(
+            user.username, user.roles, must_change_password=user.must_change_password
+        )
+        _set_session_cookie(response, token)
+        return {
+            "user": user.username,
+            "roles": user.roles,
+            "must_change_password": user.must_change_password,
+        }
+
+    @app.post("/api/v1/logout")
+    def logout(response: Response):
+        response.delete_cookie(SESSION_COOKIE, path="/")
+        # Stateless tokens cannot be revoked server-side; the idle timeout is
+        # what bounds a stolen one. Documented in DECISIONS.md D-007.
+        return {"logged_out": True}
+
+    @app.put("/api/v1/password")
+    def change_password(
+        response: Response,
+        body: dict = Body(...),
+        principal: Principal = Depends(current_principal),
+    ):
+        if codec is None:
+            raise Unauthenticated("인증이 구성되지 않았다")
+        try:
+            new_hash = authenticator.change_password(
+                principal.username,
+                str(body.get("current_password") or ""),
+                str(body.get("new_password") or ""),
+            )
+        except AuthError as exc:
+            raise Unauthenticated(str(exc))
+        except PasswordError as exc:
+            raise InvalidRequest(str(exc))
+
+        _set_session_cookie(
+            response, codec.issue(principal.username, principal.roles)
+        )
+        # The process cannot rewrite a gitignored config file it does not own,
+        # so the operator persists the new hash. Without this the change is lost
+        # on restart, and saying so is better than pretending otherwise.
+        return {
+            "changed": True,
+            "password_hash": new_hash,
+            "persist_note": (
+                "config.secret.yaml 의 portal.local_users.{}.password_hash 를 이 값으로 "
+                "교체하고 must_change_password 를 제거하라. 재시작 전까지만 유효하다."
+            ).format(principal.username),
+        }
 
     @app.exception_handler(ApiError)
     async def api_error_handler(_request, exc: ApiError):

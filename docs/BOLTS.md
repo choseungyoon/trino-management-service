@@ -163,7 +163,7 @@ FR-QUERY-HISTORY가 빠지면서 B4(대용량 히스토리 저장소)는 이월�
 | ~~V6~~ | ✅ **완료** — 감사 강제(컨텍스트 매니저), append-only 저장소, 소스 스캐너 | `src/tms/core/audit*.py` | 23 tests |
 | ~~V7~~ | ✅ **완료** — 서비스 계층 + FastAPI 래핑, 역할 매트릭스, 헬스 브리지 | `src/tms/api/`, `collector/health_writer.py` | 45 tests |
 | ~~V8~~ | ✅ **완료** — 딥링크 생성기 (V7 에 포함) | `src/tms/api/deeplinks.py` | — |
-| V9 | 인증·인가 — LDAP/AD, 역할 매트릭스 | `src/tms/core/auth.py` | `ARCHITECTURE.md` §6-1 |
+| ~~V9~~ | ✅ **완료(축소)** — 로컬 계정 인증 + 세션 (D-007). **AD 연동은 이월** | `src/tms/core/{passwords,sessions,localauth}.py` | 30 tests |
 | V10 | UI | `src/tms/web/` | 차트 자체 구현 금지 |
 | V11 | 테스트 — 핵심 로직 80% | `tests/` | TEAMS.md §4-3 |
 

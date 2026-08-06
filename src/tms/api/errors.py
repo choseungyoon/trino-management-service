@@ -81,3 +81,10 @@ class AuditUnavailableError(ApiError):
 class InvalidRequest(ApiError):
     code = "INVALID_REQUEST"
     status = 400
+
+
+class TooManyAttempts(ApiError):
+    """Login lockout. Distinct from 401 so the caller knows waiting helps."""
+
+    code = "TOO_MANY_ATTEMPTS"
+    status = 429
