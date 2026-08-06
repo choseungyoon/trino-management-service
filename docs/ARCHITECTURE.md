@@ -217,14 +217,40 @@ GET /v1/query?state=QUEUED&state=WAITING_FOR_RESOURCES&state=DISPATCHING
 
 | 현재 `access-control.name` | TMS R1 동작 | 필요 조치 |
 |---|---|---|
-| **`default`** (또는 미설정) | ✅ **basic auth만으로 전부 동작** | **없음** |
+| `default` (또는 미설정) | ✅ basic auth만으로 전부 동작 | 없음 |
 | `allow-all` | ✅ 동작 | 없음 |
-| `read-only` | ⚠️ 조회 동작. **kill 가능 여부 미검증** | 확인 필요 |
-| `file` | 조건부 | system information rules 필요 |
-| **`opa`** | ❌ **Rego 규칙 없으면 403** | §6-4 |
+| `read-only` | ⚠️ 조회 동작. kill 가능 여부 미검증 | 확인 필요 |
+| **`file`** ← **우리 환경 (2026-08-06 확인)** | ⚠️ **분할 결과 — §6-3-1** | **`rules.json` 에 `system_information` 규칙 추가** |
+| `opa` | ❌ Rego 규칙 없으면 403 | §6-4 |
 
-> **`default` 기준 (문서 원문)**: *"All operations are permitted, except for user impersonation and triggering graceful shutdown."*
-> → R1이 쓰는 `/v1/jmx`, `/v1/query`, kill은 전부 허용된다. R3의 graceful shutdown만 막힌다.
+### 6-3-1. 우리 환경 = `file` + `rules.json` (확정 조건)
+
+`TRINO_VERIFIED.md` §T3-6. **규칙 섹션이 없을 때의 기본값이 섹션마다 정반대라 결과가 갈린다.**
+
+| TMS 호출 | 등급 | `rules.json` 에 해당 섹션 없을 때 | 영향 |
+|---|---|---|---|
+| `GET /v1/info`, `/v1/info/state` | `PUBLIC` | ✅ **항상 허용** (규칙 무관, 문서 명시) | **H-01, H-02** |
+| `GET /v1/query` 목록·상세 | `AUTHENTICATED_USER` | ✅ **허용** — `queries` 규칙 없으면 기본 허용 | **FR-QUERY-LIVE** |
+| `PUT /v1/query/{id}/killed` | `AUTHENTICATED_USER` | ✅ **허용** — 기본값에 `kill` 포함 | **FR-QL-04** |
+| **`GET /v1/jmx/mbean/…`** | **`MANAGEMENT_READ`** | ❌ **거부** — `system_information` 규칙 없으면 **기본 전부 거부** | **H-03 ~ H-07 전부** |
+| `PUT /v1/info/state` (R3) | `MANAGEMENT_WRITE` | ❌ 거부 | FR-FL-03 (R3) |
+
+**→ R1 착수를 막지 않는다.** FR-PORTAL·FR-QUERY-LIVE·FR-AUDIT-ACTION·FR-LOG-DEEPLINK와 H-01/H-02는 조치 없이 동작한다.
+**→ FR-CLUSTER-HEALTH의 JMX 기반 테스트만 `rules.json` 한 블록으로 열린다.**
+
+```jsonc
+// rules.json — 필드명 전부 477 문서 확인 (role/user/allow, allow ∈ {read, write})
+{
+  "system_information": [
+    { "user": "tms-svc", "allow": ["read"] }
+  ]
+}
+```
+
+> **⚠️ 확인 필요**: `rules.json` 에 **`queries` 섹션이 이미 존재하면** 기본 허용이 적용되지 않는다. 그 경우 TMS 서비스 계정에 `view` + `kill` 규칙이 별도로 필요하다. **실물 확인 대상 (B7).**
+> **⚠️ R3 예고**: graceful shutdown은 `allow: ["read","write"]` 가 필요하고, `rules.json` 을 **전 워커에도 배포**해야 한다 (문서 명시).
+
+**단계적 적용이 가능하다.** `system_information` 규칙이 없어도 H-01/H-02는 동작하므로, 규칙 추가 전에도 "클러스터가 살아 있는가"는 답할 수 있다. Bolt 2를 규칙 승인과 병렬로 진행할 수 있다는 뜻이다.
 
 ### 6-4. OPA 접근제어 도입 시 필요한 것 (R1 착수 시점엔 불필요할 수 있음)
 

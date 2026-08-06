@@ -36,6 +36,14 @@
 
 각 테스트는 **판정식 + 임계값 + 조치 조언(FR-CH-02)** 을 반드시 갖는다. **조치 조언 없는 테스트는 머지하지 않는다.**
 
+> **⚠️ 접근제어 전제 (2026-08-06 확인)**: 운영 환경은 `access-control.name=file` + `rules.json` 이다.
+> - **H-01, H-02** → `/v1/info`(PUBLIC). `rules.json` 내용과 **무관하게 항상 동작**
+> - **H-03 ~ H-07** → `/v1/jmx/mbean`(`MANAGEMENT_READ`). **`rules.json` 에 `system_information` 규칙이 없으면 전부 403** (기본값 = 전부 거부)
+> - **H-08** → Gateway API. 접근제어와 무관
+>
+> 근거: `TRINO_VERIFIED.md` §T3-6, 조치: `ARCHITECTURE.md` §6-3-1
+> **구현 시 요구사항**: JMX 수집이 403이면 해당 테스트를 `BAD`가 아니라 **`UNKNOWN`** 으로 표기하고, 조언에 *"TMS 서비스 계정에 system_information read 권한이 없다. rules.json 확인 필요."* 를 넣는다. **권한 문제를 클러스터 장애로 오인시키지 않는다.**
+
 ### H-01 · 코디네이터 응답성
 
 | 항목 | 값 |

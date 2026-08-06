@@ -126,8 +126,10 @@ FR-QUERY-HISTORY가 빠지면서 B4(대용량 히스토리 저장소)는 이월�
 
 | # | 내용 | 처리 시점 |
 |---|---|---|
-| ~~G-7~~ | ~~`/v1/jmx/mbean` 접근 가능 여부~~ | **2026-08-06 대부분 해소** — §T3-5 참조. `MANAGEMENT_READ` → `checkCanReadSystemInformation`. **`default` 접근제어면 허용되므로 basic auth만으로 동작.** 남은 확인은 "현재 `access-control.name` 이 무엇인가" 하나 (**B7**) |
-| **B7** | **현재 `access-control.name` 설정값** — `default`면 R1은 조치 불필요, `opa`면 Rego 규칙 필요 | **Bolt 2 착수 전 확인** (1줄 확인) |
+| ~~G-7~~ | ~~`/v1/jmx/mbean` 접근 가능 여부~~ | **2026-08-06 해소** — 환경이 `access-control.name=file` + `rules.json` 임을 확인. `MANAGEMENT_READ` → `checkCanReadSystemInformation` → **`system_information` 규칙이 없으면 기본 전부 거부** (§T3-6). **조치 = `rules.json` 에 규칙 한 블록 추가** (`ARCHITECTURE.md` §6-3-1) |
+| **B7** | **`rules.json` 실물 확인** — ① `system_information` 섹션 존재 여부 ② **`queries` 섹션 존재 여부**(있으면 기본 허용이 깨져 TMS에 `view`/`kill` 규칙 별도 필요) ③ TMS 서비스 계정명 | **Bolt 2 착수 전** |
+
+> **B7이 R1 전체를 막지는 않는다.** `file` 기본값 기준으로 FR-PORTAL·FR-QUERY-LIVE·FR-AUDIT-ACTION·FR-LOG-DEEPLINK와 H-01/H-02는 조치 없이 동작한다. 막히는 것은 **FR-CLUSTER-HEALTH의 JMX 기반 테스트(H-03~H-07)** 뿐이다. → **Bolt 2를 규칙 승인과 병렬 진행 가능.**
 | H-02 | `GET /v1/info` 의 기동 상태 필드명 미확정 | Bolt 2 실응답으로 확정. 그전까지 미구현 |
 | H-03 | `ActiveCount` 가 코디네이터를 포함하는지 미확정 | Bolt 2 실측 보정 |
 | D-004 | 감사·헬스 이벤트 저장소 (PostgreSQL 권고) | **인간 승인 대기** |

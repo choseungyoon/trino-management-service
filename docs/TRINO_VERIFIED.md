@@ -693,6 +693,89 @@ if (!authenticatedIdentity.getUser().equals(originalIdentity.getUser())) {
 > **⚠️ TMS 폴링 부하 함의**: TMS가 5초마다 `/v1/query` 를 호출하면, 그때마다 distinct 사용자 수만큼 OPA 질의가 발생한다. 동시 실행 사용자 50명이면 **초당 약 10건의 추가 OPA 부하**가 클러스터당 발생한다.
 > → OPA 접근제어를 도입한다면 **`opa.policy.batched-uri` 설정을 사실상 필수로 본다** (§T3-2와 동일 결론).
 
+#### (6) 엔드포인트별 `@ResourceSecurity` 등급 — **확인(소스). 등급이 다르면 규칙도 다르다**
+
+| 엔드포인트 | 등급 | 인가 호출 |
+|---|---|---|
+| `GET /v1/info`, `/v1/info/state`, `/v1/info/coordinator` | `PUBLIC` | **없음** |
+| **`/v1/query` 전체** (목록·상세·`DELETE`·`killed`·`preempted`) | **`AUTHENTICATED_USER`** | 클래스 레벨 `@ResourceSecurity(AUTHENTICATED_USER)`. 개별 메서드가 `filterViewQueryOwnedBy` / `checkCanViewQueryOwnedBy` / `checkCanKillQueryOwnedBy` 호출 |
+| `/v1/jmx/mbean/…` | **`MANAGEMENT_READ`** | `checkCanReadSystemInformation` |
+| `/v1/resourceGroupState/…` | `MANAGEMENT_READ` | `checkCanReadSystemInformation` |
+| `PUT /v1/info/state` | `MANAGEMENT_WRITE` | `checkCanWriteSystemInformation` |
+
+> **`/v1/query` 는 `MANAGEMENT_READ` 가 아니다.** 인증만 되면 리소스에 진입하고, 그 안에서 **쿼리 단위 인가**가 걸린다. 이 차이가 `file` 접근제어에서 결정적 결과를 낳는다(아래).
+
+---
+
+### T3-6. `file` 접근제어(`access-control.name=file`)에서의 TMS 동작 — **확인. 우리 환경의 실제 조건**
+
+> **2026-08-06 확인**: 운영 환경은 `access-control.name=file` + `security.config-file`(`rules.json`) 을 사용한다.
+> 출처: `/docs/477/security/file-system-access-control.html`
+
+**설정 형식** — **확인**
+
+```properties
+access-control.name=file
+security.config-file=etc/rules.json
+```
+
+(HTTP 엔드포인트에서 로드하려면 `security.config-file=http://…` + `security.json-pointer=/data`)
+
+#### (1) 규칙 섹션이 **없을 때**의 기본값 — 섹션마다 정반대다
+
+| 규칙 섹션 | 섹션이 없을 때 | 문서 원문 |
+|---|---|---|
+| **`system_information`** | **전부 거부** | *"If no rules are specified, all access to system information is denied. If no rule matches, system access is denied."* |
+| **`queries`** | **전부 허용** | *"If no rules are specified, all users are allowed to execute queries, and to view or kill queries owned by any user."* |
+| **`impersonation`** | `principal` 규칙도 없으면 **거부** / `principal` 규칙만 있으면 **허용** | *"If neither impersonation nor principal rules are defined, impersonation is not allowed."* |
+
+> **이 비대칭이 핵심이다.** `queries` 는 관대(기본 허용), `system_information` 은 엄격(기본 거부)이다.
+
+#### (2) 규칙과 무관하게 항상 public인 엔드포인트 — **확인** (문서 명시)
+
+`GET /v1/info` · `GET /v1/info/state` · `GET /v1/status`
+
+> **H-01/H-02는 `rules.json` 내용과 무관하게 항상 동작한다.**
+
+#### (3) TMS R1 호출별 결과 (`rules.json` 에 해당 섹션이 없다고 가정)
+
+| TMS 호출 | 등급 | 결과 | FR |
+|---|---|---|---|
+| `GET /v1/info`, `/v1/info/state` | PUBLIC | ✅ **허용** | H-01, H-02 |
+| `GET /v1/query` 목록 | AUTHENTICATED_USER | ✅ **허용** (`queries` 기본 허용) | FR-QL-01/02/03 |
+| `GET /v1/query/{id}` | AUTHENTICATED_USER | ✅ **허용** | FR-QL-01 |
+| `PUT /v1/query/{id}/killed` | AUTHENTICATED_USER | ✅ **허용** (`kill` 포함) | FR-QL-04 |
+| **`GET /v1/jmx/mbean/…`** | **MANAGEMENT_READ** | ❌ **거부** | **H-03~H-07 전부** |
+| `PUT /v1/info/state` (R3) | MANAGEMENT_WRITE | ❌ **거부** | FR-FL-03 |
+
+> **→ FR-QUERY-LIVE는 조치 없이 동작한다.**
+> **→ FR-CLUSTER-HEALTH의 JMX 기반 테스트(H-03~H-07)는 `rules.json` 에 `system_information` 규칙을 추가해야 동작한다.**
+
+#### (4) 필요한 `rules.json` 추가분 (필드명 전부 문서 확인)
+
+`system_information` 규칙 필드: `role`(선택), `user`(선택), `allow`(필수, 값 `read` / `write`)
+
+```jsonc
+{
+  "system_information": [
+    { "user": "tms-svc", "allow": ["read"] }        // R1: JMX 조회
+    // R3에서 graceful shutdown이 필요해지면 ["read", "write"]
+  ]
+}
+```
+
+> **⚠️ `system_information` 섹션을 새로 추가하는 순간, 그 목록에 없는 모든 사용자는 시스템 정보 접근이 거부된다** (기본값이 "전부 거부"이므로 원래도 거부 상태였다 — 즉 **추가로 잃는 것은 없다**). 다만 기존에 이 섹션이 **이미 있다면** TMS 규칙을 추가할 뿐 기존 항목을 건드리지 않는다.
+> **⚠️ `queries` 섹션이 이미 존재한다면** 기본 허용이 적용되지 않는다. 그 경우 TMS 서비스 계정에 `view`(+ FR-QL-04용 `kill`) 허용 규칙이 필요하다. **`rules.json` 실물 확인 필요.**
+> **⚠️ 워커 배포**: 문서 원문 — *"Access control must be configured on the coordinator. Authorization for operations on specific worker nodes, such a triggering graceful shutdown, must also be configured on all workers."* R3 착수 시 `rules.json` 을 전 워커에 배포해야 한다.
+> **`management.user` 는 우회 수단이 아니다** — 문서 원문: *"When this is configured, system information rules must still be set to authorize this user."*
+
+#### (5) `file` 접근제어는 컬럼 마스킹·행 필터를 **이미 지원한다** — **확인**
+
+`tables` 규칙에 `filter` / `filter_environment` / `columns[].mask` / `mask_environment` 필드가 존재한다. 조건부 마스킹(`IF`, `CASE`)도 가능하다.
+
+> **함의 (TMS 범위 밖, 참고)**: "테이블·컬럼·행 마스킹"만이 목적이라면 **`file` 접근제어로도 달성 가능**하다. OPA의 이점은 마스킹 기능 자체가 아니라 **정책의 동적 갱신·중앙화·기존 내부 OPA 자산 재사용**이다. 선택 기준을 그쪽에 두는 것이 정확하다.
+> **`file` 접근제어의 impersonation**: `impersonation` 규칙(`original_user`, `original_role`, `new_user`)으로 처리 가능하다. 즉 "고정 계정 + `X-Trino-User`" 방식은 **OPA 없이 `rules.json` 만으로도 성립한다.**
+
 ---
 
 ## 4. 검증 결과가 무효화 / 변경한 요구사항
