@@ -321,7 +321,17 @@ Trino 477 `ServerSecurityModule`은 airlift `MBeanResource`를 `MANAGEMENT_READ`
 
 MBean 이름은 쿼리에서 큰따옴표로 감싸고, 설정 파일에서는 콤마를 이스케이프한다.
 
-**OpenMetrics** — **확인(소스)**: Trino 477 `Server.java` 는 `new JmxOpenMetricsModule()` 을 포함한다. Prometheus 연동(SETUP S6)의 근거이나, **노출 경로와 스크레이프 설정은 확인 불가** — 실환경/Prometheus 설정 시 확정할 것.
+**OpenMetrics `/metrics`** — **확인(소스). G-6 해소 (2026-08-06)**
+
+| 항목 | 값 |
+|---|---|
+| 경로 | **`GET /metrics`** (airlift `MetricsResource`, `@Path("/metrics")`) |
+| 형식 | OpenMetrics (`@Produces(OPENMETRICS_CONTENT_TYPE)`) |
+| 필터 | **`?name[]=<지표명>`** 복수 지정 가능 (`@QueryParam("name[]") List<String> filter`) |
+| 보안 | **`MANAGEMENT_READ`** — Trino 477 `ServerSecurityModule` 이 `MBeanResource` 와 **동일하게** `managementReadResource(MetricsResource.class)` 로 바인딩 |
+
+> **`/metrics` 와 `/v1/jmx/mbean` 은 권한 요건이 완전히 같다** (둘 다 `checkCanReadSystemInformation`). 어느 쪽을 쓰든 `system_information: read` 가 필요하다.
+> **⚠️ 설계 검토 대상 (Bolt 2)**: `/metrics?name[]=A&name[]=B…` 로 **여러 지표를 요청 1건에 묶을 수 있다.** MBean 7종을 개별 조회하는 현재 설계(0.47 req/s)를 1건(0.07 req/s)으로 줄일 여지가 있다. 단 **MBean 이름 → OpenMetrics 지표명 매핑은 확인 불가** — 실환경 응답으로 확정해야 한다.
 
 ---
 

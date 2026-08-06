@@ -127,9 +127,14 @@ FR-QUERY-HISTORY가 빠지면서 B4(대용량 히스토리 저장소)는 이월�
 | # | 내용 | 처리 시점 |
 |---|---|---|
 | ~~G-7~~ | ~~`/v1/jmx/mbean` 접근 가능 여부~~ | **2026-08-06 해소** — 환경이 `access-control.name=file` + `rules.json` 임을 확인. `MANAGEMENT_READ` → `checkCanReadSystemInformation` → **`system_information` 규칙이 없으면 기본 전부 거부** (§T3-6). **조치 = `rules.json` 에 규칙 한 블록 추가** (`ARCHITECTURE.md` §6-3-1) |
-| **B7** | **`rules.json` 실물 확인** — ① `system_information` 섹션 존재 여부 ② **`queries` 섹션 존재 여부**(있으면 기본 허용이 깨져 TMS에 `view`/`kill` 규칙 별도 필요) ③ TMS 서비스 계정명 | **Bolt 2 착수 전** |
+| ~~B7~~ | ~~`rules.json` 실물 확인~~ | **2026-08-06 해소.** `system_information` 에 `prometheus_scraper`(read,write), `queries` 에 `prometheus_scraper`(allow: []) + catch-all(execute,view,kill) 확인. **→ D-005: 전용 계정 `tms-svc` 필요** (`ARCHITECTURE.md` §6-3-2) |
+| **A-1** | **`rules.json` 에 `tms-svc` 규칙 2줄 추가** (`system_information: read`, `queries: view+kill`) | **플랫폼팀. Bolt 2와 병렬 가능** |
+| **A-2** | `tms-svc` basic auth 계정 발급 | 플랫폼팀 |
+| A-3 | (권고) `prometheus_scraper` 의 `system_information` 을 `read` 로 축소 — 미사용 계정이라 지금이 비용 0 | 플랫폼팀 |
 
-> **B7이 R1 전체를 막지는 않는다.** `file` 기본값 기준으로 FR-PORTAL·FR-QUERY-LIVE·FR-AUDIT-ACTION·FR-LOG-DEEPLINK와 H-01/H-02는 조치 없이 동작한다. 막히는 것은 **FR-CLUSTER-HEALTH의 JMX 기반 테스트(H-03~H-07)** 뿐이다. → **Bolt 2를 규칙 승인과 병렬 진행 가능.**
+> **A-1/A-2가 R1 전체를 막지는 않는다.** H-01/H-02는 PUBLIC이고 FR-QUERY-LIVE는 catch-all로 동작하므로, 막히는 것은 **H-03~H-07(JMX 기반)** 뿐이다. → **Bolt 2를 규칙 승인과 병렬 진행 가능.**
+>
+> **구현 요구사항 (조용한 실패 방어)**: `prometheus_scraper` 처럼 `queries` 가 거부된 계정으로 호출하면 `/v1/query` 가 **403이 아니라 빈 목록**을 반환한다. collector는 **빈 목록 + JMX `RunningQueries > 0`** 조합을 권한 문제로 판정해 `UNKNOWN` + 경고를 띄운다.
 | H-02 | `GET /v1/info` 의 기동 상태 필드명 미확정 | Bolt 2 실응답으로 확정. 그전까지 미구현 |
 | H-03 | `ActiveCount` 가 코디네이터를 포함하는지 미확정 | Bolt 2 실측 보정 |
 | D-004 | 감사·헬스 이벤트 저장소 (PostgreSQL 권고) | **인간 승인 대기** |

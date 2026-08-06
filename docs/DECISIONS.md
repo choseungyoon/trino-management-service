@@ -36,6 +36,38 @@
 
 ---
 
+## D-005 — TMS는 전용 서비스 계정 `tms-svc` 를 쓴다 (`prometheus_scraper` 재사용 금지)
+
+| 항목 | 내용 |
+|---|---|
+| **날짜** | 2026-08-06 |
+| **결정자** | `trino-expert` 검증 → **인간 승인 대기** |
+| **상태** | 제안 |
+
+**결정**: TMS는 Trino 호출에 **전용 basic auth 계정 `tms-svc`** 를 사용한다. 기존 `prometheus_scraper` 계정을 재사용하지 않는다.
+
+**근거**
+
+1. **기능상 불가**: 현재 `rules.json` 의 `queries` 첫 규칙이 `prometheus_scraper` 에 `allow: []` 다. first-match-wins이므로 이 계정은 `view`·`kill` 이 전부 거부된다 → FR-QUERY-LIVE와 FR-QL-04가 동작하지 않는다.
+2. **실패 방식이 위험**: `GET /v1/query` 는 403이 아니라 **빈 목록**을 반환한다(필터 기반 거부). "실행 중 쿼리 0건"으로 보여 한가한 정상 클러스터와 구별되지 않는다.
+3. **감사 추적성**: 계정을 공유하면 Trino 측에서 "Prometheus 스크레이핑"과 "TMS 액션"을 구분할 수 없다.
+4. **권한 분리**: `prometheus_scraper` 규칙을 TMS에 맞게 고치면, Prometheus 스크레이퍼에 쿼리 kill 권한을 주게 된다.
+
+**필요 권한 (최소권한)**
+
+| 섹션 | `tms-svc` | 비고 |
+|---|---|---|
+| `system_information` | `["read"]` | **`write` 없음.** R3 graceful shutdown 승인 시 추가 |
+| `queries` | `["view", "kill"]` | **`execute` 없음** — 원칙 A1(TMS는 SQL을 제출하지 않는다)의 강제 수단 |
+
+**부수 권고 (별건)**: `prometheus_scraper` 의 `system_information` 을 `["read","write"]` → `["read"]` 로 축소. 스크레이핑에는 `read` 만 필요하며, `write` 는 graceful shutdown 트리거 권한이다. **해당 계정은 아직 미사용이므로 지금 줄이면 비용이 0이다.**
+
+**뒤집는 조건**: 계정 발급 자체가 불가능한 조직 제약이 있다면 `prometheus_scraper` 의 `queries` 규칙을 `["view","kill"]` 로 바꾸는 대안이 있으나, 위 3·4번 문제를 감수해야 한다.
+
+**관련**: `ARCHITECTURE.md` §6-3-2, `TRINO_VERIFIED.md` §T3-6
+
+---
+
 ## D-002 — 저장소를 PUBLIC으로 유지한다
 
 | 항목 | 내용 |

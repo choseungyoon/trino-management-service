@@ -235,22 +235,74 @@ GET /v1/query?state=QUEUED&state=WAITING_FOR_RESOURCES&state=DISPATCHING
 | **`GET /v1/jmx/mbean/…`** | **`MANAGEMENT_READ`** | ❌ **거부** — `system_information` 규칙 없으면 **기본 전부 거부** | **H-03 ~ H-07 전부** |
 | `PUT /v1/info/state` (R3) | `MANAGEMENT_WRITE` | ❌ 거부 | FR-FL-03 (R3) |
 
-**→ R1 착수를 막지 않는다.** FR-PORTAL·FR-QUERY-LIVE·FR-AUDIT-ACTION·FR-LOG-DEEPLINK와 H-01/H-02는 조치 없이 동작한다.
-**→ FR-CLUSTER-HEALTH의 JMX 기반 테스트만 `rules.json` 한 블록으로 열린다.**
+### 6-3-2. 실제 `rules.json` 조건 (2026-08-06 확인) — **B7 해소**
+
+**확인된 현재 설정**
 
 ```jsonc
-// rules.json — 필드명 전부 477 문서 확인 (role/user/allow, allow ∈ {read, write})
+"system_information": [
+  { "user": "prometheus_scraper", "allow": ["read", "write"] }   // 그 외 항목은 미확인
+],
+"queries": [
+  { "user": "prometheus_scraper", "allow": [] },                 // ← 이 계정은 쿼리 권한 전무
+  { "allow": ["execute", "view", "kill"] }                       // ← 그 외 모든 사용자 전부 허용
+]
+```
+
+**부가 사실**: `prometheus_scraper` 는 **아직 사용되지 않는다.** Prometheus 연동(SETUP S6) 전에 미리 만들어 둔 계정이다.
+
+#### 결론 1 — TMS는 `prometheus_scraper` 를 재사용하면 안 된다
+
+`queries` 규칙은 **위에서 아래로 첫 매칭이 승리**한다. 첫 규칙이 `prometheus_scraper` 에 `allow: []` 이므로 이 계정은 `execute`·`view`·`kill` 전부 거부된다.
+
+| TMS 호출 | `prometheus_scraper` 로 실행 시 |
+|---|---|
+| `GET /v1/jmx/mbean` | ✅ 동작 (`system_information: read` 보유) |
+| **`GET /v1/query` 목록** | ⚠️ **403이 아니라 빈 목록.** `filterViewQueryOwnedBy` 가 전부 걸러낸다 |
+| `GET /v1/query/{id}` | ❌ 403 |
+| `PUT /v1/query/{id}/killed` | ❌ 403 |
+
+> **⚠️ 목록 조회의 실패 방식이 위험하다.** 권한 거부인데 **오류가 아니라 빈 배열**이 온다. UI에는 "실행 중 쿼리 0건"으로 보이고, 이는 **한가한 정상 클러스터와 구별되지 않는다.** 조용한 오작동이다.
+> **구현 요구사항**: collector가 `/v1/query` 에서 빈 목록을 받았는데 JMX의 `trino.execution:name=QueryManager:RunningQueries` 는 0보다 크면, **권한 문제로 판정하고 `UNKNOWN` + 경고를 띄운다.** 두 소스의 교차 검증으로 조용한 실패를 잡는다.
+
+#### 결론 2 — 전용 계정 `tms-svc` 를 만든다 (D-005)
+
+`queries` 의 catch-all 규칙이 `tms-svc` 에도 매칭되므로 **`queries` 섹션은 손대지 않아도 view·kill이 이미 허용된다.** 다만 최소권한을 위해 명시 규칙을 catch-all **위에** 둔다 — TMS는 원칙 A1에 따라 SQL을 제출하지 않으므로 **`execute` 를 갖지 않는다.**
+
+```jsonc
 {
   "system_information": [
-    { "user": "tms-svc", "allow": ["read"] }
+    { "user": "tms-svc",            "allow": ["read"] },          // ★ 추가 — R1. write는 R3까지 보류
+    { "user": "prometheus_scraper", "allow": ["read"] }           // ★ write 제거 권고 (아래)
+  ],
+  "queries": [
+    { "user": "tms-svc",            "allow": ["view", "kill"] },  // ★ 추가 — execute 없음(A1)
+    { "user": "prometheus_scraper", "allow": [] },
+    { "allow": ["execute", "view", "kill"] }
   ]
 }
 ```
 
-> **⚠️ 확인 필요**: `rules.json` 에 **`queries` 섹션이 이미 존재하면** 기본 허용이 적용되지 않는다. 그 경우 TMS 서비스 계정에 `view` + `kill` 규칙이 별도로 필요하다. **실물 확인 대상 (B7).**
-> **⚠️ R3 예고**: graceful shutdown은 `allow: ["read","write"]` 가 필요하고, `rules.json` 을 **전 워커에도 배포**해야 한다 (문서 명시).
+#### 결론 3 — `prometheus_scraper` 의 `write` 는 과다 권한 (권고)
 
-**단계적 적용이 가능하다.** `system_information` 규칙이 없어도 H-01/H-02는 동작하므로, 규칙 추가 전에도 "클러스터가 살아 있는가"는 답할 수 있다. Bolt 2를 규칙 승인과 병렬로 진행할 수 있다는 뜻이다.
+`system_information: write` 는 **graceful shutdown 트리거 권한**이다 (`PUT /v1/info/state`, §T1-2).
+Prometheus 스크레이핑에 필요한 것은 `read` 뿐이다 — `/metrics` 와 `/v1/jmx/mbean` 은 둘 다 `MANAGEMENT_READ` 이므로 `read` 로 충분하다 (§T1-7).
+
+> **아직 사용 전인 계정이므로 지금 줄이는 것이 비용이 0이다.** 나중에 Prometheus를 붙인 뒤 줄이면 회귀 위험을 따져야 한다.
+
+#### 결론 4 — catch-all이 전 사용자에게 `kill` 을 준다 (감사 설계에 영향)
+
+`{ "allow": ["execute", "view", "kill"] }` 는 **모든 인증 사용자가 타인의 쿼리를 kill할 수 있음**을 뜻한다.
+
+> **FR-AUDIT-ACTION의 한계를 명시해야 한다**: TMS 감사 로그는 **TMS를 거친 액션만** 남긴다. 사용자가 Trino Web UI나 CLI로 직접 kill하면 TMS에 기록되지 않는다. "누가 이 쿼리를 죽였나"에 TMS가 항상 답할 수 있는 것은 아니다.
+> **권고 (TMS 범위 밖, 운영 정책)**: 5만 사용자 규모에서 `kill` 을 전체 허용으로 두는 것이 의도인지 확인하고, 필요하면 `role`/`group` 으로 좁힌다. 좁히면 TMS 감사의 포괄성이 함께 올라간다.
+
+#### 단계적 적용
+
+`system_information` 에 `tms-svc` 를 추가하기 전에도 **H-01/H-02와 FR-QUERY-LIVE는 동작한다** (PUBLIC + catch-all). 막히는 것은 H-03~H-07뿐이다.
+→ **Bolt 2 구현을 `rules.json` 승인과 병렬로 진행할 수 있다.**
+
+> **⚠️ R3 예고**: graceful shutdown 사용 시 `tms-svc` 에 `write` 추가 + `rules.json` 을 **전 워커에 배포** 필요 (문서 명시).
 
 ### 6-4. OPA 접근제어 도입 시 필요한 것 (R1 착수 시점엔 불필요할 수 있음)
 

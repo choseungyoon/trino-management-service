@@ -43,6 +43,9 @@
 >
 > 근거: `TRINO_VERIFIED.md` §T3-6, 조치: `ARCHITECTURE.md` §6-3-1
 > **구현 시 요구사항**: JMX 수집이 403이면 해당 테스트를 `BAD`가 아니라 **`UNKNOWN`** 으로 표기하고, 조언에 *"TMS 서비스 계정에 system_information read 권한이 없다. rules.json 확인 필요."* 를 넣는다. **권한 문제를 클러스터 장애로 오인시키지 않는다.**
+>
+> **H-09 (신규) · 권한 자가진단**: `GET /v1/query` 가 **빈 목록**인데 `trino.execution:name=QueryManager:RunningQueries > 0` 이면, `queries` 권한 거부를 의심해 `UNKNOWN` + *"TMS 계정의 queries view 권한을 확인하라"* 조언을 띄운다.
+> **이유**: `file` 접근제어의 쿼리 목록 거부는 403이 아니라 **필터링(빈 배열)** 으로 나타난다. 두 소스를 교차 검증하지 않으면 "한가한 정상 클러스터"와 구별되지 않는다 (`ARCHITECTURE.md` §6-3-2).
 
 ### H-01 · 코디네이터 응답성
 
