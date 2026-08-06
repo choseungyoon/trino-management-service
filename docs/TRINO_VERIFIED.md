@@ -289,11 +289,22 @@ Trino 477 `ServerSecurityModule`은 airlift `MBeanResource`를 `MANAGEMENT_READ`
 
 **공식 문서에 명시된 MBean 이름** — **확인** (`/docs/477/admin/jmx.html`)
 
+> ## ⛔ 정정 (2026-08-06) — **이 문서 페이지의 MBean 이름 하나는 477에서 존재하지 않는다**
+>
+> 실환경 V1 검증에서 `trino.failuredetector:name=HeartbeatFailureDetector` 가 **HTTP 500** 을 반환했다.
+> 원인 (소스 확인):
+> - `FailureDetectorModule` 은 Trino 477의 `Server.java` / `CoordinatorModule` / `ServerMainModule` **어디에도 설치되지 않는다.** `WorkerModule` 만 `FailureDetector` 를 참조하며 `NoOpFailureDetector` 를 바인딩한다 (JMX export 없음).
+> - 코디네이터의 노드 관리는 **`io.trino.node` 패키지**로 대체됐다. `NodeManagerModule` 이 `newExporter(binder).export(CoordinatorNodeManager.class).withGeneratedName()` 로 export 한다.
+> - airlift `MBeanResource.getMBean` 은 `throws JMException` 만 선언하고 예외를 매핑하지 않는다 → **존재하지 않는 ObjectName은 404가 아니라 500**이다.
+>
+> **→ `/docs/477/admin/jmx.html` 은 이 항목에서 코드보다 뒤처져 있다.**
+> **→ 교훈: MBean 이름은 문서로 확정하지 않는다. `GET /v1/jmx/mbean` 열거 또는 소스로 확인한다.** 나머지 MBean(`java.lang:type=Memory`, `trino.execution:name=QueryManager`, `trino.memory:name=ClusterMemoryManager`)은 **실환경에서 200 확인됨**.
+
 | 용도 | ObjectName:Attribute |
 |---|---|
-| 힙 사용량 | `java.lang:type=Memory:HeapMemoryUsage.used` |
+| 힙 사용량 | `java.lang:type=Memory:HeapMemoryUsage.used` ✅ 실환경 확인 |
 | 스레드 수 | `java.lang:type=Threading:ThreadCount` |
-| 활성 노드 수 | `trino.failuredetector:name=HeartbeatFailureDetector:ActiveCount` |
+| ~~활성 노드 수~~ | ~~`trino.failuredetector:name=HeartbeatFailureDetector:ActiveCount`~~ **477에 존재하지 않음 (500)** → 아래 §T1-7-1 |
 | 여유 분산 메모리 | `trino.memory:type=ClusterMemoryPool:name=general:FreeDistributedBytes` |
 | OOM kill 누적 | `trino.memory:name=ClusterMemoryManager:QueriesKilledDueToOutOfMemory` |
 | 실행/대기 쿼리 수 | `trino.execution:name=QueryManager:RunningQueries` |
@@ -309,6 +320,32 @@ Trino 477 `ServerSecurityModule`은 airlift `MBeanResource`를 `MANAGEMENT_READ`
 | 커넥터별 | `trino.plugin*` 접두사 |
 
 > 문서 원문: *"A small subset of the available metrics are described below."* — **이 목록은 전체가 아니다.** 실제 사용 가능한 MBean 전량은 `GET /v1/jmx/mbean` 으로 실환경에서 열거할 것.
+
+#### T1-7-1. 노드 수 조회의 477 정답 — `CoordinatorNodeManager` — **확인(소스). 실환경 값 확인 대기**
+
+`io/trino/node/NodeManagerModule.java` @477 (코디네이터 분기):
+
+```java
+binder.bind(CoordinatorNodeManager.class).in(Scopes.SINGLETON);
+binder.bind(InternalNodeManager.class).to(CoordinatorNodeManager.class).in(Scopes.SINGLETON);
+newExporter(binder).export(CoordinatorNodeManager.class).withGeneratedName();
+```
+
+`io/trino/node/CoordinatorNodeManager.java` @477 의 `@Managed` 속성:
+
+| 속성 | 의미 |
+|---|---|
+| `ActiveNodeCount` | 활성 노드 수 |
+| `InactiveNodeCount` | 비활성(도달 불가) 노드 수 |
+| `DrainingNodeCount` | drain 진행 중 |
+| `DrainedNodeCount` | drain 완료 |
+| `ShuttingDownNodeCount` | 종료 중 |
+
+**예상 ObjectName**: `trino.node:name=CoordinatorNodeManager` — `withGeneratedName()` + `PrefixObjectNameGeneratorModule("io.trino")` 조합에서의 추정이다. **`withGeneratedName()` 의 정확한 출력 형식을 문서로 확정하지 못했으므로, 실환경 `GET /v1/jmx/mbean` 열거로 확정해야 한다.** (바로 이 추정 실패가 500을 유발했으므로 같은 실수를 반복하지 않는다.)
+
+> **이것은 손실이 아니라 개선이다.** 구 `ActiveCount` 는 숫자 하나뿐이었으나, 위 5개는 **"몇 대가 빠졌는가"와 "왜 빠졌는가"(장애 vs 계획된 drain)를 구분**한다.
+> - **H-03 개선**: drain 중인 노드를 장애로 오판하지 않는다
+> - **R3 FR-FLEET 직결**: graceful shutdown 진행 상황(`DrainingNodeCount` → `DrainedNodeCount`)을 폴링으로 추적할 수 있다. FR-FL-03의 drain 완료 확인 수단이 확보됐다
 
 **JMX connector (SQL 조회)** — **확인** (`/docs/477/connector/jmx.html`)
 

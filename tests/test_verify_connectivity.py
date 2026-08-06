@@ -53,8 +53,21 @@ SAMPLE_QUERY = {
 }
 
 
-def fake_request(queries, running_queries, active_count=12, jmx_status=200):
-    """Build a stand-in for vc.request with controllable responses."""
+def fake_request(
+    queries,
+    running_queries,
+    active_count=12,
+    jmx_status=200,
+    registered=None,
+    stale_name_status=500,
+):
+    """Build a stand-in for vc.request with controllable responses.
+
+    `registered` is the MBean registry contents. Defaults to exactly the names
+    the script expects; pass a shorter list to simulate a stale/renamed MBean.
+    """
+    if registered is None:
+        registered = list(vc.HEALTH_MBEANS)
 
     def _request(opener, url, user, password):
         path = url[len(BASE) :]
@@ -66,10 +79,20 @@ def fake_request(queries, running_queries, active_count=12, jmx_status=200):
             if jmx_status != 200:
                 return jmx_status, "Management only resource", 0.01
             if path == "/v1/jmx/mbean":
-                return 200, json.dumps([{"objectName": "x"}]), 0.01
+                return 200, json.dumps([{"objectName": n} for n in registered]), 0.01
             name = urllib.parse.unquote(path[len("/v1/jmx/mbean/") :])
-            if "HeartbeatFailureDetector" in name:
-                attrs = [{"name": "ActiveCount", "value": active_count}]
+            if name not in registered:
+                # Airlift MBeanResource declares `throws JMException` and does not
+                # map InstanceNotFoundException, so a missing MBean is a 500.
+                return stale_name_status, "InstanceNotFoundException", 0.01
+            if "CoordinatorNodeManager" in name:
+                attrs = [
+                    {"name": "ActiveNodeCount", "value": active_count},
+                    {"name": "InactiveNodeCount", "value": 0},
+                    {"name": "DrainingNodeCount", "value": 0},
+                    {"name": "DrainedNodeCount", "value": 0},
+                    {"name": "ShuttingDownNodeCount", "value": 0},
+                ]
             elif "QueryManager" in name:
                 attrs = [{"name": "RunningQueries", "value": running_queries}]
             else:
@@ -123,7 +146,7 @@ class VerifyConnectivityTest(unittest.TestCase):
         vc.check_v1_2_3_jmx(None, BASE, "tms-svc", "pw", 12, result)
         self.assertIn("V1-2", result.failed)
 
-    def test_active_count_records_observed_value(self):
+    def test_node_counts_are_recorded(self):
         """H-03 thresholds depend on whether the coordinator is counted."""
         for active, expected_workers in ((12, 12), (13, 12)):
             with self.subTest(active=active):
@@ -132,7 +155,54 @@ class VerifyConnectivityTest(unittest.TestCase):
                 )
                 result = vc.Result()
                 vc.check_v1_2_3_jmx(None, BASE, "tms-svc", "pw", expected_workers, result)
-                self.assertEqual(result.facts.get("active_count"), active)
+                self.assertEqual(
+                    result.facts.get("node_counts", {}).get("ActiveNodeCount"), active
+                )
+                self.assertEqual(result.failed, [])
+
+    def test_stale_mbean_name_is_diagnosed_not_just_failed(self):
+        """A renamed/removed MBean must be reported with candidates.
+
+        This is the exact failure that hit us: the 477 docs still list
+        `trino.failuredetector:name=HeartbeatFailureDetector`, but that module is
+        not installed in 477 and the endpoint answers 500. The script must say
+        "not registered" and surface alternatives rather than leaving a bare 500.
+        """
+        registry = [
+            "trino.node:name=CoordinatorNodeManager",
+            "java.lang:type=Memory",
+            "trino.execution:name=QueryManager",
+            "trino.memory:name=ClusterMemoryManager",
+        ]
+        original = list(vc.HEALTH_MBEANS)
+        try:
+            vc.HEALTH_MBEANS = [
+                "trino.failuredetector:name=HeartbeatFailureDetector"
+            ] + registry[1:]
+            vc.request = fake_request(
+                [SAMPLE_QUERY], running_queries=3, registered=registry
+            )
+            result = vc.Result()
+            vc.check_v1_2_3_jmx(None, BASE, "tms-svc", "pw", 12, result)
+            self.assertTrue(
+                any("HeartbeatFailureDetector" in c for c in result.failed),
+                "stale MBean was not reported",
+            )
+            candidates = result.facts.get(
+                "candidates_for:trino.failuredetector:name=HeartbeatFailureDetector", []
+            )
+            self.assertIn(
+                "trino.node:name=CoordinatorNodeManager",
+                candidates,
+                "replacement MBean was not surfaced as a candidate",
+            )
+        finally:
+            vc.HEALTH_MBEANS = original
+
+    def test_health_mbeans_do_not_reference_removed_failure_detector(self):
+        """Regression guard: FailureDetectorModule is not installed in Trino 477."""
+        for name in vc.HEALTH_MBEANS:
+            self.assertNotIn("failuredetector", name.lower())
 
     def test_live_states_exclude_terminal_states(self):
         """Completed queries belong to the separate history project (D-001)."""

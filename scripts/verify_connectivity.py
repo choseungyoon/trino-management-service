@@ -50,13 +50,26 @@ LIVE_STATES = [
 ]
 
 # MBeans used by health tests H-03..H-07.
-# Every name below appears verbatim in the Trino 477 docs (admin/jmx).
+#
+# WARNING: do NOT trust the Trino docs for these names. The 477 docs page
+# admin/jmx still lists `trino.failuredetector:name=HeartbeatFailureDetector`,
+# but FailureDetectorModule is no longer installed in 477 - the coordinator now
+# uses io.trino.node.CoordinatorNodeManager. Requesting the stale name returns
+# HTTP 500 (MBeanResource declares `throws JMException` and does not map
+# InstanceNotFoundException to 404).
+#
+# The script therefore enumerates GET /v1/jmx/mbean first and verifies every
+# name below actually exists before fetching it. See docs/TRINO_VERIFIED.md T1-7.
 HEALTH_MBEANS = [
-    "trino.failuredetector:name=HeartbeatFailureDetector",
+    "trino.node:name=CoordinatorNodeManager",
     "java.lang:type=Memory",
     "trino.execution:name=QueryManager",
     "trino.memory:name=ClusterMemoryManager",
 ]
+
+# Substrings used to surface candidate MBeans when an expected name is missing,
+# so a stale name is diagnosed in one run instead of guessed at.
+DISCOVERY_HINTS = ["node", "failuredetector", "memory", "querymanager", "execution"]
 
 TIMEOUT_SECONDS = 10
 
@@ -164,7 +177,11 @@ def check_v1_1_info(opener, base: str, result: Result) -> None:
 def check_v1_2_3_jmx(
     opener, base: str, user: str, password: str, expected_workers: int, result: Result
 ) -> None:
-    """V1-2/V1-3: JMX over HTTP requires system_information:read in rules.json."""
+    """V1-2/V1-3: JMX over HTTP requires system_information:read in rules.json.
+
+    Enumerates the MBean registry first so a name that no longer exists is
+    reported as "not registered" with candidates, rather than as a bare 500.
+    """
     print("\nV1-2  GET /v1/jmx/mbean  (expected: 200 WITH tms-svc basic auth)")
     status, body, _ = request(opener, base + "/v1/jmx/mbean", user, password)
     if status == 403:
@@ -177,14 +194,44 @@ def check_v1_2_3_jmx(
     if status != 200:
         result.fail("V1-2", "expected 200, got {} - {}".format(status, body[:200]))
         return
-    result.ok("V1-2", "JMX over HTTP reachable")
 
-    print("\nV1-3  Individual MBeans used by H-03..H-07")
+    registered: List[str] = []
+    try:
+        for entry in json.loads(body):
+            if isinstance(entry, dict) and entry.get("objectName"):
+                registered.append(str(entry["objectName"]))
+    except ValueError:
+        result.warn("V1-2", "MBean list is not JSON; skipping existence pre-check")
+    result.fact("registered_mbean_count", len(registered))
+    result.ok("V1-2", "JMX reachable, {} MBeans registered".format(len(registered)))
+
+    print("\nV1-3  MBeans used by H-03..H-07")
     for object_name in HEALTH_MBEANS:
+        if registered and object_name not in registered:
+            candidates = [
+                name
+                for name in registered
+                if any(hint in name.lower() for hint in DISCOVERY_HINTS)
+            ]
+            result.fail(
+                "V1-3:" + object_name,
+                "NOT REGISTERED on this server - the name is stale or the module "
+                "is not installed. Candidates printed below.",
+            )
+            result.fact("candidates_for:" + object_name, sorted(candidates)[:40])
+            for name in sorted(candidates)[:25]:
+                print("         candidate: {}".format(name))
+            continue
+
         url = base + "/v1/jmx/mbean/" + urllib.parse.quote(object_name, safe="")
         status, body, _ = request(opener, url, user, password)
         if status != 200:
-            result.fail("V1-3:" + object_name, "status {}".format(status))
+            result.fail(
+                "V1-3:" + object_name,
+                "status {} (500 usually means the ObjectName does not exist)".format(
+                    status
+                ),
+            )
             continue
         try:
             mbean = json.loads(body)
@@ -199,26 +246,30 @@ def check_v1_2_3_jmx(
         result.ok("V1-3:" + object_name, "{} attributes".format(len(attributes)))
         result.fact("mbean:" + object_name, sorted(attributes.keys()))
 
-        # H-03 threshold depends on whether ActiveCount includes the coordinator.
-        if "HeartbeatFailureDetector" in object_name:
-            active = attributes.get("ActiveCount")
+        # H-03 thresholds depend on whether the coordinator is counted as a node.
+        if "CoordinatorNodeManager" in object_name:
+            node_counts = {
+                key: value
+                for key, value in attributes.items()
+                if key.endswith("NodeCount")
+            }
+            result.fact("node_counts", node_counts)
+            for key in sorted(node_counts):
+                print("       {} = {}".format(key, node_counts[key]))
+            active = node_counts.get("ActiveNodeCount")
             if active is None:
-                result.warn("V1-3/H-03", "ActiveCount attribute not present")
+                result.warn("V1-3/H-03", "ActiveNodeCount not present")
             else:
-                result.fact("active_count", active)
-                note = (
-                    "matches expected_workers ({}) -> coordinator NOT counted"
-                    if active == expected_workers
-                    else "expected_workers+1 ({}) -> coordinator IS counted"
-                    if active == expected_workers + 1
-                    else "neither {} nor +1 - investigate before setting H-03 thresholds"
-                )
-                print(
-                    "       ActiveCount = {}  |  {}".format(
-                        active, note.format(expected_workers)
+                if active == expected_workers:
+                    note = "== expected_workers -> coordinator NOT counted"
+                elif active == expected_workers + 1:
+                    note = "== expected_workers+1 -> coordinator IS counted"
+                else:
+                    note = "neither {} nor {} - investigate before setting thresholds".format(
+                        expected_workers, expected_workers + 1
                     )
-                )
-                result.ok("V1-3/H-03", "ActiveCount={}".format(active))
+                print("       -> ActiveNodeCount={} : {}".format(active, note))
+                result.ok("V1-3/H-03", "ActiveNodeCount={}".format(active))
 
 
 def check_v1_4_5_queries(
