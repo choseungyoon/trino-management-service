@@ -599,6 +599,102 @@ rulesExternalConfiguration:
 
 ---
 
+### T3-5. 인증(authentication) vs 인가(authorization) — **확인. TMS 설계의 전제**
+
+> **2026-08-06 추가.** "TMS는 데이터를 읽지 않으니 basic auth만으로 충분하지 않은가"라는 질문에 답하기 위해 검증했다.
+> **핵심: Trino의 system access control은 하나뿐이며, 데이터 권한과 관리 권한을 함께 관장한다. "데이터 전용 OPA"라는 분리는 Trino에 존재하지 않는다.**
+
+#### (1) 관리 엔드포인트는 반드시 system access control을 거친다 — **확인(소스)**
+
+`io/trino/server/security/ResourceSecurityDynamicFeature.java` @477
+
+```java
+case MANAGEMENT_READ:
+case MANAGEMENT_WRITE:
+    context.register(new ManagementAuthenticationFilter(fixedManagementUser, fixedManagementUserForHttps, authenticationFilter));
+    context.register(new ManagementAuthorizationFilter(accessControl, sessionContextFactory, accessType == MANAGEMENT_READ));
+```
+
+`ManagementAuthorizationFilter.filter()` 내부:
+
+```java
+Identity identity = sessionContextFactory.extractAuthorizedIdentity(authenticatedIdentity(request), request.getHeaders());
+if (read) { accessControl.checkCanReadSystemInformation(identity); }
+else      { accessControl.checkCanWriteSystemInformation(identity); }
+// AccessDeniedException → ForbiddenException("Management only resource")
+```
+
+**따라서**: `MANAGEMENT_READ` 리소스(`/v1/jmx/mbean`, `/v1/query`, `/v1/resourceGroupState/…`)는 **인증을 통과해도 `checkCanReadSystemInformation` 인가를 다시 거친다.** `access-control.name=opa` 면 이 호출이 곧 **OPA 질의**다.
+
+#### (2) 접근제어 구현별 동작 — **확인** (`/docs/477/security/built-in-system-access-control.html`)
+
+| `access-control.name` | 동작 (문서 원문 요약) |
+|---|---|
+| **`default`** (설정 파일 없을 때 기본) | *"All operations are permitted, **except for user impersonation and triggering graceful shutdown**."* |
+| `allow-all` | 전부 허용 |
+| `read-only` | 읽기만 허용 |
+| `file` | 파일 규칙 |
+| `opa` | OPA가 판정 |
+| `ranger` | Apache Ranger |
+
+**`default` 기준 TMS R1 영향 (매우 중요)**
+
+| TMS 호출 | `default`에서 | 근거 |
+|---|---|---|
+| `GET /v1/jmx/mbean/…` (`MANAGEMENT_READ`) | ✅ **허용** | impersonation·shutdown 외 전부 허용 |
+| `GET /v1/query`, `GET /v1/query/{id}` | ✅ **허용** | 동일 |
+| `PUT /v1/query/{id}/killed` | ✅ **허용** | 동일 |
+| `GET /v1/info`, `/v1/info/state` | ✅ **인증조차 불필요** | `@ResourceSecurity(PUBLIC)` (§T1-2) |
+| `PUT /v1/info/state` (graceful shutdown, R3) | ❌ **거부** | 문서 명시 |
+| **X-Trino-User로 최종 사용자 가장** | ❌ **거부** | 문서 명시 |
+
+> **→ 현재 접근제어가 `default`(또는 미설정)라면, TMS R1은 basic auth만으로 전부 동작한다.** OPA 규칙 추가가 필요 없다.
+> **→ `access-control.name=opa` 로 전환하는 순간, 위 전부가 Rego 규칙을 요구한다.**
+
+#### (3) impersonation 발동 조건 — **확인(소스)**
+
+`io/trino/server/HttpRequestSessionContextFactory.java` @477
+
+```java
+// only check impersonation if authenticated user is not the same as the explicitly set user
+if (!authenticatedIdentity.getUser().equals(originalIdentity.getUser())) {
+    accessControl.checkCanImpersonateUser(authenticatedIdentity, originalIdentity.getUser());
+}
+```
+
+- **인증된 사용자 == `X-Trino-User` 이면 impersonation 검사가 아예 일어나지 않는다.**
+- 다르면 `checkCanImpersonateUser` 호출 → OPA 플러그인은 `action.operation = "ImpersonateUser"` 를 전송한다 (`OpaAccessControl.java` 확인).
+- `checkCanSetUser` 는 **OPA 플러그인에서 빈 구현(no-op)** 이다. 인가에 관여하지 않는다.
+
+> **⚠️ 설계 함의 1 (TMS)**: **TMS는 `X-Trino-User` 를 보내지 않는다.** basic auth 서비스 계정으로만 호출하면 인증 사용자 == 세션 사용자가 되어 impersonation 경로를 타지 않는다.
+> **⚠️ 설계 함의 2 (데이터 권한 계획)**: "고정 basic auth 계정 + 사용자별 `X-Trino-User`" 방식은 **정의상 impersonation이다.** `default` 접근제어에서는 **금지되어 동작하지 않는다.** OPA(또는 `file`) 접근제어를 붙이고 Rego에 `ImpersonateUser` 허용 규칙을 넣어야 비로소 동작한다.
+
+#### (4) `management.user` — 존재하나 해결책이 아니다 — **확인(소스)**
+
+`io/trino/server/security/SecurityConfig.java` @477
+
+| property | 설명 |
+|---|---|
+| `management.user` | 관리 엔드포인트에 고정 사용자 식별자를 부여 |
+| `management.user.https-enabled` | HTTPS 요청에도 적용할지 (기본 false → **HTTPS에서는 기본적으로 무효**) |
+
+**인증만 우회하고 인가는 우회하지 않는다.** `ManagementAuthorizationFilter` 는 무조건 실행되므로 `checkCanReadSystemInformation` 은 그대로 호출된다.
+→ **OPA 규칙 회피 수단이 아니다.** 게다가 인증을 건너뛰므로 보안상 권장하지 않는다. **TMS는 사용하지 않는다.**
+
+#### (5) `GET /v1/query` 의 목록 필터링 비용 — **확인(소스)**
+
+`QueryResource.getAllQueryInfo()` 는 응답을 `filterQueries()` 로 거르며, 이는 `AccessControl.filterViewQueryOwnedBy` 를 호출한다.
+`OpaAccessControl.filterViewQueryOwnedBy` 는 `opaHighLevelClient.parallelFilterFromOpa(queryOwners, …)` 를 쓴다.
+
+- 호출 수 = **쿼리 수가 아니라 실행 중 쿼리의 distinct 소유자 수** (`Collection<Identity> queryOwners`)
+- `opa.policy.batched-uri` 미설정 시 **소유자 1명당 OPA 요청 1건**, 병렬 전송
+- `OpaBatchAccessControl`(배치 모드)이면 1건으로 합쳐진다
+
+> **⚠️ TMS 폴링 부하 함의**: TMS가 5초마다 `/v1/query` 를 호출하면, 그때마다 distinct 사용자 수만큼 OPA 질의가 발생한다. 동시 실행 사용자 50명이면 **초당 약 10건의 추가 OPA 부하**가 클러스터당 발생한다.
+> → OPA 접근제어를 도입한다면 **`opa.policy.batched-uri` 설정을 사실상 필수로 본다** (§T3-2와 동일 결론).
+
+---
+
 ## 4. 검증 결과가 무효화 / 변경한 요구사항
 
 | 요구사항 | 검증 결과에 따른 변경 | 근거 |

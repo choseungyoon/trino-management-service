@@ -126,7 +126,8 @@ FR-QUERY-HISTORY가 빠지면서 B4(대용량 히스토리 저장소)는 이월�
 
 | # | 내용 | 처리 시점 |
 |---|---|---|
-| **G-7** | `/v1/jmx/mbean` 이 우리 인증(OPA+TLS)에서 접근 가능한지 미확인 — **FR-CLUSTER-HEALTH의 주 수집 경로** | **Bolt 2 착수 전 필수 확인** |
+| ~~G-7~~ | ~~`/v1/jmx/mbean` 접근 가능 여부~~ | **2026-08-06 대부분 해소** — §T3-5 참조. `MANAGEMENT_READ` → `checkCanReadSystemInformation`. **`default` 접근제어면 허용되므로 basic auth만으로 동작.** 남은 확인은 "현재 `access-control.name` 이 무엇인가" 하나 (**B7**) |
+| **B7** | **현재 `access-control.name` 설정값** — `default`면 R1은 조치 불필요, `opa`면 Rego 규칙 필요 | **Bolt 2 착수 전 확인** (1줄 확인) |
 | H-02 | `GET /v1/info` 의 기동 상태 필드명 미확정 | Bolt 2 실응답으로 확정. 그전까지 미구현 |
 | H-03 | `ActiveCount` 가 코디네이터를 포함하는지 미확정 | Bolt 2 실측 보정 |
 | D-004 | 감사·헬스 이벤트 저장소 (PostgreSQL 권고) | **인간 승인 대기** |

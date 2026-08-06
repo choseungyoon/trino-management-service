@@ -132,6 +132,7 @@ GET /v1/query?state=QUEUED&state=WAITING_FOR_RESOURCES&state=DISPATCHING
 | 의존성 | 다운 시 TMS 동작 | 영향받는 FR | 영향 없는 FR |
 |---|---|---|---|
 | Trino 코디네이터 A | 클러스터 A만 `unknown`. B는 정상 표시 | FR-QUERY-LIVE(A), FR-CLUSTER-HEALTH(A) | 나머지 전부 |
+| **OPA** (접근제어로 도입한 경우) | `MANAGEMENT_READ` 호출이 전부 실패 → JMX·쿼리 목록 `unknown`. **단 `/v1/info`는 PUBLIC이라 계속 동작** → **H-01/H-02(코디네이터 생존·기동)는 살아남는다** | FR-QUERY-LIVE, H-03~H-07 | **H-01, H-02**, FR-PORTAL, FR-AUDIT-ACTION |
 | **모든** 코디네이터 | 쿼리/헬스 화면 전체 `unknown` + stale 배지 | FR-QUERY-LIVE, FR-CLUSTER-HEALTH | FR-PORTAL, FR-AUDIT-ACTION(조회), FR-LOG-DEEPLINK |
 | Gateway | Gateway 헬스 테스트만 `unknown`. 클러스터 목록은 정적 설정 fallback | FR-CH(gateway test) | 나머지 전부 |
 | **TMS PostgreSQL** | **쓰기 액션 전면 거부**(감사 불가 → 액션 금지). 조회는 collector 캐시 없이 불가 | 거의 전부 | — |
@@ -193,15 +194,54 @@ GET /v1/query?state=QUEUED&state=WAITING_FOR_RESOURCES&state=DISPATCHING
 
 **규칙**: 권한 밖 화면은 **노출하지 않는다**(FR-PT-04). 노출 후 클릭 시 403은 나쁜 설계다. API는 별개로 항상 서버측 검사를 수행한다.
 
-### 6-2. Trino 호출 주체
+### 6-2. Trino 호출 주체 — **basic auth 서비스 계정. `X-Trino-User` 미전송**
 
-TMS가 Trino를 호출할 때 쓰는 자격은 **TMS 서비스 계정**이며, 최종 사용자를 가장(impersonate)하지 않는다.
+근거: `TRINO_VERIFIED.md` §T3-5
 
-- 조회(`MANAGEMENT_READ`) → OPA 정책에 `ReadSystemInformation` 허용 필요
-- kill(`checkCanKillQueryOwnedBy`) → OPA 정책에 `KillQueryOwnedBy` 허용 필요
-- 근거: `TRINO_VERIFIED.md` §T3-4
+| 항목 | 결정 |
+|---|---|
+| 인증 | **HTTP Basic auth, TMS 전용 서비스 계정 1개.** 자격증명은 `config.secret.yaml` |
+| `X-Trino-User` | **보내지 않는다** |
+| `management.user` | **사용하지 않는다** (인증만 우회하고 인가는 그대로. 보안상 불리) |
 
-> **인가 판단은 TMS가 한다.** "이 사용자가 kill해도 되는가"는 §6-1 매트릭스로 TMS가 먼저 판정하고, 통과한 요청만 서비스 계정으로 Trino에 보낸다. 감사 로그에는 **실제 요청자**를 기록한다 (서비스 계정이 아니라).
+**`X-Trino-User`를 보내지 않는 이유 (소스 확인)**
+
+`HttpRequestSessionContextFactory` 는 **인증된 사용자와 세션 사용자가 다를 때만** `checkCanImpersonateUser` 를 호출한다. TMS가 헤더를 보내지 않으면 둘이 같아져 **impersonation 경로를 아예 타지 않는다.** 불필요한 인가 호출과 정책 의존을 하나 줄인다.
+
+> **TMS는 최종 사용자를 가장할 이유가 없다.** "이 사용자가 kill해도 되는가"는 §6-1 매트릭스로 **TMS가 먼저 판정**하고, 통과한 요청만 서비스 계정으로 Trino에 보낸다. 감사 로그에는 **실제 요청자**를 기록한다(서비스 계정이 아니라).
+> TMS는 테이블 데이터를 읽지 않으므로 **테이블/컬럼/행 마스킹 권한과 무관하다.**
+
+### 6-3. 접근제어 설정별 TMS 동작 (⚠️ R1 전제)
+
+**Trino의 system access control은 하나뿐이며, 데이터 권한과 관리 권한을 함께 관장한다.** "데이터 전용 OPA"라는 분리는 존재하지 않는다.
+
+| 현재 `access-control.name` | TMS R1 동작 | 필요 조치 |
+|---|---|---|
+| **`default`** (또는 미설정) | ✅ **basic auth만으로 전부 동작** | **없음** |
+| `allow-all` | ✅ 동작 | 없음 |
+| `read-only` | ⚠️ 조회 동작. **kill 가능 여부 미검증** | 확인 필요 |
+| `file` | 조건부 | system information rules 필요 |
+| **`opa`** | ❌ **Rego 규칙 없으면 403** | §6-4 |
+
+> **`default` 기준 (문서 원문)**: *"All operations are permitted, except for user impersonation and triggering graceful shutdown."*
+> → R1이 쓰는 `/v1/jmx`, `/v1/query`, kill은 전부 허용된다. R3의 graceful shutdown만 막힌다.
+
+### 6-4. OPA 접근제어 도입 시 필요한 것 (R1 착수 시점엔 불필요할 수 있음)
+
+`access-control.name=opa` 로 전환하면 TMS 호출도 전부 OPA 인가를 거친다. **데이터 규칙이 아니라 시스템 정보 규칙이 필요하다.**
+
+| TMS 호출 | OPA `action.operation` | 필요 시점 |
+|---|---|---|
+| `/v1/jmx/mbean`, `/v1/query` 목록 | `ReadSystemInformation` | R1 |
+| `/v1/query` 목록 필터링 | `FilterViewQueryOwnedBy` | R1 |
+| `/v1/query/{id}` 상세 | `ViewQueryOwnedBy` | R1 |
+| `PUT /v1/query/{id}/killed` | `KillQueryOwnedBy` | R1 |
+| `PUT /v1/info/state` (graceful shutdown) | `WriteSystemInformation` | R3 |
+
+**⚠️ 성능**: `filterViewQueryOwnedBy` 는 **실행 중 쿼리의 distinct 소유자 수만큼** OPA 요청을 보낸다(비배치 시). TMS가 5초 주기로 폴링하므로 동시 사용자 50명이면 클러스터당 **초당 약 10건**의 추가 OPA 부하가 생긴다.
+→ **`opa.policy.batched-uri` 설정을 사실상 필수로 본다** (`TRINO_VERIFIED.md` §T3-2, §T3-5).
+
+**⚠️ 별개 사안 — 데이터 권한 계획**: "고정 basic auth 계정 + 사용자별 `X-Trino-User`" 는 정의상 **impersonation**이며, **`default` 접근제어에서는 금지되어 동작하지 않는다.** OPA(또는 `file`) 도입 + Rego의 `ImpersonateUser` 허용 규칙이 있어야 성립한다. TMS 범위는 아니지만 **동일한 접근제어 설정을 공유하므로 함께 계획해야 한다.**
 
 ---
 
