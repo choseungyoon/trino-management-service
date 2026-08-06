@@ -128,9 +128,12 @@ FR-QUERY-HISTORY가 빠지면서 B4(대용량 히스토리 저장소)는 이월�
 |---|---|---|
 | ~~G-7~~ | ~~`/v1/jmx/mbean` 접근 가능 여부~~ | **2026-08-06 해소** — 환경이 `access-control.name=file` + `rules.json` 임을 확인. `MANAGEMENT_READ` → `checkCanReadSystemInformation` → **`system_information` 규칙이 없으면 기본 전부 거부** (§T3-6). **조치 = `rules.json` 에 규칙 한 블록 추가** (`ARCHITECTURE.md` §6-3-1) |
 | ~~B7~~ | ~~`rules.json` 실물 확인~~ | **2026-08-06 해소.** `system_information` 에 `prometheus_scraper`(read,write), `queries` 에 `prometheus_scraper`(allow: []) + catch-all(execute,view,kill) 확인. **→ D-005: 전용 계정 `tms-svc` 필요** (`ARCHITECTURE.md` §6-3-2) |
-| **A-1** | **`rules.json` 에 `tms-svc` 규칙 2줄 추가** (`system_information: read`, `queries: view+kill`) | **플랫폼팀. Bolt 2와 병렬 가능** |
-| **A-2** | `tms-svc` basic auth 계정 발급 | 플랫폼팀 |
-| A-3 | (권고) `prometheus_scraper` 의 `system_information` 을 `read` 로 축소 — 미사용 계정이라 지금이 비용 0 | 플랫폼팀 |
+| ~~A-1~~ | ~~`rules.json` 에 `tms-svc` 규칙 추가~~ | ✅ **완료 (2026-08-06)** |
+| ~~A-2~~ | ~~`tms-svc` basic auth 계정 발급~~ | ✅ **완료 (2026-08-06)** |
+| ~~A-3~~ | ~~`prometheus_scraper` 를 `read` 로 축소~~ | ✅ **완료 (2026-08-06)** |
+
+> **⚠️ 자격증명 취급**: `tms-svc` 비밀번호는 **`config/config.secret.yaml`(gitignore)에만** 둔다. 이 저장소는 **PUBLIC**이다(D-002). 커밋 전 diff에 자격증명이 없는지 확인한다.
+> **⚠️ 실환경 미검증**: 규칙 적용 결과는 **Bolt 2 첫 작업(V1)에서 실제 호출로 확인**한다. 문서상 성립과 실제 동작은 다를 수 있다.
 
 > **A-1/A-2가 R1 전체를 막지는 않는다.** H-01/H-02는 PUBLIC이고 FR-QUERY-LIVE는 catch-all로 동작하므로, 막히는 것은 **H-03~H-07(JMX 기반)** 뿐이다. → **Bolt 2를 규칙 승인과 병렬 진행 가능.**
 >
@@ -142,6 +145,65 @@ FR-QUERY-HISTORY가 빠지면서 B4(대용량 히스토리 저장소)는 이월�
 
 ---
 
-## Bolt 2 — R1 구현 (예정)
+## Bolt 2 — R1 구현 🔵 **계획 제시 — 인간 승인 대기**
 
-Bolt 1 승인 후 계획 수립. **착수 전 G-7 확인 필수.**
+| 항목 | 내용 |
+|---|---|
+| **목표** | R1 5개 기능 구현 및 테스트. `TRINO_VERIFIED.md` 에 없는 API는 쓰지 않는다 |
+| **기간** | 3일 (V1 결과에 따라 조정) |
+| **담당** | `backend-dev` 주도, `trino-expert` 게이트, `frontend-dev`, `reviewer` |
+| **선행 조건** | A-1/A-2/A-3 ✅ 완료. **D-004 승인 필요** |
+
+### Unit of Work
+
+| # | UoW | 산출물 | 비고 |
+|---|---|---|---|
+| **V1** | **실환경 연결 검증 (최우선, 코드 이전)** | `TRINO_VERIFIED.md` 갱신 | 아래 §V1 |
+| V2 | 프로젝트 스캐폴딩 — `pyproject`, 설정 로더, systemd 유닛 2종, DB 마이그레이션 | `src/tms/core/`, `ops/systemd/` | Python 3.9+ |
+| V3 | Trino 클라이언트 — REST + JMX, 타임아웃·서킷브레이커·`unknown` 폴백 | `src/tms/clients/trino.py` | `ARCHITECTURE.md` §4-1 |
+| V4 | `tms-collector` — 폴링 루프, 스냅샷 기록, stale 판정 | `src/tms/collector/` | 단일 인스턴스 |
+| V5 | 헬스 엔진 — H-01~H-09 (구현 가능한 것만) | `src/tms/health/` | `HEALTH_TESTS.md` |
+| V6 | 감사 미들웨어 + 저장소 | `src/tms/core/audit.py` | `AUDIT_MODEL.md` |
+| V7 | API 라우트 — `API_R1.md` 전량 | `src/tms/api/` | 쓰기 4개 포함 |
+| V8 | 딥링크 생성기 | `src/tms/deeplink/` | 순수 함수 |
+| V9 | 인증·인가 — LDAP/AD, 역할 매트릭스 | `src/tms/core/auth.py` | `ARCHITECTURE.md` §6-1 |
+| V10 | UI | `src/tms/web/` | 차트 자체 구현 금지 |
+| V11 | 테스트 — 핵심 로직 80% | `tests/` | TEAMS.md §4-3 |
+
+### §V1 — 실환경 연결 검증 (코드 작성 전 선행)
+
+**A-1/A-2/A-3이 완료됐어도 문서상 성립과 실제 동작은 다르다.** 아래를 `tms-svc` 자격으로 실제 호출해 확인한 뒤 구현에 들어간다. 결과는 `TRINO_VERIFIED.md` 에 기록한다.
+
+| # | 확인 | 실패 시 영향 |
+|---|---|---|
+| V1-1 | `GET /v1/info` — 인증 없이 200, **기동 상태 필드명 확정** | H-01/H-02 |
+| V1-2 | `GET /v1/jmx/mbean` — `tms-svc` basic auth로 200 | **H-03~H-07 전체** |
+| V1-3 | §3-2의 MBean 7종이 실제로 존재하고 값이 나오는가. **`ActiveCount` 가 코디네이터를 포함하는가** | H-03 보정 |
+| V1-4 | `GET /v1/query?state=…` — 목록이 **비어 있지 않은가** (권한 필터 확인) | FR-QUERY-LIVE |
+| V1-5 | `/v1/query` 응답 크기 실측 (피크 기준) | 폴링 주기 조정 |
+| V1-6 | `PUT /v1/query/{id}/killed` — **비프로덕션 또는 자체 생성 쿼리로만** 시험 | FR-QL-04 |
+| V1-7 | `GET /metrics?name[]=…` 응답과 MBean 이름 매핑 | 폴링 7건→1건 최적화 여부 |
+| V1-8 | 폴링 on/off 시 코디네이터 CPU 차이 (NFR-PERF-03, **기존 EventListener와 합산**) | 부하 예산 |
+
+> **V1-6 주의**: kill 시험은 프로덕션 쿼리를 대상으로 하지 않는다. TMS 자체 계정으로 긴 쿼리를 하나 띄워 그것만 죽인다. 대상 확인 없는 시험은 금지(CLAUDE.md 절대 규칙 5의 취지).
+
+### 완료 정의 (DoD)
+
+- [ ] V1 전 항목 확인 및 `TRINO_VERIFIED.md` 반영
+- [ ] `API_R1.md` 전 엔드포인트 동작
+- [ ] 쓰기 4개 전수: `reason` 없으면 400, 감사 기록 남음, DB 불가 시 503
+- [ ] `audit_action` 대상 UPDATE/DELETE 코드 부재 + 마이그레이션에 `REVOKE` 포함
+- [ ] `BAD`/`CONCERNING` 상태에 `advice` 빈 값 없음
+- [ ] NFR-PERF-03 실측 충족 (기존 EventListener 합산 기준)
+- [ ] 핵심 로직 테스트 커버리지 80%
+- [ ] `reviewer` 체크리스트 전 항목 통과
+- [ ] 자격증명이 저장소에 없음 (**PUBLIC 저장소**)
+
+### 리스크
+
+| # | 리스크 | 완화 |
+|---|---|---|
+| B2-1 | V1에서 JMX 접근이 여전히 막힘 | H-01/H-02만으로 R1 축소 출시 후 규칙 재조정 |
+| B2-2 | 코디네이터 부하가 예산 초과 | 폴링 주기 상향 + `/metrics` 묶음 조회 전환 |
+| B2-3 | LDAP/AD 연동 사양 미확인 | **기존 FastAPI 자산의 인증 패턴 재사용**. 미확인 시 V9를 뒤로 미루고 나머지 진행 |
+| B2-4 | 기존 히스토리 URL 패턴 미확인 | 설정 비우면 링크 미렌더링. 기능 차단 없음 |

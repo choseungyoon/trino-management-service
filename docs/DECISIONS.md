@@ -41,8 +41,8 @@
 | 항목 | 내용 |
 |---|---|
 | **날짜** | 2026-08-06 |
-| **결정자** | `trino-expert` 검증 → **인간 승인 대기** |
-| **상태** | 제안 |
+| **결정자** | `trino-expert` 검증 → Platform Owner 승인 |
+| **상태** | ✅ **확정 및 적용 완료 (2026-08-06)** — `rules.json` 규칙 추가, 계정 발급, `prometheus_scraper` 권한 축소 모두 완료 |
 
 **결정**: TMS는 Trino 호출에 **전용 basic auth 계정 `tms-svc`** 를 사용한다. 기존 `prometheus_scraper` 계정을 재사용하지 않는다.
 
