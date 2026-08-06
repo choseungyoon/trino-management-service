@@ -228,6 +228,29 @@ default void shutdown() {}
 
 > **FR-QUERY-LIVE(FR-QL-01/02/03)에 필요한 필드가 전부 존재한다.** 사용자·경과시간·상태·리소스그룹·진행률·CPU·피크메모리 모두 `/v1/query` 한 번으로 얻는다.
 > **⚠️ `query` 는 SQL 전문이다.** 동시 실행 쿼리가 많으면 응답이 수 MB가 될 수 있다 — 목록 스냅샷 저장 시 절단 정책 필요 (`ARCHITECTURE.md` §3-1).
+
+**⭐ 실제 응답 형식 — 로컬 Trino 477 실증 (2026-08-06)**
+
+단일 노드 Trino 477(HTTPS + PASSWORD 인증 + `file` 접근제어)을 띄워 실행 중 쿼리의 `/v1/query` 응답을 그대로 확인했다.
+
+| 필드 | 실제 값 | 타입 |
+|---|---|---|
+| `elapsedTime` | `'10.93s'` | **문자열** |
+| `queuedTime` | `'537.42us'` | **문자열** (마이크로초 단위 실사용 확인) |
+| `totalCpuTime` | `'47.99s'` | 문자열 |
+| `physicalInputDataSize` | `'0B'` | **문자열, 바이트 + `B`** |
+| `peakUserMemoryReservation` | `'10488440B'` | **문자열, 바이트 + `B`** — `'10MB'` 가 **아니다** |
+| `progressPercentage` | `0.0` | 숫자 |
+| `runningDrivers` | `8` | 정수 |
+| `fullyBlocked` | `False` | 불리언 |
+| `createTime` | `'2026-08-06T12:22:50.202230Z'` | ISO 문자열 |
+| `resourceGroupId` | `['global']` | 배열 |
+| `session.user` / `session.source` | `'analyst'` / `'superset'` | 문자열 |
+
+최상위 키 (실측): `query`, `queryId`, `queryStats`, `queryType`, `resourceGroupId`, `retryPolicy`, `scheduled`, `self`, `session`, `state`
+
+> **`DataSize` 가 사람이 읽는 단위가 아니라 항상 바이트 문자열이라는 소스 판독이 실물로 확인됐다.** 숫자로 가정했다면 모든 메모리·바이트 필드가 `None` 이 되어 화면이 비었을 것이다.
+> **응답 크기 실측**: 쿼리 1건에 **2,222 bytes** (SQL 48자 기준). 운영 환경 실측치 3,493 bytes 와 같은 자릿수다.
 >
 > **FR-FL-02(워커 등록/조인 여부)**: `system.runtime.nodes`가 1차 소스라는 REQUIREMENTS.md의 설계 판단은 유효하다. 단 컬럼이 5개뿐이므로, 인벤토리의 나머지 필드는 Ansible inventory와 `/v1/info` 조합으로 채워야 한다.
 
@@ -745,6 +768,31 @@ if (!authenticatedIdentity.getUser().equals(originalIdentity.getUser())) {
 > **⚠️ 설계 함의 1 (TMS)**: **TMS는 `X-Trino-User` 를 보내지 않는다.** basic auth 서비스 계정으로만 호출하면 인증 사용자 == 세션 사용자가 되어 impersonation 경로를 타지 않는다.
 > **⚠️ 설계 함의 2 (데이터 권한 계획)**: "고정 basic auth 계정 + 사용자별 `X-Trino-User`" 방식은 **정의상 impersonation이다.** `default` 접근제어에서는 **금지되어 동작하지 않는다.** OPA(또는 `file`) 접근제어를 붙이고 Rego에 `ImpersonateUser` 허용 규칙을 넣어야 비로소 동작한다.
 
+#### (3-1) ⚠️ **basic auth 는 HTTPS 에서만 동작한다** — **확인(소스 + 로컬 실증)**
+
+`io/trino/server/security/AuthenticationFilter.java` @477
+
+```java
+if (request.getSecurityContext().isSecure()) {
+    authenticators = this.authenticators;                      // 설정한 PASSWORD 등
+}
+else if (insecureAuthenticationOverHttpAllowed) {
+    authenticators = ImmutableList.of(insecureAuthenticator);  // ← insecure 만
+}
+else {
+    throw new ForbiddenException("Authentication over HTTP is not enabled");
+}
+```
+
+**`http-server.authentication.allow-insecure-over-http=true`(기본값)는 "HTTP에서 PASSWORD 인증을 허용"이 아니다.** "HTTP에서는 insecure 인증기만 쓴다"는 뜻이며, `InsecureAuthenticator` 는 **비밀번호가 붙은 basic auth 를 거부**한다:
+
+```
+401  Password not allowed for insecure authentication
+```
+
+> **TMS 영향**: 프로덕션은 HTTPS(`:8443`)이므로 정상이다. 다만 **HTTP 코디네이터를 상대로 TMS를 붙이면 401 로 실패**하며 메시지가 원인을 짐작하기 어렵다. 로컬 검증 중 실제로 겪었고 TLS 활성화로 해소했다.
+> **부가 요구사항**: `http-server.authentication.type=PASSWORD` 설정 시 `internal-communication.shared-secret` 이 **필수**다. 없으면 기동이 실패한다(Guice 오류).
+
 #### (4) `management.user` — 존재하나 해결책이 아니다 — **확인(소스)**
 
 `io/trino/server/security/SecurityConfig.java` @477
@@ -826,6 +874,39 @@ security.config-file=etc/rules.json
 
 > **→ FR-QUERY-LIVE는 조치 없이 동작한다.**
 > **→ FR-CLUSTER-HEALTH의 JMX 기반 테스트(H-03~H-07)는 `rules.json` 에 `system_information` 규칙을 추가해야 동작한다.**
+
+#### (3-1) ⭐ 조용한 필터링 — **로컬 Trino 477 로 실증 (2026-08-06)**
+
+운영 환경과 동일한 구조의 `rules.json` 을 로컬 Trino 477에 적용하고, **같은 클러스터·같은 순간에 계정만 바꿔** 호출했다.
+
+```jsonc
+"queries": [
+  { "user": "tms-svc",            "allow": ["view", "kill"] },
+  { "user": "prometheus_scraper", "allow": [] },
+  { "allow": ["execute", "view", "kill"] }
+]
+```
+
+| 계정 | `GET /v1/query` | JMX `RunningQueries` |
+|---|---|---|
+| `tms-svc` | **1건** (HTTP 200) | 1 |
+| `prometheus_scraper` | **0건 (HTTP 200)** — 403이 **아니다** | 1 |
+
+> **거부가 오류가 아니라 빈 배열로 나타난다는 것이 실물로 확인됐다.** 두 응답 모두 HTTP 200이며, 바디만 다르다. 교차검증 없이는 "한가한 클러스터"와 구별할 방법이 없다.
+> **H-09 교차검증이 이 상황을 정확히 잡았다** — `collection_error` 설정 + `advice` 제시, 그리고 **진짜 유휴(`RunningQueries=0`)일 때는 정상 통과**하는 것까지 함께 확인했다.
+
+#### (3-2) kill 경로 — **실증 (2026-08-06)**
+
+`PUT /v1/query/{id}/killed` 에 본문을 실어 호출한 결과:
+
+| 항목 | 결과 |
+|---|---|
+| 응답 | 200 |
+| 쿼리 상태 | `FAILED`, `errorCode = ADMINISTRATIVELY_KILLED` |
+| **사용자에게 반환된 메시지** | `Query killed. Message: Killed by TMS. actor=syhcho, reason=…, request_id=…` |
+| 권한 없는 계정의 kill | `403` → `TrinoForbidden(transient=False)` 로 분류됨 |
+
+> **운영자가 입력한 사유가 쿼리를 실행한 사용자에게 그대로 도달한다는 설계 가정이 실증됐다** (`AUDIT_MODEL.md` §4-2). Trino가 `Query killed. Message: ` 접두사를 붙인다.
 
 #### (4) 필요한 `rules.json` 추가분 (필드명 전부 문서 확인)
 
