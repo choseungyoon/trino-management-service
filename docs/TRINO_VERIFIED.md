@@ -353,7 +353,26 @@ newExporter(binder).export(CoordinatorNodeManager.class).withGeneratedName();
 > 코디네이터는 우리가 그 코디네이터에 질의해 응답을 받은 이상 항상 활성이다. 따라서 상수 1을 빼는 것이 안전하다.
 > 이 사실을 코드에 매직넘버로 넣지 않고 `config.yaml` 의 `coordinator_counted_in_active_nodes: true`(검증된 기본값)로 둔다 — 버전업으로 바뀌면 설정 한 줄로 대응한다.
 
-> **이것은 손실이 아니라 개선이다.** 구 `ActiveCount` 는 숫자 하나뿐이었으나, 위 5개는 **"몇 대가 빠졌는가"와 "왜 빠졌는가"(장애 vs 계획된 drain)를 구분**한다.
+**⭐ 다섯 집합은 서로 배타적이다 — 확인(소스)**
+
+`CoordinatorNodeManager` 는 각 노드의 상태에 대해 `switch` 로 분류하므로 **노드 하나는 정확히 한 집합에만 들어간다.**
+
+```java
+switch (remoteNodeState.getState()) {
+    case ACTIVE -> activeNodesBuilder.add(node);
+    case INACTIVE -> inactiveNodesBuilder.add(node);
+    case DRAINING -> drainingNodesBuilder.add(node);
+    case DRAINED -> drainedNodesBuilder.add(node);
+    case SHUTTING_DOWN -> shuttingDownNodesBuilder.add(node);
+    case INVALID -> invalidNodesBuilder.add(node);   // ← @Managed 카운터 없음
+    case GONE -> goneNodesBuilder.add(node);         // ← @Managed 카운터 없음
+}
+```
+
+> **H-03 판정식이 이 사실 위에 서 있다.** 집합이 겹치면 `expected - active - planned` 가 음수가 되거나 중복 차감된다.
+> **`INVALID` / `GONE` 노드는 5개 카운터 어디에도 나타나지 않는다.** 따라서 `expected - active_workers - planned` 의 잔여분이 곧 **"완전히 사라진 노드"** 이며, 이것이 정확히 H-03이 잡아야 할 대상이다.
+
+**이것은 손실이 아니라 개선이다.** 구 `ActiveCount` 는 숫자 하나뿐이었으나, 위 5개는 **"몇 대가 빠졌는가"와 "왜 빠졌는가"(장애 vs 계획된 drain)를 구분**한다.
 > - **H-03 개선**: drain 중인 노드를 장애로 오판하지 않는다
 > - **R3 FR-FLEET 직결**: graceful shutdown 진행 상황(`DrainingNodeCount` → `DrainedNodeCount`)을 폴링으로 추적할 수 있다. FR-FL-03의 drain 완료 확인 수단이 확보됐다
 

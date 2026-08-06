@@ -132,16 +132,13 @@ FR-QUERY-HISTORY가 빠지면서 B4(대용량 히스토리 저장소)는 이월�
 | ~~A-2~~ | ~~`tms-svc` basic auth 계정 발급~~ | ✅ **완료 (2026-08-06)** |
 | ~~A-3~~ | ~~`prometheus_scraper` 를 `read` 로 축소~~ | ✅ **완료 (2026-08-06)** |
 
-> **⚠️ 자격증명 취급**: `tms-svc` 비밀번호는 **`config/config.secret.yaml`(gitignore)에만** 둔다. 이 저장소는 **PUBLIC**이다(D-002). 커밋 전 diff에 자격증명이 없는지 확인한다.
-> **⚠️ 실환경 미검증**: 규칙 적용 결과는 **Bolt 2 첫 작업(V1)에서 실제 호출로 확인**한다. 문서상 성립과 실제 동작은 다를 수 있다.
-
-> **A-1/A-2가 R1 전체를 막지는 않는다.** H-01/H-02는 PUBLIC이고 FR-QUERY-LIVE는 catch-all로 동작하므로, 막히는 것은 **H-03~H-07(JMX 기반)** 뿐이다. → **Bolt 2를 규칙 승인과 병렬 진행 가능.**
->
-> **구현 요구사항 (조용한 실패 방어)**: `prometheus_scraper` 처럼 `queries` 가 거부된 계정으로 호출하면 `/v1/query` 가 **403이 아니라 빈 목록**을 반환한다. collector는 **빈 목록 + JMX `RunningQueries > 0`** 조합을 권한 문제로 판정해 `UNKNOWN` + 경고를 띄운다.
-| H-02 | `GET /v1/info` 의 기동 상태 필드명 미확정 | Bolt 2 실응답으로 확정. 그전까지 미구현 |
-| H-03 | `ActiveCount` 가 코디네이터를 포함하는지 미확정 | Bolt 2 실측 보정 |
-| D-004 | 감사·헬스 이벤트 저장소 (PostgreSQL 권고) | **인간 승인 대기** |
+| ~~H-02~~ | ~~`GET /v1/info` 기동 상태 필드명~~ | **해소** — `ServerInfo` record 의 `starting`(boolean). 소스 확인 @477 |
+| ~~H-03~~ | ~~`ActiveNodeCount` 의 코디네이터 포함 여부~~ | **해소** — 포함한다. 실측(12워커→13) |
+| ~~D-004~~ | ~~감사·헬스 이벤트 저장소~~ | **해소** — 신규 PostgreSQL 인스턴스로 확정 |
 | — | 기존 히스토리 시스템의 queryId URL 패턴 | 플랫폼팀 확인. 미확인 시 링크 미렌더링 |
+
+> **⚠️ 자격증명 취급**: `tms-svc` 비밀번호는 **`config/config.secret.yaml`(gitignore) 또는 `/etc/tms/tms.env` 에만** 둔다. 이 저장소는 **PUBLIC**이다(D-002).
+> **A-1~A-3 완료로 R1 진행을 막는 항목은 없다.** 남은 미확정은 히스토리 URL 패턴 하나이며, 비어 있으면 링크가 렌더링되지 않을 뿐 기능은 동작한다.
 
 ---
 
@@ -162,7 +159,7 @@ FR-QUERY-HISTORY가 빠지면서 B4(대용량 히스토리 저장소)는 이월�
 | ~~V2~~ | ✅ **완료** — `pyproject`, `config.yaml`, 설정 로더, systemd 유닛 2종, DB 마이그레이션 | `src/tms/core/config.py`, `migrations/001_init.sql`, `ops/systemd/` | 19 tests |
 | ~~V3~~ | ✅ **완료** — Trino 클라이언트 (REST + JMX), 오류 분류, 서킷브레이커, transport 추상화 | `src/tms/clients/` | 34 tests |
 | ~~V4~~ | ✅ **완료** — 폴링 루프, 스냅샷 기록, stale 판정, **H-09 교차검증 상시화**, 적응형 백오프, advisory lock 단일 인스턴스 강제 | `src/tms/collector/` | 43 tests |
-| V5 | 헬스 엔진 — H-01~H-09 (구현 가능한 것만) | `src/tms/health/` | `HEALTH_TESTS.md` |
+| ~~V5~~ | ✅ **완료** — 헬스 엔진 H-01~H-09, roll-up, 안정화 카운트, stale 강등 | `src/tms/health/` | 41 tests |
 | V6 | 감사 미들웨어 + 저장소 | `src/tms/core/audit.py` | `AUDIT_MODEL.md` |
 | V7 | API 라우트 — `API_R1.md` 전량 | `src/tms/api/` | 쓰기 4개 포함 |
 | V8 | 딥링크 생성기 | `src/tms/deeplink/` | 순수 함수 |

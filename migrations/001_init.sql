@@ -156,10 +156,7 @@ COMMENT ON TABLE health_test_override IS
 
 COMMIT;
 
--- ---------------------------------------------------------------------------
--- Second line of defence for the append-only guarantee (AUDIT_MODEL.md AU3).
--- Run as the owner, replacing tms_app with the application role. Kept out of
--- the transaction above so a missing role does not roll back the schema.
--- ---------------------------------------------------------------------------
--- REVOKE UPDATE, DELETE, TRUNCATE ON audit_action FROM tms_app;
--- REVOKE UPDATE, DELETE, TRUNCATE ON health_event FROM tms_app;
+-- Privileges live in 002_grants.sql. The application role is granted only
+-- SELECT and INSERT on the append-only tables, so the guarantee holds by
+-- construction rather than by revoking something first (AUDIT_MODEL.md AU3).
+-- See docs/runbooks/db-setup.md for the full procedure.
