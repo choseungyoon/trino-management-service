@@ -10,9 +10,13 @@
 
 \set app_role 'tms_app'
 
+-- Read the database name from the session instead of requiring `-v DBNAME=...`.
+-- One less flag to forget on a manual run.
+SELECT current_database() AS dbname \gset
+
 BEGIN;
 
-GRANT CONNECT ON DATABASE :"DBNAME" TO :"app_role";
+GRANT CONNECT ON DATABASE :"dbname" TO :"app_role";
 GRANT USAGE ON SCHEMA public TO :"app_role";
 
 -- ---------------------------------------------------------------------------

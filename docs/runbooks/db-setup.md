@@ -74,14 +74,13 @@ psql -h <db-host> -U tms_owner -d tms -c "\dt"
 
 ## 3. 권한 적용 (002)
 
-`002_grants.sql`은 DB 이름을 변수로 받는다.
-
 ```bash
 export PGPASSWORD='<owner-password>'
-psql -h <db-host> -U tms_owner -d tms -v ON_ERROR_STOP=1 -v DBNAME=tms \
-     -f migrations/002_grants.sql
+psql -h <db-host> -U tms_owner -d tms -v ON_ERROR_STOP=1 -f migrations/002_grants.sql
 unset PGPASSWORD
 ```
+
+DB 이름은 `current_database()` 로 스크립트가 직접 읽는다 — 별도 플래그가 필요 없다.
 
 > 애플리케이션 역할 이름이 `tms_app`이 아니면 `002_grants.sql` 첫 줄의 `\set app_role` 을 바꾼다.
 

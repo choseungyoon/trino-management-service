@@ -160,7 +160,7 @@ FR-QUERY-HISTORY가 빠지면서 B4(대용량 히스토리 저장소)는 이월�
 | ~~V3~~ | ✅ **완료** — Trino 클라이언트 (REST + JMX), 오류 분류, 서킷브레이커, transport 추상화 | `src/tms/clients/` | 34 tests |
 | ~~V4~~ | ✅ **완료** — 폴링 루프, 스냅샷 기록, stale 판정, **H-09 교차검증 상시화**, 적응형 백오프, advisory lock 단일 인스턴스 강제 | `src/tms/collector/` | 43 tests |
 | ~~V5~~ | ✅ **완료** — 헬스 엔진 H-01~H-09, roll-up, 안정화 카운트, stale 강등 | `src/tms/health/` | 41 tests |
-| V6 | 감사 미들웨어 + 저장소 | `src/tms/core/audit.py` | `AUDIT_MODEL.md` |
+| ~~V6~~ | ✅ **완료** — 감사 강제(컨텍스트 매니저), append-only 저장소, 소스 스캐너 | `src/tms/core/audit*.py` | 23 tests |
 | V7 | API 라우트 — `API_R1.md` 전량 | `src/tms/api/` | 쓰기 4개 포함 |
 | V8 | 딥링크 생성기 | `src/tms/deeplink/` | 순수 함수 |
 | V9 | 인증·인가 — LDAP/AD, 역할 매트릭스 | `src/tms/core/auth.py` | `ARCHITECTURE.md` §6-1 |
