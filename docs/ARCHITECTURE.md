@@ -114,7 +114,7 @@ GET /v1/query?state=QUEUED&state=WAITING_FOR_RESOURCES&state=DISPATCHING
 
 | 지표 | ObjectName:Attribute |
 |---|---|
-| 활성 노드 수 | `trino.failuredetector:name=HeartbeatFailureDetector:ActiveCount` |
+| **노드 수 (활성/비활성/drain/종료중)** | **`trino.node:name=CoordinatorNodeManager`** 의 `ActiveNodeCount`, `InactiveNodeCount`, `DrainingNodeCount`, `DrainedNodeCount`, `ShuttingDownNodeCount` ✅ 실환경 확인. **`ActiveNodeCount` 는 코디네이터를 포함한다(12워커→13)** |
 | 힙 사용 | `java.lang:type=Memory:HeapMemoryUsage.used` |
 | 실행 중 쿼리 | `trino.execution:name=QueryManager:RunningQueries` |
 | 실패 쿼리(5분) | `trino.execution:name=QueryManager:FailedQueries.FiveMinute.Count` |

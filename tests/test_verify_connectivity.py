@@ -133,12 +133,19 @@ class VerifyConnectivityTest(unittest.TestCase):
             "H-09 cross-check did not fire; silent filtering would go unnoticed",
         )
 
-    def test_genuinely_idle_cluster_is_not_flagged(self):
-        """Empty list AND RunningQueries == 0 is a normal idle cluster."""
+    def test_idle_cluster_is_inconclusive_not_a_pass(self):
+        """Empty list AND RunningQueries == 0 must warn, never silently pass.
+
+        An idle cluster and a fully filtered response are indistinguishable, so
+        treating this as verification of `queries:view` would be false
+        confidence. It must not be a failure either - the cluster is fine.
+        """
         vc.request = fake_request([], running_queries=0)
         result = vc.Result()
         vc.check_v1_4_5_queries(None, BASE, "tms-svc", "pw", result)
         self.assertEqual(result.failed, [], "idle cluster was misreported as a failure")
+        self.assertIn("V1-4", result.warned, "idle run was not flagged INCONCLUSIVE")
+        self.assertIn("V1-5", result.warned, "empty-response sizing was not flagged")
 
     def test_jmx_forbidden_is_actionable(self):
         vc.request = fake_request([SAMPLE_QUERY], running_queries=3, jmx_status=403)

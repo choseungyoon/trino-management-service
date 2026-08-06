@@ -72,10 +72,22 @@
 
 | 항목 | 값 |
 |---|---|
-| 소스 | **`CoordinatorNodeManager`** MBean (§T1-7-1). ObjectName 추정 `trino.node:name=CoordinatorNodeManager` — **실환경 열거로 확정 필요** |
+| 소스 | **`trino.node:name=CoordinatorNodeManager`** ✅ **실환경 200 확인 (2026-08-06)** (§T1-7-1) |
 | 읽는 속성 | `ActiveNodeCount`, `InactiveNodeCount`, `DrainingNodeCount`, `DrainedNodeCount`, `ShuttingDownNodeCount` |
 | 기준 | `config.yaml` 의 `expected_workers` |
-| 판정 | `active >= expected` → `GOOD` / `expected×0.8 <= active < expected` → `CONCERNING` / `active < expected×0.8` → `BAD` |
+| **판정식 (확정)** | 아래 |
+
+```
+# ActiveNodeCount 에 코디네이터가 포함된다 — 실측 확인 (12 워커 → 13)
+active_workers = ActiveNodeCount - (1 if coordinator_counted_in_active_nodes else 0)
+
+planned   = DrainingNodeCount + DrainedNodeCount + ShuttingDownNodeCount
+unplanned = max(0, expected_workers - active_workers - planned)
+
+unplanned == 0                        -> GOOD
+unplanned <= expected_workers * 0.2   -> CONCERNING
+otherwise                             -> BAD
+```
 | 조언(BAD) | "워커 {expected}대 중 {active}대만 활성이다. 미조인 워커의 systemd 상태와 discovery 설정을 확인하라. 클러스터 용량이 {pct}%로 떨어져 있다." |
 
 > **⛔ 2026-08-06 정정**: 원래 `trino.failuredetector:name=HeartbeatFailureDetector:ActiveCount` 를 쓰기로 했으나, **Trino 477에 그 MBean은 존재하지 않는다** (실환경 500 확인, `FailureDetectorModule` 미설치). 477 공식 문서가 코드보다 뒤처져 있었다. 상세는 `TRINO_VERIFIED.md` §T1-7 정정 블록.
@@ -90,7 +102,7 @@
 > ```
 > `unplanned` 로 GOOD/CONCERNING/BAD를 판정하고, `planned > 0` 이면 조언에 **"이 중 {planned}대는 계획된 종료 절차 중"** 을 덧붙인다. 워커를 정상적으로 줄이는 중에 헬스가 빨갛게 뜨면 운영자는 곧 헬스를 믿지 않게 된다.
 >
-> **`ActiveNodeCount` 가 코디네이터를 포함하는지 미확인.** V1 재실행 결과로 보정한다. 보정 전에는 임계값을 보수적으로 둔다.
+> ✅ **`ActiveNodeCount` 는 코디네이터를 포함한다** — 실측 확정 (워커 12대 클러스터에서 13). 매직넘버로 넣지 않고 `config.yaml` 의 `coordinator_counted_in_active_nodes: true` 로 둔다.
 > **노드 단위 식별(어느 워커가 빠졌는가)은 R1 범위 밖**이다 — R3 FR-FLEET 소관. R1은 "몇 대가, 계획된 것인가"까지 답한다.
 
 ### H-04 · 힙 사용률

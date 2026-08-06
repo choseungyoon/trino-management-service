@@ -324,6 +324,17 @@ def check_v1_4_5_queries(
                 "SILENT FILTERING: /v1/query returned 0 but JMX RunningQueries={}. "
                 "tms-svc likely lacks queries:view in rules.json.".format(running),
             )
+        elif len(queries) == 0:
+            # Both sources agree the cluster is idle. That is self-consistent, but
+            # it proves nothing about queries:view - an idle cluster and a fully
+            # filtered response look identical. Do not let this pass as verified.
+            result.warn(
+                "V1-4",
+                "INCONCLUSIVE: cluster is idle (0 queries, RunningQueries=0). "
+                "queries:view permission is NOT verified by this run - an idle "
+                "cluster and a silently filtered response are indistinguishable. "
+                "Re-run while at least one query is executing.",
+            )
         else:
             result.ok(
                 "V1-4/H-09",
@@ -340,7 +351,15 @@ def check_v1_4_5_queries(
             size_bytes, len(queries), elapsed
         )
     )
-    if size_bytes > 2_000_000:
+    if len(queries) == 0:
+        result.warn(
+            "V1-5",
+            "INCONCLUSIVE: {} bytes for an empty list says nothing about peak "
+            "size. Re-run at peak concurrency before fixing the poll interval.".format(
+                size_bytes
+            ),
+        )
+    elif size_bytes > 2_000_000:
         result.warn(
             "V1-5",
             "{} bytes is large; raise poll interval or lower query_text_max_bytes".format(
@@ -348,7 +367,18 @@ def check_v1_4_5_queries(
             ),
         )
     else:
-        result.ok("V1-5", "{} bytes".format(size_bytes))
+        per_query = size_bytes // max(1, len(queries))
+        result.ok(
+            "V1-5",
+            "{} bytes / {} queries (~{} B per query)".format(
+                size_bytes, len(queries), per_query
+            ),
+        )
+        print(
+            "       projection: 200 concurrent queries ~= {:.1f} MB per poll".format(
+                per_query * 200 / 1_000_000
+            )
+        )
 
     if queries:
         sample = queries[0]

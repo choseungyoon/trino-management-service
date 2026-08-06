@@ -341,7 +341,17 @@ newExporter(binder).export(CoordinatorNodeManager.class).withGeneratedName();
 | `DrainedNodeCount` | drain 완료 |
 | `ShuttingDownNodeCount` | 종료 중 |
 
-**예상 ObjectName**: `trino.node:name=CoordinatorNodeManager` — `withGeneratedName()` + `PrefixObjectNameGeneratorModule("io.trino")` 조합에서의 추정이다. **`withGeneratedName()` 의 정확한 출력 형식을 문서로 확정하지 못했으므로, 실환경 `GET /v1/jmx/mbean` 열거로 확정해야 한다.** (바로 이 추정 실패가 500을 유발했으므로 같은 실수를 반복하지 않는다.)
+**ObjectName**: **`trino.node:name=CoordinatorNodeManager`** — ✅ **실환경 200 확인 (2026-08-06)**
+
+**실측값 (2026-08-06, 워커 12대 클러스터)**
+
+| 항목 | 값 | 의미 |
+|---|---|---|
+| `ActiveNodeCount` | **13** | `expected_workers(12) + 1` → **코디네이터가 포함된다** ✅ 확정 |
+
+> **H-03 판정식 확정**: `active_workers = ActiveNodeCount - 1`
+> 코디네이터는 우리가 그 코디네이터에 질의해 응답을 받은 이상 항상 활성이다. 따라서 상수 1을 빼는 것이 안전하다.
+> 이 사실을 코드에 매직넘버로 넣지 않고 `config.yaml` 의 `coordinator_counted_in_active_nodes: true`(검증된 기본값)로 둔다 — 버전업으로 바뀌면 설정 한 줄로 대응한다.
 
 > **이것은 손실이 아니라 개선이다.** 구 `ActiveCount` 는 숫자 하나뿐이었으나, 위 5개는 **"몇 대가 빠졌는가"와 "왜 빠졌는가"(장애 vs 계획된 drain)를 구분**한다.
 > - **H-03 개선**: drain 중인 노드를 장애로 오판하지 않는다
