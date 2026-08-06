@@ -1,0 +1,101 @@
+# TMS configuration - non-secret values only.
+#
+# This file is tracked in git and the repository is PUBLIC (DECISIONS.md D-002).
+# Never put credentials, real hostnames, or internal IPs here.
+# Secrets belong in config.secret.yaml (gitignored) or the environment.
+
+clusters:
+  # Gateway is disabled for now (B6), so this list is the source of truth for
+  # which clusters exist. See ARCHITECTURE.md 6-3-2.
+  - name: prod-a
+    coordinator_url: https://trino-a-coordinator.example.internal:8443
+    expected_workers: 12
+    trino_ui_url: https://trino-a-coordinator.example.internal:8443/ui/
+  - name: prod-b
+    coordinator_url: https://trino-b-coordinator.example.internal:8443
+    expected_workers: 12
+    trino_ui_url: https://trino-b-coordinator.example.internal:8443/ui/
+
+trino:
+  # Basic auth service account. Password comes from config.secret.yaml or
+  # TMS_TRINO_PASSWORD. TMS never sends X-Trino-User: keeping the authenticated
+  # user equal to the session user avoids the impersonation check entirely
+  # (TRINO_VERIFIED.md T3-5).
+  user: tms-svc
+  verify_tls: true
+  connect_timeout_seconds: 2
+  read_timeout_seconds: 5
+  write_timeout_seconds: 10
+  # Reads are retried, writes never are: a retried kill can kill twice.
+  read_retries: 2
+  circuit_breaker_failures: 5
+  circuit_breaker_reset_seconds: 30
+
+collector:
+  query_poll_interval_seconds: 5
+  jmx_poll_interval_seconds: 15
+  info_poll_interval_seconds: 30
+  # Snapshots older than this are surfaced as stale and every health test is
+  # downgraded to UNKNOWN. Never show stale data as current.
+  stale_threshold_seconds: 30
+  # SQL text stored in the list snapshot is truncated here. Full text is fetched
+  # on demand from GET /v1/query/{queryId}.
+  query_text_max_bytes: 4096
+  # Measured 2026-08-06: ~3.5 KB per running query. 1,000 concurrent queries is
+  # therefore ~3.5 MB per poll. Peak concurrency is still unknown
+  # (WORKLOAD_PROFILE.md W2), so back off automatically instead of guessing.
+  response_backoff_bytes: 5000000
+  response_backoff_interval_seconds: 10
+
+trino_facts:
+  # CoordinatorNodeManager.ActiveNodeCount includes the coordinator.
+  # Verified 2026-08-06: a 12-worker cluster reports 13.
+  # Kept as configuration rather than a magic number so a version change is a
+  # one-line fix. See TRINO_VERIFIED.md T1-7-1.
+  coordinator_counted_in_active_nodes: true
+
+gateway:
+  # Disabled until the running Gateway version is confirmed (B6).
+  # While disabled, health test H-08 is removed from the catalogue entirely
+  # rather than reported as permanently UNKNOWN.
+  enabled: false
+  base_url: ""
+
+health:
+  # Consecutive polls a test must hold a state before the transition is
+  # recorded. Stops a single spike from generating an event.
+  stabilization_polls: 3
+  thresholds:
+    heap_used_pct_concerning: 80
+    heap_used_pct_bad: 90
+    failure_rate_pct_concerning: 5
+    failure_rate_pct_bad: 20
+    internal_failures_concerning: 1
+    internal_failures_bad: 5
+    oom_kills_concerning: 1
+    oom_kills_bad: 3
+    # H-03 works on unplanned missing workers; drain and shutdown are excluded.
+    missing_workers_pct_bad: 20
+  long_running_query_seconds: 300
+
+deeplinks:
+  # Empty values render no link at all rather than a dead one.
+  log:
+    template: ""
+    padding_seconds: 300
+  query_history:
+    # The separate query-history project (DECISIONS.md D-001). This is the only
+    # R1 entry point for completed queries, so fill it in as soon as known.
+    query_url_template: ""
+    home_url: ""
+  grafana:
+    cluster_dashboard: ""
+  superset_url: ""
+
+portal:
+  session_idle_timeout_minutes: 30
+  session_absolute_timeout_hours: 12
+
+server:
+  host: 127.0.0.1
+  port: 8500

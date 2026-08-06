@@ -1,0 +1,45 @@
+[Unit]
+# Stateless. Safe to scale out: it reads snapshots from PostgreSQL and never
+# polls Trino on a timer, so extra workers add no load to any coordinator
+# (ARCHITECTURE.md principle A3). Write actions (kill) go straight to Trino from
+# here, on the user's request only.
+Description=TMS API - FastAPI service for the Trino Management Service
+Documentation=https://github.com/choseungyoon/trino-management-service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Must match the owner of the virtualenv (TEAMS.md infra-agent).
+User=tms
+Group=tms
+WorkingDirectory=/opt/tms
+
+Environment=PYTHONUNBUFFERED=1
+Environment=TMS_CONFIG=/opt/tms/config/config.yaml
+# Credentials arrive through the environment so they never enter the repo,
+# which is PUBLIC. Keep this file 0600 and owned by root:tms.
+EnvironmentFile=-/etc/tms/tms.env
+
+ExecStart=/opt/tms/venv/bin/tms-api
+
+Restart=on-failure
+RestartSec=5s
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log/tms
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=tms-api
+
+[Install]
+WantedBy=multi-user.target

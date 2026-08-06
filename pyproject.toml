@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tms"
+version = "0.1.0"
+description = "Trino Management Service - operational console for OSS Trino"
+readme = "README.md"
+# Python 3.9 is the floor: several target hosts still ship 3.9.
+# Do not use 3.10+ syntax (no `X | Y` unions, no `match`).
+requires-python = ">=3.9"
+
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "PyYAML>=6.0",
+    "httpx>=0.27",
+    "psycopg[binary]>=3.1",
+    "python-multipart>=0.0.9",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.4",
+]
+
+[project.scripts]
+tms-api = "tms.api.main:run"
+tms-collector = "tms.collector.main:run"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+target-version = "py39"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+# UP006/UP007 would rewrite typing.List / Optional into 3.10+ syntax.
+ignore = ["UP006", "UP007", "UP035"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

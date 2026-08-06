@@ -1,0 +1,49 @@
+[Unit]
+# Single instance, always. This is the only process that polls Trino.
+# Running two of these doubles the load on every coordinator and quietly breaks
+# NFR-PERF-03 (ARCHITECTURE.md principle A3). Do not add a template unit or an
+# @-instance for this service.
+Description=TMS collector - polls Trino coordinators and writes snapshots
+Documentation=https://github.com/choseungyoon/trino-management-service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Must match the owner of the virtualenv (TEAMS.md infra-agent).
+User=tms
+Group=tms
+WorkingDirectory=/opt/tms
+
+Environment=PYTHONUNBUFFERED=1
+Environment=TMS_CONFIG=/opt/tms/config/config.yaml
+# Credentials arrive through the environment so they never enter the repo,
+# which is PUBLIC. Keep this file 0600 and owned by root:tms.
+EnvironmentFile=-/etc/tms/tms.env
+
+ExecStart=/opt/tms/venv/bin/tms-collector
+
+Restart=on-failure
+RestartSec=5s
+# Repeated crash detection (Cloudera Manager pattern). systemd gives up after
+# 5 failures in 5 minutes, which surfaces as a unit failure rather than an
+# endless restart loop nobody notices.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+# The collector reads Trino and writes PostgreSQL. It needs nothing else.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log/tms
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=tms-collector
+
+[Install]
+WantedBy=multi-user.target
