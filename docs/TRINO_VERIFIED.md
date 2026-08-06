@@ -212,6 +212,22 @@ default void shutdown() {}
 - 기타 `system.runtime` 테이블: `tasks`, `transactions`, `optimizer_rule_stats` — **확인**
 
 > `system.runtime.queries`에는 CPU time·메모리 사용량 컬럼이 **없다.** 실행 중 쿼리의 리소스 소비가 필요하면 `/v1/query`의 `BasicQueryInfo`(→ `BasicQueryStats`)를 써야 한다.
+
+**`state` 파라미터 유효값 — 확인(소스)** `io/trino/execution/QueryState.java` @477
+
+`QUEUED`, `WAITING_FOR_RESOURCES`, `DISPATCHING`, `PLANNING`, `STARTING`, `RUNNING`, `FINISHING`, `FINISHED`, `FAILED` (9종)
+종료 상태(`isDone() == true`)는 `FINISHED`, `FAILED` 둘뿐이다. `@QueryParam("state") Set<String>` 이므로 `?state=A&state=B` 형태로 복수 지정한다.
+
+**`BasicQueryInfo` 필드 — 확인(소스)** `io/trino/server/BasicQueryInfo.java` @477
+
+`queryId`, `session`, **`resourceGroupId`**, `state`, `scheduled`, `self`, `query`, `updateType`, `preparedQuery`, `queryStats`, `errorType`, `errorCode`, `queryType`, `retryPolicy`
+
+**`BasicQueryStats` 필드 — 확인(소스)** `io/trino/server/BasicQueryStats.java` @477
+
+`createTime`, `endTime`, `queuedTime`, **`elapsedTime`**, `executionTime`, `planningTime`, `analysisTime`, `finishingTime`, `physicalInputReadTime`, **`totalCpuTime`**, `failedCpuTime`, `totalScheduledTime`, `failedScheduledTime`, `failedTasks`, `totalDrivers`/`queuedDrivers`/`runningDrivers`/`completedDrivers`/`blockedDrivers`, `processedInputPositions`, `physicalInputDataSize`, `physicalWrittenDataSize`, `internalNetworkInputDataSize`, `spilledDataSize`, `cumulativeUserMemory`, `failedCumulativeUserMemory`, `userMemoryReservation`, `totalMemoryReservation`, **`peakUserMemoryReservation`**, `peakTotalMemoryReservation`, `fullyBlocked`, `blockedReasons`, **`progressPercentage`**, `runningPercentage`
+
+> **FR-QUERY-LIVE(FR-QL-01/02/03)에 필요한 필드가 전부 존재한다.** 사용자·경과시간·상태·리소스그룹·진행률·CPU·피크메모리 모두 `/v1/query` 한 번으로 얻는다.
+> **⚠️ `query` 는 SQL 전문이다.** 동시 실행 쿼리가 많으면 응답이 수 MB가 될 수 있다 — 목록 스냅샷 저장 시 절단 정책 필요 (`ARCHITECTURE.md` §3-1).
 >
 > **FR-FL-02(워커 등록/조인 여부)**: `system.runtime.nodes`가 1차 소스라는 REQUIREMENTS.md의 설계 판단은 유효하다. 단 컬럼이 5개뿐이므로, 인벤토리의 나머지 필드는 Ansible inventory와 `/v1/info` 조합으로 채워야 한다.
 

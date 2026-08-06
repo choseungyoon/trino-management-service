@@ -16,7 +16,9 @@
 
 ---
 
-## Bolt 1 — R1 상세 설계 🔵 **계획 제시 — 인간 승인 대기**
+## Bolt 1 — R1 상세 설계 🟡 **설계 완료 — 인간 검토 대기**
+
+> **2026-08-06 진행 상황**: U1~U8 산출물 작성 완료. 아래 계획은 원안이며, 실제 산출물은 §Bolt 1 결과 참조.
 
 | 항목 | 내용 |
 |---|---|
@@ -88,6 +90,50 @@ FR-QUERY-HISTORY가 빠지면서 B4(대용량 히스토리 저장소)는 이월�
 
 ---
 
+### Bolt 1 결과 (2026-08-06)
+
+**산출물**
+
+| UoW | 산출물 | 상태 |
+|---|---|---|
+| U1, U2, U4, U6, U7 | `docs/ARCHITECTURE.md` | ✅ |
+| U3 | `docs/HEALTH_TESTS.md` | ✅ |
+| U5 | `docs/AUDIT_MODEL.md` | ✅ |
+| U8 | `docs/API_R1.md` | ✅ |
+
+**설계 중 확정된 핵심 판단**
+
+| # | 판단 | 근거 |
+|---|---|---|
+| A1 | **TMS는 Trino에 SQL 쿼리를 제출하지 않는다.** REST + JMX-over-HTTP만 | `system.runtime.*` 폴링은 쿼리 슬롯을 먹고, **하루 약 17,000건의 TMS 쿼리를 기존 히스토리 시스템에 주입해 남의 데이터를 오염시킨다** |
+| A3 | 폴링 주체를 `tms-collector` 단일 유닛으로 분리 | API를 스케일아웃하면 폴링도 N배가 되어 NFR-PERF-03이 조용히 깨진다 |
+| — | 완료 상태(`FINISHED`/`FAILED`)는 `GET /v1/query` 에서 요청하지 않는다 | 완료 쿼리는 D-001로 기존 프로젝트 소관. 응답 크기도 줄어든다 |
+| — | 감사 저장소 불가 시 **쓰기 API 전면 503** | 감사 없는 쓰기를 허용하는 우회로를 만들지 않는다 (AU1) |
+
+**Bolt 1에서 추가 검증한 Trino 477 사실** (`TRINO_VERIFIED.md` 보강 대상)
+- `QueryState` enum 값 9종: `QUEUED`, `WAITING_FOR_RESOURCES`, `DISPATCHING`, `PLANNING`, `STARTING`, `RUNNING`, `FINISHING`, `FINISHED`, `FAILED`
+- `BasicQueryInfo` / `BasicQueryStats` 필드 전량 — FR-QUERY-LIVE에 필요한 `resourceGroupId`, `elapsedTime`, `totalCpuTime`, `peakUserMemoryReservation`, `progressPercentage` 가 **전부 존재**
+
+### ⚠️ Bolt 1이 제안하는 요구사항 축소 (인간 승인 필요)
+
+| 항목 | 내용 | 이관처 |
+|---|---|---|
+| **FR-CH-06** | 반복 크래시 감지 — systemd `Restart=` 이력이 필요해 노드 접근이 전제된다 | R3 FR-FLEET |
+| **FR-LD-02** | 노드 상세 → 로그 딥링크 — R1에 노드 상세 화면 자체가 없다 | R3 FR-FLEET |
+| 헬스 테스트 6종 | GC pause(MBean 미검증), 리소스그룹 큐뎁스(R2), 디스크(node_exporter), systemd(R3), OPA(R4) | 각 표기 |
+
+### Bolt 1 잔여 리스크
+
+| # | 내용 | 처리 시점 |
+|---|---|---|
+| **G-7** | `/v1/jmx/mbean` 이 우리 인증(OPA+TLS)에서 접근 가능한지 미확인 — **FR-CLUSTER-HEALTH의 주 수집 경로** | **Bolt 2 착수 전 필수 확인** |
+| H-02 | `GET /v1/info` 의 기동 상태 필드명 미확정 | Bolt 2 실응답으로 확정. 그전까지 미구현 |
+| H-03 | `ActiveCount` 가 코디네이터를 포함하는지 미확정 | Bolt 2 실측 보정 |
+| D-004 | 감사·헬스 이벤트 저장소 (PostgreSQL 권고) | **인간 승인 대기** |
+| — | 기존 히스토리 시스템의 queryId URL 패턴 | 플랫폼팀 확인. 미확인 시 링크 미렌더링 |
+
+---
+
 ## Bolt 2 — R1 구현 (예정)
 
-Bolt 1 승인 후 계획 수립.
+Bolt 1 승인 후 계획 수립. **착수 전 G-7 확인 필수.**
