@@ -365,9 +365,25 @@ collector started for 2 cluster(s): prod-a, prod-b
 
 **스냅샷이 실제로 쌓이는지 확인**
 ```sql
-SELECT cluster, kind, collected_at, collection_error
+SELECT cluster, kind, collected_at, collection_error,
+       length(payload::text) AS payload_bytes
 FROM collector_snapshot ORDER BY cluster, kind;
 ```
+
+**기동 실패 / 스냅샷 이상 진단**
+
+| 증상 | 원인 | 조치 |
+|---|---|---|
+| `Unit tms-collector.service not found` | 유닛 미설치 | §9 첫 `cp` + `daemon-reload` |
+| `status=203/EXEC` | `/opt/tms/venv/bin/tms-collector` 없음 | §2 `pip install /opt/tms` 재확인 |
+| 기동 실패 `configuration error` / `is required` | `config.yaml` 또는 `/etc/tms/tms.env` 미완 | §6 |
+| 기동 실패 DB 접속 오류 | `TMS_DATABASE_URL` 오류·방화벽 | §3, §6-2 |
+| `another tms-collector already holds the advisory lock` | 중복 기동 | **정상 차단.** 위 경고 참조 |
+| `collection_error` 에 `TrinoForbidden` | `rules.json` 권한 | §4-2 |
+| `collection_error` 에 `MBeanNotRegistered` | 버전업으로 MBean 이름 변경 | `GET /v1/jmx/mbean` 열거 후 보고 |
+| `collection_error` 에 `filtered by access control` | **H-09 발동** — 목록이 조용히 비었다 | §4-2 `queries: view`. 조용한 실패를 잡은 것이므로 **정상 동작** |
+| 인증서 오류 / `ConnectError` | 내부 CA 미신뢰 | §7 |
+| 행이 아예 없음 | 폴링 미도달 | `journalctl -u tms-collector -n 100` |
 
 > **⛔ collector 는 절대 1개만 띄운다.** 2개를 띄우면 모든 코디네이터에 부하가 2배가 되어 NFR-PERF-03 이 조용히 깨진다. 중복 기동은 PostgreSQL advisory lock 으로 차단되며 `another tms-collector already holds the advisory lock; exiting` 를 남기고 **종료 코드 4** 로 끝난다 — **이건 정상 동작이다.**
 >

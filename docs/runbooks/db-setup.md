@@ -4,6 +4,16 @@
 **수행**: 플랫폼팀 (사내망 DB이므로 직접 실행)
 **소요**: 약 10분
 
+> **이 문서의 위치**: 전체 배포는 [`deploy.md`](deploy.md) 가 주관하고, 이 런북은 그 §3(DB 구축)에 해당한다.
+> **이 문서는 §6 에서 끝난다.** 서비스 기동(collector/api)은 코드·설정·systemd 유닛이 모두 갖춰진 뒤의 일이라 `deploy.md` §9 소관이다.
+>
+> ```
+> deploy.md §1~2  코드 + venv
+> deploy.md §3    ← 이 문서 (§0~§6)
+> deploy.md §4~8  Trino 권한 · 연결 검증 · 설정 · 계정
+> deploy.md §9    collector / api 기동
+> ```
+
 > ⚠️ **Gateway용 PostgreSQL에 만들지 않는다.** Gateway DB는 queryId→backend 조회로 **쿼리 경로의 일부**다. TMS가 부하를 얹으면 NFR-ISOLATION 취지에 어긋난다 (D-004).
 
 ---
@@ -195,36 +205,25 @@ PY
 
 ---
 
-## 7. collector 기동 (첫 통합 확인 지점)
+## 7. collector 기동 — **이 문서에서 하지 않는다**
 
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now tms-collector
-sudo journalctl -u tms-collector -f
-```
+> **⛔ 여기서 `systemctl enable --now tms-collector` 를 실행하지 마라. 실패한다.**
+>
+> DB 만 준비된 상태에서는 성공할 수 없다. collector 기동에는 아래가 **전부** 필요하다.
+>
+> | 필요한 것 | 준비하는 곳 |
+> |---|---|
+> | `/opt/tms` 코드 + `venv` (`tms-collector` 실행 파일) | `deploy.md` §1~2 |
+> | `config.yaml` 의 실제 클러스터 주소 | `deploy.md` §6-1 |
+> | `/etc/tms/tms.env` (DB URL·Trino 비밀번호·세션 키) | `deploy.md` §6-2 |
+> | Trino `rules.json` 권한 | `deploy.md` §4 |
+> | `/etc/systemd/system/tms-collector.service` | `deploy.md` §9 |
+>
+> **DB 구축은 §6 에서 끝난다.** 이어서 `deploy.md` 로 가라. 그 문서가 이 런북을 §3 에서 호출하고, collector 기동은 §9-1 에서 다룬다.
 
-**정상 로그**
+**→ 다음: [`deploy.md`](deploy.md) §4 부터 계속**
 
-```
-collector started for 2 cluster(s): prod-a, prod-b
-```
-
-**확인 쿼리** — 폴링이 실제로 스냅샷을 쓰는지:
-
-```sql
-SELECT cluster, kind, collected_at, collection_error,
-       length(payload::text) AS payload_bytes
-FROM collector_snapshot
-ORDER BY cluster, kind;
-```
-
-| 증상 | 원인 | 조치 |
-|---|---|---|
-| `collection_error`에 `TrinoForbidden` | `rules.json` 권한 | `system_information:read` / `queries:view` 확인 |
-| `collection_error`에 `MBeanNotRegistered` | MBean 이름 변경(버전업) | `GET /v1/jmx/mbean` 열거로 실제 이름 확인 |
-| `collection_error`에 `filtered by access control` | **H-09 발동** — 목록이 조용히 비었다 | `queries:view` 확인. 조용한 실패를 잡은 것이므로 정상 동작 |
-| `another tms-collector already holds the advisory lock` | 두 번째 인스턴스 | **정상 차단.** 중복 기동 여부 확인 |
-| 행이 아예 없음 | 폴링 미도달 | `journalctl -u tms-collector` 확인 |
+(이 런북만 단독으로 수행 중이라면, DB 쪽 할 일은 §6 으로 완료다.)
 
 ---
 
