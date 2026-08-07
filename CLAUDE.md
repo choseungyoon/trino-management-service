@@ -89,6 +89,7 @@ TMS가 완전히 다운되어도 모든 쿼리는 정상 실행되어야 한다.
 | `docs/TRINO_VERIFIED.md` | **검증 완료 사실만 기록** (trino-expert 소유). 여기 없는 property/API는 코드에 넣지 않는다 | **기술 가정 확인 시 항상** |
 | `docs/BOLT_0_RESULT.md` | Bolt 0 판정 결과 — Blocker 판정, SETUP 우선순위, 근본원인 체크리스트, 인간 결정 대기 목록 | 착수 범위·우선순위 확인 시 |
 | `docs/WORKLOAD_PROFILE.md` | 워크로드 특성화 (**데이터 미수집**). B4·SLO 목표값을 막고 있음 | 사이징·SLO 논의 시 |
+| `docs/runbooks/deploy.md` | **사내 실환경 배포 가이드** — git pull → DB → 설정 → systemd → Trino 연결까지 전 과정 | 실환경 배포·업데이트 시 |
 
 ---
 

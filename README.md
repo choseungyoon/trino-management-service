@@ -38,7 +38,10 @@ docs/TRINO_VERIFIED.md 에 없는 config property / API 경로 / SPI 시그니�
 │   ├── BOLTS.md               # (진행 중) Bolt 이력
 │   ├── DECISIONS.md           # (진행 중) 의사결정 기록
 │   ├── REVIEW_LOG.md          # (진행 중) 리뷰 이력
-│   └── runbooks/              # 알림별 런북
+│   └── runbooks/              # 운영 런북
+│       ├── deploy.md          # ⭐ 사내 실환경 배포 (git pull → DB → 기동 → Trino 연결)
+│       ├── db-setup.md        # PostgreSQL 초기 구축
+│       └── local-account-setup.md  # 로컬 계정 (AD 연동 전까지 임시)
 ├── src/
 │   ├── tms/
 │   │   ├── api/               # FastAPI 라우트
