@@ -169,11 +169,51 @@ default void shutdown() {}
 | 보안 | `@ResourceSecurity(MANAGEMENT_READ)` |
 | 부가 | `@Encoded` — 경로 세그먼트를 URL 디코딩하지 않는다 |
 
-**방법 B — JMX** — **부분 확인**
+> **⛔ 2026-08-08 실측 정정 — 위 표의 "점 포함 ID 그대로 사용 가능" 은 사실이 아니다.**
+>
+> 경로 정규식 `{resourceGroupId: .+}` 이 점을 매칭하는 것은 맞지만, **조회는 실패한다.** 로컬 Trino 477 에 `global → adhoc → dashboard` 3단계를 구성하고 실제로 쿼리를 흘린 뒤 측정했다.
+>
+> | 요청 | 결과 |
+> |---|---|
+> | `GET /v1/resourceGroupState/global` | **200** |
+> | `GET /v1/resourceGroupState/global.adhoc` | **404** |
+> | `GET /v1/resourceGroupState/global.adhoc.dashboard` | **404** |
+> | `GET /v1/resourceGroupState/global%2Eadhoc` (URL 인코딩) | **404** |
+>
+> **루트 그룹 이름만 받는다.** 소스의 정규식만 보고 역산한 가정이 실제 동작과 달랐던 사례다.
+>
+> **⛔ 게다가 응답은 root + 1단계까지만 내려준다.** `global` 응답의 `subGroups[0]`(= `adhoc`)에는 **`subGroups` 키 자체가 없다.** 그런데 같은 응답의 `runningQueries[].resourceGroupId` 는 `["global","adhoc","dashboard"]` 로 3단계를 가리킨다.
+>
+> **결론: 이 REST 엔드포인트만으로는 리소스 그룹 트리를 만들 수 없다.** 2단계 아래는 조회할 방법이 없다. FR-WORKLOAD / FR-GW-02 는 아래 JMX 경로를 써야 한다.
+
+**방법 B — JMX** — ✅ **확인 완료 (2026-08-08 실측). Bolt 0 의 "ObjectName 확인 불가" 항목 해소**
 
 - 리소스 그룹 JSON에 `"jmxExport": true` 를 설정하면 해당 그룹이 JMX로 export 된다. — **확인** (`/docs/477/admin/resource-groups.html`)
-- 소스상 export 호출은 `exporter.exportWithGeneratedName(group, InternalResourceGroup.class, group.getId().toString())` 이며, Trino는 `PrefixObjectNameGeneratorModule("io.trino")`를 사용한다. — **확인(소스)**
-- **최종 ObjectName 문자열은 확인 불가.** 생성 규칙을 소스로 역산하는 것은 추측이 된다. **실환경에서 `GET /v1/jmx/mbean` 목록을 받아 확정할 것** (아래 T1-7).
+- **ObjectName 실측 확정** — `jmxExport: true` 를 준 4개 그룹 중 트래픽이 흐른 3개가 등록됐다.
+
+```
+trino.execution.resourcegroups:name=InternalResourceGroupManager
+trino.execution.resourcegroups:type=InternalResourceGroup,name=global
+trino.execution.resourcegroups:type=InternalResourceGroup,name=global.adhoc
+trino.execution.resourcegroups:type=InternalResourceGroup,name=global.adhoc.dashboard
+```
+
+> **중첩 그룹은 각자 독립된 MBean 을 갖고, `name=` 에 전체 점 경로가 들어간다.** 부모 MBean 안에 중첩되지 않는다. 따라서 **`GET /v1/jmx/mbean` 을 열거해 `type=InternalResourceGroup` 을 필터링하면 전체 트리를 복원할 수 있다.** REST 의 깊이 제한을 우회하는 유일한 경로다.
+
+**MBean 속성 31개** (`io.trino.execution.resourcegroups.InternalResourceGroup`) — 주요 항목:
+
+| 속성 | 비고 |
+|---|---|
+| `RunningQueries`, `QueuedQueries`, `WaitingQueuedQueries` | 현재 상태 |
+| `HardConcurrencyLimit`, `MaxQueuedQueries` | **읽기/쓰기 모두 가능** |
+| `SoftConcurrencyLimit`, `SoftMemoryLimitBytes`, `SoftCpuLimitMillis`, `HardCpuLimitMillis` | 읽기 전용 |
+| `CpuUsageMillis`, `MemoryUsageBytes`, `PhysicalInputDataUsageBytes` | 누적 사용량 |
+| `StartedQueries.*`, `TimeBetweenStartsSec.*` | 1/5/15분 EWMA + TotalCount |
+
+> **⛔ 두 가지 함정**
+>
+> 1. **리소스 그룹은 지연 생성된다.** 설정에 있어도 **쿼리가 한 번이라도 배정되기 전에는 MBean 도 없고 REST 응답의 `subGroups` 에도 없다.** 실측에서 `global.etl` 은 설정에 있었으나 트래픽이 없어 어디에도 나타나지 않았다. → **TMS 는 "설정되었으나 유휴인 그룹"을 알 수 없다.** 전체 목록이 필요하면 `resource-groups.json` 자체를 읽어야 한다.
+> 2. **`HardConcurrencyLimit`·`MaxQueuedQueries` 쓰기는 런타임 한정으로 보인다.** 파일 기반 설정이 재시작 시 다시 적용되므로 JMX 로 바꾼 값은 사라질 가능성이 높다(**미검증**). R2 에서 이 쓰기를 기능으로 노출한다면 **"재시작하면 되돌아간다"는 점을 반드시 확인하고 화면에 명시해야 한다** — 비밀번호 해시 미반영과 같은 부류의 함정이다.
 
 **리소스 그룹 설정 property** — **확인**
 
