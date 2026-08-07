@@ -540,6 +540,49 @@ server {
 
 `/`(UI), `/api/`, `/ui/static`, `/health`, `/ready` 가 전부 같은 앱이므로 **경로 분기 없이 통째로 넘기면 된다.**
 
+**적용과 확인**
+
+```bash
+sudo nginx -t && sudo systemctl reload nginx
+
+# 브라우저를 열기 전에 nginx 를 통과하는지부터 확인한다
+curl -sk -o /dev/null -w "%{http_code}\n" https://127.0.0.1/     # 303 이면 정상
+```
+
+| 결과 | 의미 | 조치 |
+|---|---|---|
+| `303` | 정상 — `/login` 으로 리다이렉트 | 브라우저로 접속 |
+| `502` | nginx 가 백엔드에 붙지 못함 | 아래 SELinux 확인, `tms-api` 상태 확인 |
+| `404` | UI 미마운트 | §8 `portal.local_users` |
+| 연결 거부 | nginx 미기동·방화벽 | `systemctl status nginx`, 443 방화벽 |
+
+> **⚠️ RHEL·Rocky·CentOS 계열에서 `502` 가 나오면 SELinux 를 먼저 의심하라.** 기본 정책이 nginx 의 아웃바운드 접속을 막아서, 설정이 완벽해도 502 가 난다. `sudo tail /var/log/audit/audit.log | grep denied` 로 확인되면:
+>
+> ```bash
+> sudo setsebool -P httpd_can_network_connect 1
+> ```
+>
+> `-P` 를 붙여야 재부팅 후에도 유지된다. **SELinux 를 통째로 끄지 마라** — 이 서비스는 프로덕션 쿼리를 죽일 수 있는 자격증명을 들고 있다.
+
+**방화벽** — 외부에서 443 이 열려 있어야 한다.
+
+```bash
+sudo firewall-cmd --add-service=https --permanent && sudo firewall-cmd --reload   # firewalld
+# 또는
+sudo ufw allow 443/tcp                                                            # ufw
+```
+
+**인증서** — 사내 CA 발급 인증서가 원칙이다. 아직 없어 우선 붙여만 보겠다면 자체 서명으로도 동작한다(브라우저 경고가 뜬다).
+
+```bash
+sudo openssl req -x509 -newkey rsa:2048 -nodes -days 30 \
+  -keyout /etc/ssl/private/tms.key -out /etc/ssl/certs/tms.pem \
+  -subj "/CN=<tms-host>" -addext "subjectAltName=DNS:<tms-host>"
+sudo chmod 600 /etc/ssl/private/tms.key
+```
+
+> 자체 서명은 **임시방편이다.** 운영자들이 매번 경고를 클릭해 넘기는 데 익숙해지면, 진짜 중간자 공격이 있어도 똑같이 넘긴다. 사내 CA 인증서로 교체할 티켓을 걸어라.
+
 | 구성 | `server.host` | 감사 IP 추가 설정 |
 |---|---|---|
 | **같은 VM 의 nginx 가 프록시** (권장) | `127.0.0.1` (기본) | 불필요 — 그대로 동작 |
