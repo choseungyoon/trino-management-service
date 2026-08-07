@@ -126,49 +126,49 @@ Bolt 2 DoD 항목이다. 아래를 실측하기 전까지 NFR-PERF-03 충족은 
 
 ### 6-1. 측정 절차 (프로덕션)
 
-> **`measure_coordinator_load.py` 를 프로덕션에 쓰지 않는다.** 그 스크립트는 별도 폴러를 하나 더 띄워 측정하므로, 이미 collector가 돌고 있는 프로덕션에서는 **부하를 이중으로 얹는다.** 프로덕션에서는 이미 돌고 있는 collector를 껐다 켜서 차이를 본다.
+> **`measure_coordinator_load.py` 를 프로덕션에 쓰지 않는다.** 그 스크립트는 별도 폴러를 하나 더 띄워 측정하므로, 이미 collector가 도는 프로덕션에서는 **부하를 이중으로 얹는다.** 프로덕션에서는 이미 돌고 있는 collector를 껐다 켜서 차이를 본다.
 
-**전제**: 아래는 **코디네이터 호스트에서** 실행한다. collector를 잠시 멈춰도 **쿼리는 전혀 영향받지 않는다** (NFR-ISOLATION). TMS 화면이 그동안 stale로 표시될 뿐이다.
+**`scripts/measure_production_load.py` 를 쓴다. TMS 호스트에서 실행한다.**
 
-```bash
-# 코디네이터 PID
-PID=$(pgrep -f 'io.trino.server.TrinoServer' | head -1)
-
-# CPU 초 스냅샷 (utime+stime, 초 단위)
-cpu() { awk -v c=$(getconf CLK_TCK) '{print ($14+$15)/c}' /proc/$PID/stat; }
-
-# 동시 실행 쿼리 수도 같이 기록한다 - 이 수가 곧 /v1/query 비용이다
-running() { curl -sk -u "tms-svc:$TMS_TRINO_PASSWORD" \
-  "https://127.0.0.1:8443/v1/jmx/mbean/trino.execution:name=QueryManager" \
-  | python3 -c "import sys,json;print({a['name']:a.get('value') for a in json.load(sys.stdin)['attributes']}['RunningQueries'])"; }
-```
-
-**측정** — 피크 시간대에, 창 하나당 10분, 3회 반복한다.
+코디네이터 CPU를 JMX(`java.lang:type=OperatingSystem` / `ProcessCpuTime`)로 원격 조회하므로 **코디네이터 서버에 접속할 필요가 없다.** `tms-svc` 계정만 있으면 된다(이미 `system_information: read` 보유).
 
 ```bash
-# A) collector ON
-echo "running=$(running)"; S=$(cpu); sleep 600; echo "ON  $(echo "$(cpu) - $S" | bc) cpu-sec"
+cd /opt/tms
+read -rs TMS_TRINO_PASSWORD && export TMS_TRINO_PASSWORD
 
-# B) collector OFF  (TMS만 잠시 눈을 감는다. 쿼리는 무관)
-sudo systemctl stop tms-collector
-echo "running=$(running)"; S=$(cpu); sleep 600; echo "OFF $(echo "$(cpu) - $S" | bc) cpu-sec"
-sudo systemctl start tms-collector
+sudo -E /opt/tms/venv/bin/python scripts/measure_production_load.py \
+  --coordinator https://<trino-a>:8443 \
+  --coordinator https://<trino-b>:8443 \
+  --pairs 6 --window 120
+
+unset TMS_TRINO_PASSWORD
 ```
 
-**판정**
+`systemctl` 을 쓰므로 `sudo` 가 필요하고, 비밀번호 환경변수를 넘기려면 `-E` 를 붙인다. 내부 CA가 신뢰 저장소에 없으면 `--insecure` 를 추가한다. 절차만 확인하려면 `--dry-run`(collector를 실제로 멈추지 않는다).
 
-```
-추가 부하(%p) = (ON_cpu_sec - OFF_cpu_sec) / 600 / 코어수 × 100
-```
+**측정 설계** — 신호가 작고(로컬 실측 0.60%p) 사용자 부하 변동은 그보다 훨씬 크다. 긴 창 두 개를 비교하면 collector가 아니라 "어느 창이 더 바빴는가"를 재게 된다. 그래서:
 
-| 결과 | 판정 |
+| 설계 | 이유 |
 |---|---|
-| NFR-PERF-03 예산 이내 | 충족 확정. 이 문서 §1의 "잠정" 표기를 제거한다 |
-| 예산 초과 | 아래 **초과 시 대응 순서**를 위에서부터 적용 |
+| 짧은 창을 여러 쌍 | 느린 트래픽 변동이 쌍 안에서 상쇄된다 |
+| 쌍마다 ON/OFF 순서를 뒤집음 | stop/start 전환 자체의 편향이 쌍 간에 상쇄된다 |
+| 쌍별 차이의 **중앙값** | 이상치에 강하다 |
+| 차이의 **편차(1σ)** 도 함께 보고 | 이 수치가 의미 있는지 판단하는 근거 |
+| 창별 `RunningQueries` 기록 | ON/OFF 창의 부하가 크게 다르면 그 쌍은 신뢰도가 낮다고 표시 |
 
-> **⚠️ ON/OFF 두 창의 `running` 수가 비슷해야 비교가 성립한다.** 부하가 크게 달라진 창끼리 비교하면 collector가 아니라 사용자 트래픽 차이를 재게 된다. 차이가 크면 그 회차는 버리고 다시 측정하라.
->
-> **⚠️ 기존 EventListener 부하와 합산해야 한다** (D-001). TMS collector만 예산 안에 들어와도, 히스토리 프로젝트의 EventListener와 합쳐 초과하면 NFR-PERF-03 위반이다. 두 시스템을 함께 껐다 켜는 창을 하나 더 두는 것이 가장 정확하다.
+**판정** — 종료 코드로도 구분된다.
+
+| 판정 | 코드 | 의미 |
+|---|---|---|
+| 충족 | 0 | §0의 "잠정" 표기를 제거해도 된다 |
+| 예산 초과 | 1 | §6-2 대응 순서 적용 |
+| **판정 불가** | 2 | **편차 > 신호.** collector 부하가 트래픽 변동에 묻혔다 |
+
+> **⛔ "판정 불가"는 통과가 아니다.** 헬스 테스트에서 `UNKNOWN` 을 `GOOD` 으로 표시하지 않는 것과 같은 원칙이다. 이 결과가 나오면 DoD를 닫지 말고 `--pairs` 를 늘리거나 더 한가한 시간대에 재측정하라.
+
+> **collector를 멈춰도 쿼리는 전혀 영향받지 않는다** (NFR-ISOLATION). TMS 화면이 그동안 stale로 표시될 뿐이다. 스크립트는 정상 종료·오류·Ctrl-C 어느 경로로 끝나든 collector를 다시 켜며, 실패하면 직접 실행할 명령을 출력한다.
+
+> **⚠️ 기존 EventListener 부하와 합산해야 한다** (D-001). TMS collector만 예산 안에 들어와도, 히스토리 프로젝트의 EventListener와 합쳐 초과하면 NFR-PERF-03 위반이다. 두 시스템을 함께 멈춘 창을 하나 더 두는 것이 가장 정확하다.
 
 ### 6-2. 초과 시 대응 순서 (설계에 이미 구현됨)
 1. `collector.query_poll_interval_seconds` 상향 (5초 → 10초). 자동 백오프도 동작한다
