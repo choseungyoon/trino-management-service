@@ -94,6 +94,21 @@ def register(app, service, config, authenticator, codec, session_cookie: str) ->
     def theme_of(request: Request) -> str:
         return "light" if request.cookies.get(THEME_COOKIE) == "light" else "dark"
 
+    # How often each live page reloads itself, in seconds. Matched to the
+    # collector's own cadence: refreshing faster than data arrives just burns
+    # queries and makes the page jump for nothing, and refreshing slower leaves
+    # an operator staring at a number that quietly went out of date.
+    #
+    # Pages not listed here never auto-refresh. The audit log is deliberately
+    # among them - it is a record being read, not a dashboard being watched,
+    # and reloading it under someone mid-investigation loses their place.
+    collector_cfg = config.collector
+    refresh_by_page = {
+        "overview": max(int(collector_cfg.query_poll_interval_seconds), 5),
+        "queries": max(int(collector_cfg.query_poll_interval_seconds), 5),
+        "health": max(int(collector_cfg.jmx_poll_interval_seconds), 10),
+    }
+
     def base_context(request: Request, principal: Principal, page: str) -> Dict[str, Any]:
         try:
             links = views.link_rows(service.links(principal))
@@ -109,6 +124,10 @@ def register(app, service, config, authenticator, codec, session_cookie: str) ->
             "links": links,
             "cluster_names": cluster_names,
             "flash": _take_flash(request),
+            # Drives data-refresh in base.html, which tms.js reads. Without it
+            # the auto-refresh timer never starts and every screen is frozen
+            # until the operator reloads by hand.
+            "refresh_seconds": refresh_by_page.get(page, 0),
         }
 
     def render(name: str, context: Dict[str, Any], status_code: int = 200) -> HTMLResponse:
