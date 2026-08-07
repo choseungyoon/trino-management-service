@@ -17,6 +17,11 @@
       if (stored) { document.documentElement.dataset.theme = stored[1]; return; }
       if (window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches) {
         document.documentElement.dataset.theme = "light";
+        /* Persist the correction. Without this the server keeps assuming its
+           own default (dark) while the operator is looking at a light page,
+           so the first click of the toggle switches "dark -> light" and
+           nothing visibly happens. They had to click it twice. */
+        document.cookie = "tms_theme=light; path=/; max-age=31536000; samesite=strict";
       }
     } catch (e) { /* theme is cosmetic; never block the page */ }
   })();
