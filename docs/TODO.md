@@ -12,6 +12,22 @@ R1(운영 콘솔)은 **실환경에 배포되어 동작 중**이다. 기능은 �
 
 ---
 
+## 공통 — 설정을 바꾸면 반드시
+
+아래 항목 대부분이 `config.yaml` 이나 `config.secret.yaml` 을 건드린다. **재시작 전에 검증하라.**
+
+```bash
+read -rs TMS_TRINO_PASSWORD && export TMS_TRINO_PASSWORD
+/opt/tms/venv/bin/tms-config-check --config /opt/tms/config/config.yaml
+unset TMS_TRINO_PASSWORD
+```
+
+계정 오타 · `http://` URL · 세션키 누락 · JMX/쿼리 권한 부족 · DB 스키마 누락을 잡는다. 실제로 겪은 `trino.user` 오타가 여기서 걸린다. 종료 코드 0=정상, 1=문제, 2=설정 로드 실패.
+
+비밀번호 없이 `--offline` 로 정적 검사만 돌릴 수도 있으나, **계정·권한 오류는 실접속 검사에서만 잡힌다.**
+
+---
+
 ## A. R1 마감 — 이것만 끝나면 R1이 닫힌다
 
 ### ⭐ A-1. NFR-PERF-03 프로덕션 실측 `[가장 중요]`

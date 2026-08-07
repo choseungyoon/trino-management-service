@@ -350,6 +350,30 @@ portal:
 
 ---
 
+## 8-5. ⭐ 재시작 전 설정 검증
+
+서비스를 올리기 전에 설정을 한 번에 점검한다. **기동 후 로그를 읽는 것보다 훨씬 빠르다.**
+
+```bash
+read -rs TMS_TRINO_PASSWORD && export TMS_TRINO_PASSWORD
+/opt/tms/venv/bin/tms-config-check --config /opt/tms/config/config.yaml
+unset TMS_TRINO_PASSWORD
+```
+
+| 종료 코드 | 의미 |
+|---|---|
+| 0 | 사용 가능 (경고는 있을 수 있다) |
+| 1 | 문제 발견 — **고치기 전에 재시작하지 마라** |
+| 2 | 설정을 아예 읽지 못했다 |
+
+검사 항목: `coordinator_url` 이 `https` 인지 · Trino 계정·비밀번호 실제 인증 · `system_information:read` / `queries:view` 권한 · DB 접속과 테이블 4개 · 세션 비밀키 · 로컬 계정 유무 · 시크릿 파일 권한 · 딥링크 치환자.
+
+> **계정 오타는 이 검사에서만 잡힌다.** 정적 검사(`--offline`)로는 잡을 수 없다. 비밀번호를 넣고 돌려라.
+
+이후 설정을 바꿀 때마다 재시작 전에 같은 명령을 돌리면 된다.
+
+---
+
 ## 9. systemd 기동 — collector 먼저
 
 ```bash
