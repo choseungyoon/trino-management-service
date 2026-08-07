@@ -189,9 +189,63 @@ def _deep_merge(base: Dict[str, Any], overlay: Dict[str, Any]) -> Dict[str, Any]
     return merged
 
 
+def _current_user_description() -> str:
+    """'uid 993 (tms)' - who the process actually is, for permission errors."""
+    uid = getattr(os, "geteuid", lambda: None)()
+    if uid is None:  # pragma: no cover - non-POSIX
+        return "this process"
+    name = None
+    try:
+        import pwd
+
+        name = pwd.getpwuid(uid).pw_name
+    except Exception:  # noqa: BLE001 - no passwd entry is not an error here
+        pass
+    return "uid {} ({})".format(uid, name) if name else "uid {}".format(uid)
+
+
+def _secret_file_present(path: str) -> bool:
+    """Does the secret file exist?
+
+    Not os.path.exists: that returns False when the *directory* cannot be
+    traversed, which silently drops every credential and surfaces later as a
+    baffling "session secret is required". Refuse to guess - if we cannot tell
+    whether the file is there, say so.
+    """
+    try:
+        os.stat(path)
+    except FileNotFoundError:
+        return False
+    except PermissionError:
+        raise ConfigError(
+            "{path}: cannot be checked - permission denied on a parent directory. "
+            "This process runs as {who}. Every credential lives in this file, so it "
+            "must not be skipped silently. Make the directory traversable:  "
+            "sudo chmod o+x <parent dir>  (or chown it to the service user)".format(
+                path=path, who=_current_user_description()
+            )
+        ) from None
+    return True
+
+
 def _read_yaml(path: str) -> Dict[str, Any]:
-    with open(path, "r", encoding="utf-8") as handle:
-        loaded = yaml.safe_load(handle)
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            loaded = yaml.safe_load(handle)
+    except PermissionError:
+        # Secret files are 0600 by design, so this is nearly always an
+        # ownership mismatch: the file was created by root but the service runs
+        # as its own user. Say who we are and what to run - the bare errno sends
+        # people hunting through systemd hardening directives instead.
+        raise ConfigError(
+            "{path}: permission denied. This process runs as {who} and cannot read "
+            "the file. If it was created with sudo it is probably owned by root. "
+            "Fix with:  sudo chown <service-user>:<service-group> {path} "
+            "&& sudo chmod 600 {path}  (the parent directory must also be "
+            "traversable by that user)".format(path=path, who=_current_user_description())
+        ) from None
+    except IsADirectoryError:
+        raise ConfigError("{}: expected a file, found a directory".format(path)) from None
     if loaded is None:
         return {}
     if not isinstance(loaded, dict):
@@ -367,7 +421,7 @@ def load_config(
 
     if secret_path is None:
         secret_path = os.path.join(os.path.dirname(config_path), "config.secret.yaml")
-    if os.path.exists(secret_path):
+    if _secret_file_present(secret_path):
         raw = _deep_merge(raw, _read_yaml(secret_path))
 
     raw = _apply_env(raw, environ)

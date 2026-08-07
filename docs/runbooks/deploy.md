@@ -307,6 +307,23 @@ sudo -u tms cp /opt/tms/config/config.secret.yaml.example /opt/tms/config/config
 sudo -u tms chmod 600 /opt/tms/config/config.secret.yaml
 ```
 
+> **⛔ `sudo -u tms` 의 `-u tms` 를 빼먹지 마라.** 그냥 `sudo` 로 만들면 파일 소유자가 `root` 가 되고, 모드가 600 이라 **서비스 계정(`tms`)이 읽지 못한다.** 기동이 `permission denied ... config/config.secret.yaml` 로 실패한다. 편집기로 `sudo vi` 해서 만든 경우도 동일하다.
+
+**소유권 확인** — 서비스를 띄우기 전에 이걸 확인하는 편이 빠르다.
+
+```bash
+ls -l /opt/tms/config/config.secret.yaml     # tms tms, -rw-------
+sudo -u tms head -c1 /opt/tms/config/config.secret.yaml >/dev/null \
+  && echo "OK: tms 계정이 읽을 수 있다" || echo "FAIL: 아래 명령으로 고쳐라"
+```
+
+틀어졌다면:
+
+```bash
+sudo chown tms:tms /opt/tms/config/config.secret.yaml
+sudo chmod 600 /opt/tms/config/config.secret.yaml
+```
+
 ```yaml
 portal:
   local_users:
@@ -377,6 +394,7 @@ FROM collector_snapshot ORDER BY cluster, kind;
 | `Unit tms-collector.service not found` | 유닛 미설치 | §9 첫 `cp` + `daemon-reload` |
 | `status=203/EXEC` | `/opt/tms/venv/bin/tms-collector` 없음 | §2 `pip install /opt/tms` 재확인 |
 | **`status=226/NAMESPACE`** | **샌드박스 마운트 설정 실패** — Python 이 실행되기도 전이다 | 아래 9-3 |
+| 기동 실패 `permission denied ... config.secret.yaml` | 파일 소유자가 `root` (`sudo` 로 생성) | §8 소유권 확인. `sudo chown tms:tms` |
 | 기동 실패 `configuration error` / `is required` | `config.yaml` 또는 `/etc/tms/tms.env` 미완 | §6 |
 | 기동 실패 DB 접속 오류 | `TMS_DATABASE_URL` 오류·방화벽 | §3, §6-2 |
 | `another tms-collector already holds the advisory lock` | 중복 기동 | **정상 차단.** 위 경고 참조 |

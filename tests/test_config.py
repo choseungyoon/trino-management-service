@@ -126,6 +126,77 @@ class BuildConfigTest(unittest.TestCase):
         self.assertEqual(deeplinks.query_history_url_template, "")
 
 
+class SecretFilePermissionTest(unittest.TestCase):
+    """First-deploy traps. Both were hit on a real install (2026-08-07).
+
+    A secret file is 0600 by design, so an ownership mismatch is the normal way
+    this goes wrong. The bare errno sends people hunting through systemd
+    hardening directives, and the unreadable-directory case is worse still: it
+    drops every credential without a word.
+    """
+
+    BASE = (
+        "clusters:\n"
+        "  - name: prod-a\n"
+        "    coordinator_url: https://a.invalid:8443\n"
+        "    expected_workers: 12\n"
+        "trino:\n"
+        "  user: tms-svc\n"
+    )
+    SECRET = "trino:\n  password: pw\ndatabase:\n  url: postgresql://t:p@db.invalid/tms\n"
+
+    def setUp(self):
+        if os.geteuid() == 0:
+            self.skipTest("running as root - permission bits do not apply")
+
+    def _lay_out(self, tmp):
+        base = os.path.join(tmp, "config.yaml")
+        secret = os.path.join(tmp, "config.secret.yaml")
+        for path, body in ((base, self.BASE), (secret, self.SECRET)):
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(body)
+        return base, secret
+
+    def test_unreadable_secret_file_explains_the_fix(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base, secret = self._lay_out(tmp)
+            os.chmod(secret, 0o000)
+            try:
+                with self.assertRaises(ConfigError) as caught:
+                    load_config(base, environ={})
+            finally:
+                os.chmod(secret, 0o600)
+        message = str(caught.exception)
+        self.assertIn("permission denied", message)
+        self.assertIn("chown", message)          # tells them what to run
+        self.assertIn("config.secret.yaml", message)
+
+    def test_untraversable_directory_is_not_silently_skipped(self):
+        """os.path.exists() would return False here and drop every credential."""
+        with tempfile.TemporaryDirectory() as tmp:
+            inner = os.path.join(tmp, "config")
+            os.mkdir(inner)
+            base = os.path.join(inner, "config.yaml")
+            secret = os.path.join(inner, "config.secret.yaml")
+            for path, body in ((base, self.BASE), (secret, self.SECRET)):
+                with open(path, "w", encoding="utf-8") as handle:
+                    handle.write(body)
+            # Read the base config first, then make the directory untraversable
+            # so only the secret lookup is affected.
+            with open(base, encoding="utf-8") as handle:
+                raw = handle.read()
+            outside = os.path.join(tmp, "config.yaml")
+            with open(outside, "w", encoding="utf-8") as handle:
+                handle.write(raw)
+            os.chmod(inner, 0o000)
+            try:
+                with self.assertRaises(ConfigError) as caught:
+                    load_config(outside, secret_path=secret, environ={})
+            finally:
+                os.chmod(inner, 0o700)
+        self.assertIn("permission denied", str(caught.exception))
+
+
 class LoadConfigTest(unittest.TestCase):
     def _write(self, directory, name, body):
         path = os.path.join(directory, name)
