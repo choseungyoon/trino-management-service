@@ -596,8 +596,9 @@ def _to_csv(rows: List[Dict[str, Any]]) -> str:
     import csv
     import io
 
-    if not rows:
-        return ""
+    # The header is written even with no rows. An export is evidence someone
+    # asked for, and a 0-byte file cannot be told apart from a broken export -
+    # "nothing matched" and "this failed" must not look identical.
     columns = ["occurred_at", "actor", "actor_roles", "actor_ip", "action_type", "target_kind",
                "target_id", "target_cluster", "reason", "outcome", "error_message", "request_id"]
     buffer = io.StringIO()

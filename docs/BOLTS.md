@@ -227,7 +227,7 @@ FR-QUERY-HISTORY가 빠지면서 B4(대용량 히스토리 저장소)는 이월�
 - [x] `audit_action` 대상 UPDATE/DELETE 코드 부재 + 마이그레이션에 `REVOKE` 포함 — 스캐너 + GRANT 검증
 - [x] `BAD`/`CONCERNING` 상태에 `advice` 빈 값 없음 — 엔진에서 강제 + 테스트
 - [ ] **NFR-PERF-03 실측 충족** (기존 EventListener 합산 기준) → `TODO.md` A-1
-- [ ] **핵심 로직 테스트 커버리지 80%** → 미측정
+- [x] **핵심 로직 테스트 커버리지 80%** — 2026-08-08 측정: 전체 **80%**. `formatting.py` 100%, `views.py` 92%, `routes.py` 70%. Postgres 어댑터 제외 시 83%
 - [ ] **`reviewer` 체크리스트 전 항목 통과** → 미수행
 - [x] 자격증명이 저장소에 없음 (**PUBLIC 저장소**) — 매 커밋 전 스캔
 
