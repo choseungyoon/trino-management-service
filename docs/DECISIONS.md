@@ -6,6 +6,39 @@
 
 ---
 
+## D-008 — 클러스터 목록의 추가·수정·삭제는 Gateway가 담당한다. TMS에 CRUD를 만들지 않는다
+
+| 항목 | 내용 |
+|---|---|
+| **날짜** | 2026-08-07 |
+| **결정자** | Platform Owner (인간) |
+| **상태** | 확정 |
+
+**배경**: 클러스터가 늘어날 때마다 `config.yaml` 을 직접 고치는 것이 번거롭고 휴먼에러 위험이 있다는 문제 제기가 있었다. 실제로 R1 실환경 배포 중 `trino.user` 오타로 전 헬스 테스트가 401로 막히는 일이 있었다.
+
+**결정**: 그럼에도 **TMS에 클러스터 등록/수정/삭제 UI나 API를 만들지 않는다.** 클러스터 목록의 주인은 Trino Gateway다.
+
+**근거**
+
+1. **Gateway가 이미 한다.** `POST /gateway/backend/modify/add · update · delete`, `GET /gateway/backend/all` 이 존재한다 (`TRINO_VERIFIED.md` §T2-3). CLAUDE.md 절대규칙 4번 — 이미 있는 것을 다시 만들지 않는다.
+2. **`config.yaml` 의 클러스터 목록은 애초에 임시다.** 파일 주석이 그렇게 밝히고 있다 — *"Gateway is disabled for now (B6), so this list is the source of truth."* 지금 CRUD를 만들면 임시 상태를 영구 기능으로 굳힌다.
+3. **source of truth가 둘이 되는 편이 더 위험하다.** 라우팅이 아는 클러스터와 모니터링이 아는 클러스터가 갈라지면, 그 불일치는 평소에 안 보이다가 장애 때 드러난다. 편집의 번거로움보다 비싸다.
+
+**영향**
+
+| 대상 | 영향 |
+|---|---|
+| R1 | 변경 없음. `config.yaml` 이 계속 source of truth |
+| **B6** | 우선순위 상승. 해소되어야 이 결정이 실효를 갖는다 |
+| FR-GW-01 | 백엔드 목록 조회가 곧 클러스터 목록 조회가 된다. R2에서 TMS는 Gateway에서 목록을 읽고 `config.yaml` 의 `clusters` 는 폴백으로 축소 |
+| 휴먼에러 완화 | CRUD 대신 **설정 검증 명령**으로 대응한다 (재시작 전에 문법·중복·URL·접속·권한을 확인). 미구현 |
+
+**뒤집는 조건**: Gateway를 도입하지 않기로 확정되면 `config.yaml` 이 영구 source of truth가 되므로 재검토한다. 또는 클러스터 증감이 월 단위로 잦아져 Gateway 조작만으로 감당이 안 되는 것이 확인되면 재검토한다.
+
+**관련**: `TRINO_VERIFIED.md` §T2-3, `BACKLOG.md` B6, `REQUIREMENTS.md` FR-GW-01
+
+---
+
 ## D-001 — FR-QUERY-HISTORY를 R1 범위에서 제외한다
 
 | 항목 | 내용 |

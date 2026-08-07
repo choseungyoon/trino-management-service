@@ -124,7 +124,53 @@ Bolt 2 DoD 항목이다. 아래를 실측하기 전까지 NFR-PERF-03 충족은 
 - [ ] 피크 동시 실행 쿼리 수에서의 `/v1/query` 응답 크기와 CPU (`WORKLOAD_PROFILE.md` W2 수집과 병행)
 - [ ] OPA 접근제어 도입 시 재측정
 
-**초과 시 대응 순서** (설계에 이미 구현됨)
+### 6-1. 측정 절차 (프로덕션)
+
+> **`measure_coordinator_load.py` 를 프로덕션에 쓰지 않는다.** 그 스크립트는 별도 폴러를 하나 더 띄워 측정하므로, 이미 collector가 돌고 있는 프로덕션에서는 **부하를 이중으로 얹는다.** 프로덕션에서는 이미 돌고 있는 collector를 껐다 켜서 차이를 본다.
+
+**전제**: 아래는 **코디네이터 호스트에서** 실행한다. collector를 잠시 멈춰도 **쿼리는 전혀 영향받지 않는다** (NFR-ISOLATION). TMS 화면이 그동안 stale로 표시될 뿐이다.
+
+```bash
+# 코디네이터 PID
+PID=$(pgrep -f 'io.trino.server.TrinoServer' | head -1)
+
+# CPU 초 스냅샷 (utime+stime, 초 단위)
+cpu() { awk -v c=$(getconf CLK_TCK) '{print ($14+$15)/c}' /proc/$PID/stat; }
+
+# 동시 실행 쿼리 수도 같이 기록한다 - 이 수가 곧 /v1/query 비용이다
+running() { curl -sk -u "tms-svc:$TMS_TRINO_PASSWORD" \
+  "https://127.0.0.1:8443/v1/jmx/mbean/trino.execution:name=QueryManager" \
+  | python3 -c "import sys,json;print({a['name']:a.get('value') for a in json.load(sys.stdin)['attributes']}['RunningQueries'])"; }
+```
+
+**측정** — 피크 시간대에, 창 하나당 10분, 3회 반복한다.
+
+```bash
+# A) collector ON
+echo "running=$(running)"; S=$(cpu); sleep 600; echo "ON  $(echo "$(cpu) - $S" | bc) cpu-sec"
+
+# B) collector OFF  (TMS만 잠시 눈을 감는다. 쿼리는 무관)
+sudo systemctl stop tms-collector
+echo "running=$(running)"; S=$(cpu); sleep 600; echo "OFF $(echo "$(cpu) - $S" | bc) cpu-sec"
+sudo systemctl start tms-collector
+```
+
+**판정**
+
+```
+추가 부하(%p) = (ON_cpu_sec - OFF_cpu_sec) / 600 / 코어수 × 100
+```
+
+| 결과 | 판정 |
+|---|---|
+| NFR-PERF-03 예산 이내 | 충족 확정. 이 문서 §1의 "잠정" 표기를 제거한다 |
+| 예산 초과 | 아래 **초과 시 대응 순서**를 위에서부터 적용 |
+
+> **⚠️ ON/OFF 두 창의 `running` 수가 비슷해야 비교가 성립한다.** 부하가 크게 달라진 창끼리 비교하면 collector가 아니라 사용자 트래픽 차이를 재게 된다. 차이가 크면 그 회차는 버리고 다시 측정하라.
+>
+> **⚠️ 기존 EventListener 부하와 합산해야 한다** (D-001). TMS collector만 예산 안에 들어와도, 히스토리 프로젝트의 EventListener와 합쳐 초과하면 NFR-PERF-03 위반이다. 두 시스템을 함께 껐다 켜는 창을 하나 더 두는 것이 가장 정확하다.
+
+### 6-2. 초과 시 대응 순서 (설계에 이미 구현됨)
 1. `collector.query_poll_interval_seconds` 상향 (5초 → 10초). 자동 백오프도 동작한다
 2. `collector.jmx_poll_interval_seconds` 상향 (15초 → 30초)
 3. 그래도 안 되면 헬스 테스트 축소 — 단 H-01/H-02는 `/v1/info`(PUBLIC)라 비용이 가장 싸다
