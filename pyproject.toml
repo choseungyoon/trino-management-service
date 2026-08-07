@@ -35,6 +35,13 @@ tms-collector = "tms.collector.main:run"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+# The UI is served from files, not from Python. Without this they are simply
+# absent from the wheel and tms-api dies at startup with
+# "Directory 'tms/web/static' does not exist" - which never shows up in
+# development because that runs straight from src/ on sys.path.
+[tool.setuptools.package-data]
+"tms.web" = ["static/*", "templates/*"]
+
 [tool.ruff]
 target-version = "py39"
 line-length = 100

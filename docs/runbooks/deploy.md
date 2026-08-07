@@ -419,6 +419,33 @@ curl -s http://127.0.0.1:8500/ready      # {"status":"ready"}
 
 `tms-api` 는 **무상태**다. 스냅샷을 DB 에서 읽을 뿐 타이머로 Trino 를 폴링하지 않으므로, 여러 대로 늘려도 코디네이터 부하가 늘지 않는다.
 
+**기동 실패 진단**
+
+| 증상 | 원인 | 조치 |
+|---|---|---|
+| `Directory 'tms/web/static' does not exist` | **UI 파일이 설치되지 않았다** | 아래 |
+| `226/NAMESPACE` | 샌드박스 마운트 실패 | §9-3 |
+| `permission denied ... config.secret.yaml` | 파일 소유자가 `root` | §8 |
+| 기동은 되는데 `/` 가 404 | `portal.local_users` 비어 있음 | §8 |
+
+`static`/`templates` 가 설치되지 않는 문제는 **0.1.0 최초 배포판의 패키징 버그**였다 (2026-08-07 수정). `pip install` 로 만들어지는 패키지에 UI 파일이 빠져 있었다. 최신 코드로 재설치하면 해결된다.
+
+```bash
+cd /opt/tms && sudo -u tms git pull
+sudo -u tms /opt/tms/venv/bin/pip install --force-reinstall --no-deps \
+  --index-url https://<artifactory-host>/artifactory/api/pypi/<pypi-remote>/simple /opt/tms
+sudo systemctl restart tms-api
+```
+
+**설치 확인** — 아래가 비어 있으면 여전히 안 들어간 것이다.
+
+```bash
+SP=$(/opt/tms/venv/bin/python -c "import tms,os;print(os.path.dirname(os.path.dirname(tms.__file__)))")
+ls "$SP/tms/web/static" "$SP/tms/web/templates"
+```
+
+기대: `static` 2개(`tms.css`, `tms.js`), `templates` 14개.
+
 ---
 
 ### 9-3. `226/NAMESPACE` 로 죽는 경우
