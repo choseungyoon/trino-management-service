@@ -33,7 +33,7 @@
 ```bash
 sudo useradd --system --home-dir /opt/tms --shell /usr/sbin/nologin tms
 sudo install -d -o tms -g tms -m 755 /opt/tms
-sudo install -d -o tms -g tms -m 755 /var/log/tms   # systemd 유닛의 ReadWritePaths
+# /var/log/tms 는 만들 필요 없다 - 유닛의 LogsDirectory= 로 systemd 가 만든다
 
 sudo -u tms git clone https://github.com/choseungyoon/trino-management-service.git /opt/tms
 cd /opt/tms
@@ -376,6 +376,7 @@ FROM collector_snapshot ORDER BY cluster, kind;
 |---|---|---|
 | `Unit tms-collector.service not found` | 유닛 미설치 | §9 첫 `cp` + `daemon-reload` |
 | `status=203/EXEC` | `/opt/tms/venv/bin/tms-collector` 없음 | §2 `pip install /opt/tms` 재확인 |
+| **`status=226/NAMESPACE`** | **샌드박스 마운트 설정 실패** — Python 이 실행되기도 전이다 | 아래 9-3 |
 | 기동 실패 `configuration error` / `is required` | `config.yaml` 또는 `/etc/tms/tms.env` 미완 | §6 |
 | 기동 실패 DB 접속 오류 | `TMS_DATABASE_URL` 오류·방화벽 | §3, §6-2 |
 | `another tms-collector already holds the advisory lock` | 중복 기동 | **정상 차단.** 위 경고 참조 |
@@ -399,6 +400,70 @@ curl -s http://127.0.0.1:8500/ready      # {"status":"ready"}
 ```
 
 `tms-api` 는 **무상태**다. 스냅샷을 DB 에서 읽을 뿐 타이머로 Trino 를 폴링하지 않으므로, 여러 대로 늘려도 코디네이터 부하가 늘지 않는다.
+
+---
+
+### 9-3. `226/NAMESPACE` 로 죽는 경우
+
+```
+tms-collector.service: Main process exited, code=exited, status=226/NAMESPACE
+```
+
+**애플리케이션 오류가 아니다.** systemd 가 유닛의 샌드박스(`ProtectSystem=strict`, `ProtectHome`, `PrivateTmp`, `LogsDirectory`)를 위한 **마운트 네임스페이스를 만드는 데 실패**한 것이고, 그래서 Python 은 단 한 줄도 실행되지 않았다. 로그에 앱 메시지가 하나도 없는 이유가 이것이다.
+
+정확한 원인은 종료 직전 줄에 찍힌다.
+
+```bash
+sudo journalctl -u tms-collector -n 40 --no-pager | grep -i "namespac\|mount\|Failed to set up"
+```
+
+| 로그 | 원인 | 조치 |
+|---|---|---|
+| `Failed to set up mount namespacing: No such file or directory` | 유닛이 참조하는 경로가 없음 | 아래 (1) |
+| `ProtectHome` 관련 | `/opt/tms` 를 `/home` 아래에 두었음 | `ProtectHome=false` 로 완화하거나 경로 이동 |
+| `Operation not permitted` | 구버전 systemd·컨테이너·SELinux | `systemctl --version` 확인, 아래 (2) |
+
+**(1) 과거 유닛의 `ReadWritePaths=/var/log/tms` — 가장 흔했던 원인**
+
+이전 버전 유닛에는 `ReadWritePaths=/var/log/tms` 가 있었다. **그 디렉터리가 없으면 네임스페이스 구성이 통째로 실패한다.** 게다가 앱은 디스크에 아무것도 쓰지 않으므로(로그는 전부 journald 로 간다) 애초에 불필요한 지시자였다.
+
+현재 유닛은 `LogsDirectory=tms` 로 바꿨다 — systemd 가 `/var/log/tms` 를 알아서 만들고 소유권도 `User=` 에 맞춘다. **최신 유닛을 다시 설치하면 해결된다.**
+
+```bash
+cd /opt/tms && sudo -u tms git pull
+sudo cp ops/systemd/tms-collector.service ops/systemd/tms-api.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl restart tms-collector
+```
+
+옛 유닛을 그대로 쓰고 싶다면 디렉터리만 만들어도 된다.
+
+```bash
+sudo install -d -o tms -g tms -m 755 /var/log/tms
+sudo systemctl restart tms-collector
+```
+
+**(2) 그래도 안 되면 — 어느 지시자가 문제인지 이분법으로 찾는다**
+
+```bash
+sudo systemd-analyze verify /etc/systemd/system/tms-collector.service
+```
+
+하드닝을 임시로 꺼서 격리한다. **원인을 찾은 뒤에는 반드시 되돌린다.**
+
+```bash
+sudo systemctl edit tms-collector
+```
+```ini
+[Service]
+ProtectSystem=
+ProtectHome=
+PrivateTmp=
+```
+
+이 상태로 기동되면 원인은 셋 중 하나다. 하나씩 되살려 범인을 특정하라. 기동에 성공하면 override 를 지우고(`sudo systemctl revert tms-collector`) 근본 원인을 고친다.
+
+> **하드닝을 영구히 끄지 마라.** 이 서비스는 프로덕션 쿼리를 죽일 수 있는 자격증명을 들고 있다. `ProtectSystem=strict` 는 침해 시 피해 범위를 줄이는 최후 방어선이다.
 
 ---
 

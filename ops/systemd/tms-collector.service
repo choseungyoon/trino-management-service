@@ -36,7 +36,13 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/log/tms
+# systemd creates and owns /var/log/tms itself. An explicit
+# ReadWritePaths= on a directory that does not exist yet makes the whole
+# mount namespace fail to build - the unit then dies with 226/NAMESPACE
+# before a single line of Python runs, which is a miserable first-deploy
+# experience. Nothing writes here today (logs go to the journal); the
+# directory exists so file logging can be added without touching this unit.
+LogsDirectory=tms
 ProtectKernelTunables=true
 ProtectControlGroups=true
 RestrictSUIDSGID=true
