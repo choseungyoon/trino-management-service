@@ -35,7 +35,28 @@
 
 **뒤집는 조건**: Gateway를 도입하지 않기로 확정되면 `config.yaml` 이 영구 source of truth가 되므로 재검토한다. 또는 클러스터 증감이 월 단위로 잦아져 Gateway 조작만으로 감당이 안 되는 것이 확인되면 재검토한다.
 
-**관련**: `TRINO_VERIFIED.md` §T2-3, `BACKLOG.md` B6, `REQUIREMENTS.md` FR-GW-01
+### 부기 (2026-08-07) — "TMS가 Gateway API를 호출하는 CRUD"는 이 결정이 막는 대상이 아니다
+
+운영팀 회신 과정에서 **"TMS에서 Gateway API를 통해 CRUD 하면 좋겠다"** 는 제안이 나왔다. **이것은 위에서 반려한 것과 다른 제안이며, D-008을 근거로 반려해서는 안 된다.**
+
+| | 반려한 것 | 새 제안 |
+|---|---|---|
+| 목록의 주인 | **TMS**(자체 DB) | **Gateway** (변함없음) |
+| TMS의 역할 | 소유자 | **클라이언트** |
+| 근거 3(이중 source of truth) | 해당됨 | **해당 없음** |
+
+새 제안은 Gateway를 여전히 유일한 source of truth로 두고 TMS는 그 API를 호출하는 **화면**만 제공한다. 근거 3이 성립하지 않으므로 D-008의 반려 논리는 적용되지 않는다.
+
+**오히려 유리한 점이 두 가지 있다.**
+
+1. **TMS는 이미 Gateway API 쓰기 권한이 필요하다.** FR-CO-02 안전 시퀀스의 1단계(routing group 비활성화)와 5단계(재활성화)가 `POST /gateway/backend/deactivate|activate/{name}` 로 구현된다(§T2-3). 즉 Gateway 자격증명 보유는 이미 확정된 전제이고, add/update/delete 추가는 처음 보이는 것보다 작은 확장이다.
+2. **감사 기록이 남는다.** Gateway UI에서 한 변경은 TMS 감사 로그에 없다. TMS를 경유하면 `reason` 필수 + `audit_action` 기록이 붙는다(절대규칙 3). "누가 왜 이 클러스터를 뺐나"에 답할 수 있게 된다.
+
+**단, 확인된 제약**: Gateway 역할 모델은 `ADMIN` / `USER` / `API` 셋뿐이고 **읽기 전용 역할이 없다**(§T2-3). 목록 조회만 하려 해도 `API` 역할이 필요하며 그 역할은 변경 권한을 포함한다. 따라서 TMS가 쥐는 Gateway 자격증명은 **어차피 라우팅을 바꿀 수 있는 권한**이다. 이는 CRUD 구현 여부와 무관하게 성립하는 사실이므로, "권한이 커지니 하지 말자"는 반대 논거가 되지 못한다.
+
+**판정**: **R2 FR-GATEWAY에서 다룬다.** R1 범위에 넣지 않는다 — R1은 읽기 전용 콘솔이고, 클러스터 변경은 파괴적 액션이라 안전 시퀀스(절대규칙 5)와 함께 설계해야 한다. R2 착수 시 `[NEEDS-HUMAN-DECISION]` 없이 진행 가능하다.
+
+**관련**: `TRINO_VERIFIED.md` §T2-3, `BACKLOG.md` B6, `REQUIREMENTS.md` FR-GW-01·FR-GW-03
 
 ---
 

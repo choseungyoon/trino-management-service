@@ -18,7 +18,8 @@
 |---|---|
 | Trino 버전 | **477** |
 | 클러스터 | 2개 (코디네이터 1 + 워커 12 각각) |
-| Gateway | **버전 19** (2026-08-07 확인), 2대, PostgreSQL 공유 (현재 VM1에 co-located = **SPOF**), `databaseCache` 활성 |
+| Gateway | **버전 19** (2026-08-07 확인), 2대, PostgreSQL 공유 (현재 VM1에 co-located = **SPOF**) |
+| Gateway 설정 | 백엔드는 **Gateway UI로 등록**. **라우팅 그룹 미사용**(= 기본 랜덤 라우팅). `databaseCache` 활성, **`expireAfterWrite: 10m`** (⚠️ DB 장애 10분 초과 시 라우팅 실패 — §T2-4) |
 | LB | IP HASH (**세션 어피니티로 교체 예정 — 임시 우회책**) |
 | 인프라 | VM + systemd (**K8s 미사용, 확정**) |
 | 증설 | 수동/스크립트 (**확정**) |

@@ -485,6 +485,31 @@ modules:
 
 백엔드 페이로드 필드: `name`, `proxyTo`, `active`, `routingGroup`, `externalUrl`
 
+**필드 의미 — 확인 (2026-08-07, `gateway-api.md`)**
+
+| 필드 | 의미 |
+|---|---|
+| `proxyTo` | Gateway가 **쿼리를 실제로 전달하는 주소**. 클러스터 생성·수정 시 지정한다 |
+| `externalUrl` | **선택 항목.** 문서 원문: *"If the Trino cluster URL is different from the `proxyTo` URL, for example if they are internal and external hostnames used, you can use the optional `externalUrl` field to override the link in the **Active Backends** page."* |
+
+> **`externalUrl` 은 Active Backends 화면의 링크만 바꾼다.** 라우팅에는 관여하지 않는다. 내부/외부 호스트명이 갈리지 않는 환경이라면 **`proxyTo` 와 같은 값을 넣거나 비워도 무방하다.**
+> **TMS 매핑**: `proxyTo` → `coordinator_url`(JMX 폴링 대상), `externalUrl` → `trino_ui_url`(사용자에게 보여줄 링크).
+
+**API 인증·인가 — 확인 (2026-08-07, `security.md`)**
+
+REST API는 웹 UI와 **동일한 인증·인가**를 받는다. 역할은 셋이다.
+
+| 역할 | 문서 원문 |
+|---|---|
+| `ADMIN` | *"Allows access to the Editor tab, which can be used to configure the clusters"* |
+| `USER` | *"Allows access to the rest of the website"* |
+| **`API`** | *"Allows access to rest apis to configure the clusters"* |
+
+권한 부여 경로: preset user 정의 / LDAP 속성 / OAuth 클레임 (`privilegesField` 설정).
+
+> **⛔ "읽기 전용" 역할은 존재하지 않는다.** 백엔드 목록을 REST로 읽으려면 `API` 역할이 필요한데, 이 역할은 문서상 *configure* 권한이다 — 즉 **같은 자격증명으로 백엔드 추가·수정·삭제도 가능하다.** TMS가 Gateway 자격증명을 보유하면 그 자격증명은 라우팅을 바꿀 수 있는 권한이며, `tms-svc` 와 동급으로 보호해야 한다.
+> **전제**: *"All authentication and authorization mechanisms require configuring TLS as the foundational layer."* Gateway에 TLS가 켜져 있어야 인증이 동작한다.
+
 > **FR-CO-02 안전 시퀀스 1단계(routing group 비활성화)와 5단계(재활성화)는 `POST /gateway/backend/deactivate/{name}` / `activate/{name}` 로 구현된다.** 경로가 확정되었다.
 > **FR-BM-04(프로덕션 보호)도 동일 API로 구현 가능하다.**
 

@@ -191,7 +191,7 @@
 | ~~B3~~ | ~~가중치 라우팅 목적 확인~~ | **해소** | 목적=느린 클러스터 트래픽 감소 → least-loaded 라우터로 대체. **근본 원인 규명이 우선 과제** — 절차는 `BOLT_0_RESULT.md` §5에 체크리스트로 확정 |
 | ~~B4~~ | ~~히스토리 저장소 선정~~ | **R1 범위에서 이월** | **2026-08-06**: FR-QUERY-HISTORY가 별도 프로젝트로 이미 구현되어 R1에서 제외됨 → **B4는 더 이상 R1을 막지 않는다.** 두 프로젝트 통합 작업 시점으로 이월. `WORKLOAD_PROFILE.md`는 FR-SLO(R2) 목표값 근거로 여전히 필요 |
 | ~~B5~~ | ~~런타임 로그레벨 API 지원 여부~~ | **해소 — 사전 가정이 틀림** | **OSS Trino 477에 존재한다.** REST가 아니라 JMX MBean `io.airlift.log:name=Logging`(`setLevel`/`setRootLevel`). `Server.java`가 `LogJmxModule`을 무조건 등록. **→ FR-LOGLEVEL 폐기하지 않고 축소 존치.** 구현 방식은 D-2로 인간 결정 대기 |
-| **B6** | **운영 Gateway 버전 및 설정 확인** | **부분 해소 (2026-08-07)** | **버전 19 확인** → Gateway 19의 리소스 그룹 제거(FR-WORKLOAD 데이터 소스 = Trino)와 charset 버그 수정(B1)이 모두 적용된 버전이다. **`databaseCache` 활성 확인** → `expireAfterWrite` 실제 값은 회신 대기(§T2-4: `1h` 기본, 만료 후 DB 다운이면 라우팅 실패). **잔여**: 백엔드 목록 등록 방식·API 인증·`proxyTo` 도달성. D-008로 클러스터 관리를 Gateway에 위임했으므로 R2 FR-GW-01 착수 전 필수. **R1은 막지 않는다** |
+| **B6** | **운영 Gateway 버전 및 설정 확인** | **해소 (2026-08-07)** | 버전 **19** · 백엔드는 **Gateway UI 등록** · **라우팅 그룹 미사용** · `databaseCache` 활성 **`expireAfterWrite: 10m`** · `proxyTo` = `externalUrl` = 코디네이터 실주소 · API 읽기 전용 계정 발급 가능. **후속 2건**: ① `expireAfterWrite: 10m` 은 DB 장애 10분 초과 시 라우팅 실패 — Gateway DB가 SPOF인 점을 감안해 상향/`null` 검토 ② `GET /gateway/backend/all` 실동작 미확인 — 계정 발급 후 검증 |
 
 ---
 
