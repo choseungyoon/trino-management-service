@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+{% import "_icons.html" as ui %}
+{% block title %}Gateway{% endblock %}
+{% block heading %}Gateway{% endblock %}
+
+{% block content %}
+{% if not gateway.enabled %}
+<div class="banner" role="status">
+  {{ ui.icon('info', 15, 2) }}
+  <div>
+    <b>Gateway integration is off.</b>
+    Set <code class="mono">gateway.enabled: true</code> and
+    <code class="mono">gateway.base_url</code> to show routing here.
+  </div>
+</div>
+{% else %}
+
+{% if gateway.unavailable_reason %}
+<div class="banner banner--bad" role="alert">
+  {{ ui.icon('bad', 15, 2) }}
+  <div>
+    <b>{{ gateway.unavailable_reason }}</b>
+    {% if gateway.advice %}<div>{{ gateway.advice }}</div>{% endif %}
+  </div>
+</div>
+{% endif %}
+
+{% if envelope.stale %}
+<div class="banner banner--concerning" role="status">
+  {{ ui.icon('clock', 15, 2) }}
+  <div><b>Data is stale — last collected {{ envelope.collected_at | relative_time }}.</b></div>
+</div>
+{% endif %}
+
+{#
+  The two disagreements below are the reason this screen exists. Each side —
+  Gateway's own UI and the TMS cluster list — looks perfectly correct on its
+  own; only the join shows that they disagree.
+#}
+{% if gateway.unmonitored_backends %}
+<div class="banner banner--bad" role="alert">
+  {{ ui.icon('bad', 15, 2) }}
+  <div>
+    <b>{{ gateway.unmonitored_backends | length }} backend(s) are not monitored by TMS.</b>
+    <div>Queries are being routed to
+      {% for name in gateway.unmonitored_backends %}<code class="mono">{{ name }}</code>{% if not loop.last %}, {% endif %}{% endfor %}
+      and nobody is watching them. Add them to <code class="mono">config.yaml</code>
+      or remove them from the Gateway.</div>
+  </div>
+</div>
+{% endif %}
+
+{% if gateway.unrouted_clusters %}
+<div class="banner banner--concerning" role="status">
+  {{ ui.icon('concerning', 15, 2) }}
+  <div>
+    <b>{{ gateway.unrouted_clusters | length }} monitored cluster(s) have no Gateway backend.</b>
+    <div>
+      {% for name in gateway.unrouted_clusters %}<code class="mono">{{ name }}</code>{% if not loop.last %}, {% endif %}{% endfor %}
+      receive no routed traffic. Either they are not registered, or
+      <code class="mono">config.yaml</code> lists a cluster that no longer exists.</div>
+  </div>
+</div>
+{% endif %}
+
+{% if gateway.inactive_backends %}
+<div class="banner banner--concerning" role="status">
+  {{ ui.icon('concerning', 15, 2) }}
+  <div>
+    <b>{{ gateway.inactive_backends | length }} backend(s) are deactivated.</b>
+    <div>
+      {% for name in gateway.inactive_backends %}<code class="mono">{{ name }}</code>{% if not loop.last %}, {% endif %}{% endfor %}
+      accept no new queries. Ignore this if it is a deliberate drain.</div>
+  </div>
+</div>
+{% endif %}
+
+{% if gateway.backends %}
+<div class="panel">
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Backend</th>
+        <th>Routing group</th>
+        <th>Routes to</th>
+        <th>TMS cluster</th>
+        <th>State</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for b in gateway.backends %}
+      <tr>
+        <td class="mono">{{ b.name }}</td>
+        <td>{% if b.routing_group %}<span class="mono">{{ b.routing_group }}</span>
+            {% else %}<span class="muted">—</span>{% endif %}</td>
+        <td class="mono dim">{{ b.proxy_to }}</td>
+        <td>
+          {% if b.cluster %}
+            <a href="/clusters/{{ b.cluster | urlencode }}/health">{{ b.cluster }}</a>
+            {% if b.matched_by == 'name' %}
+            {# Matched on name, which drifts. Worth saying so. #}
+            <span class="muted" title="matched by name, not by URL">(by name)</span>
+            {% endif %}
+          {% else %}
+            <span class="status status--bad">{{ ui.icon('bad', 12, 2) }} not monitored</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if b.active %}<span class="status status--good">{{ ui.icon('good', 12, 2) }} active</span>
+          {% else %}<span class="status status--concerning">{{ ui.icon('concerning', 12, 2) }} inactive</span>{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if gateway.groups %}
+<div class="section-label">Routing groups</div>
+<div class="panel">
+  <table class="table">
+    <thead><tr><th>Group</th><th class="num">Active</th><th>Backends</th></tr></thead>
+    <tbody>
+      {% for g in gateway.groups %}
+      <tr>
+        <td class="mono">{{ g.name }}</td>
+        <td class="num">{{ g.active }} / {{ g.total }}</td>
+        <td class="dim">
+          {% for b in g.backends %}<span class="mono">{{ b.name }}</span>{% if not loop.last %}, {% endif %}{% endfor %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endif %}
+
+{#
+  Routing rules come from an endpoint that is not in the Gateway documentation.
+  None means "not configured, or the endpoint is gone after an upgrade" — both
+  are normal, so the section simply does not appear rather than showing an error.
+#}
+{% if gateway.routing_rules %}
+<div class="section-label">Routing rules — read-only</div>
+<div class="panel">
+  <table class="table">
+    <thead><tr><th class="num">Priority</th><th>Name</th><th>Condition</th><th>Action</th></tr></thead>
+    <tbody>
+      {% for r in gateway.routing_rules %}
+      <tr>
+        <td class="num">{{ r.priority | integer }}</td>
+        <td>{{ r.name }}{% if r.description %}<div class="muted">{{ r.description }}</div>{% endif %}</td>
+        <td class="mono dim">{{ r.condition }}</td>
+        <td class="mono dim">
+          {% for a in r.actions or [] %}{{ a }}{% if not loop.last %}<br>{% endif %}{% endfor %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% if gateway.enabled and not gateway.backends and not gateway.unavailable_reason %}
+<div class="empty">
+  {{ ui.icon('info', 22, 1.6) }}
+  <h2>No backends registered</h2>
+  <p>The Gateway has no clusters registered, so no query is being routed.</p>
+</div>
+{% endif %}
+{% endif %}
+{% endblock %}

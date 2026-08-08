@@ -108,6 +108,7 @@ def register(app, service, config, authenticator, codec, session_cookie: str) ->
         "queries": max(int(collector_cfg.query_poll_interval_seconds), 5),
         "health": max(int(collector_cfg.jmx_poll_interval_seconds), 10),
         "workload": max(int(config.workload.poll_interval_seconds), 10),
+        "gateway": max(int(config.gateway.poll_interval_seconds), 15),
     }
 
     def base_context(request: Request, principal: Principal, page: str) -> Dict[str, Any]:
@@ -124,6 +125,9 @@ def register(app, service, config, authenticator, codec, session_cookie: str) ->
             "environment": environment,
             "links": links,
             "cluster_names": cluster_names,
+            # The nav hides the Gateway link when the integration is off - a
+            # link to a page that can only say "disabled" is noise.
+            "gateway_enabled": config.gateway.enabled,
             "flash": _take_flash(request),
             # Drives data-refresh in base.html, which tms.js reads. Without it
             # the auto-refresh timer never starts and every screen is frozen
@@ -441,6 +445,20 @@ def register(app, service, config, authenticator, codec, session_cookie: str) ->
     @app.get("/clusters", response_class=HTMLResponse, include_in_schema=False)
     def clusters_redirect():
         return RedirectResponse("/", status_code=303)
+
+    @app.get("/gateway", response_class=HTMLResponse, include_in_schema=False)
+    def gateway_page(request: Request):
+        principal, claims = principal_or_redirect(request)
+        if claims is None:
+            return principal
+        try:
+            envelope = service.get_gateway(principal)
+        except ApiError as exc:
+            return _error_page(request, principal, exc)
+
+        context = base_context(request, principal, "gateway")
+        context.update({"envelope": envelope, "gateway": envelope.get("data") or {}})
+        return render("gateway.html", context)
 
     @app.get("/clusters/{cluster}/workload", response_class=HTMLResponse,
              include_in_schema=False)

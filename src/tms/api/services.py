@@ -37,6 +37,8 @@ from tms.api.permissions import (
 from tms.clients.errors import TrinoClientError, TrinoNotFound
 from tms.clients.trino import build_kill_message
 from tms.collector.snapshot import (
+    GATEWAY_SCOPE,
+    KIND_GATEWAY,
     KIND_HEALTH,
     KIND_QUERIES,
     KIND_RESOURCE_GROUPS,
@@ -442,6 +444,36 @@ class TmsService:
                 }
             )
         return envelope(oldest, rows, self._stale_threshold)
+
+    def get_gateway(self, principal: Principal) -> Dict[str, Any]:
+        """Gateway backends joined to what TMS monitors (FR-GW-01/02).
+
+        Fleet-level: there is one Gateway deployment behind a load balancer, so
+        this takes no cluster argument.
+        """
+        require(principal, VIEW_HEALTH)
+        enabled = self.config.gateway.enabled
+        snapshot = self.repository.load(GATEWAY_SCOPE, KIND_GATEWAY)
+        if snapshot is None:
+            return envelope(
+                None,
+                {
+                    "enabled": enabled, "backends": [], "groups": [],
+                    "unmonitored_backends": [], "unrouted_clusters": [],
+                    "routing_rules": None, "live": None,
+                    "unavailable_reason": (
+                        None if enabled else
+                        "Gateway integration is off (gateway.enabled)."
+                    ),
+                },
+                self._stale_threshold,
+            )
+        payload = dict(snapshot.payload or {})
+        payload["enabled"] = enabled
+        if snapshot.collection_error:
+            payload["unavailable_reason"] = snapshot.collection_error
+            payload["advice"] = snapshot.advice
+        return envelope(snapshot, payload, self._stale_threshold)
 
     def get_workload(self, principal: Principal, cluster: str) -> Dict[str, Any]:
         """Resource group tree for one cluster (FR-WORKLOAD).

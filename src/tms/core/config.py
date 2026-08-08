@@ -29,6 +29,7 @@ ENV_OVERRIDES = {
     "TMS_DATABASE_URL": ("database", "url"),
     "TMS_LDAP_BIND_PASSWORD": ("ldap", "bind_password"),
     "TMS_SESSION_SECRET": ("portal", "session_secret"),
+    "TMS_GATEWAY_PASSWORD": ("gateway", "password"),
 }
 
 
@@ -118,6 +119,12 @@ class TrinoFacts:
 class GatewayConfig:
     enabled: bool = False
     base_url: str = ""
+    # Gateway has no read-only role: the `API` role that can list backends can
+    # also change them (TRINO_VERIFIED.md T2-3). Treat this like the Trino
+    # credential, not like a monitoring token.
+    user: str = ""
+    password: Secret = field(default_factory=lambda: Secret(""))
+    poll_interval_seconds: float = 30.0
 
 
 @dataclass(frozen=True)
@@ -342,6 +349,9 @@ def build_config(raw: Dict[str, Any], where: str = "config.secret.yaml") -> Conf
     gateway = GatewayConfig(
         enabled=bool(gateway_raw.get("enabled", False)),
         base_url=str(gateway_raw.get("base_url") or "").rstrip("/"),
+        user=str(gateway_raw.get("user") or ""),
+        password=Secret(str(gateway_raw.get("password") or "")),
+        poll_interval_seconds=float(gateway_raw.get("poll_interval_seconds", 30)),
     )
     if gateway.enabled and not gateway.base_url:
         raise ConfigError("gateway.enabled is true but gateway.base_url is empty")

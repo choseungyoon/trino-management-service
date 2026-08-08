@@ -77,7 +77,7 @@ def _query(qid, user, source, elapsed_ms, long_running=False, state="RUNNING"):
     }
 
 
-def build_app(workload_enabled=False, seed=None):
+def build_app(workload_enabled=False, seed=None, gateway=None):
     repository = InMemorySnapshotRepository()
     now = utcnow()
 
@@ -128,6 +128,7 @@ def build_app(workload_enabled=False, seed=None):
         "collector": {"query_poll_interval_seconds": 5, "stale_threshold_seconds": 600},
         "deeplinks": {"superset_url": "https://superset.invalid/"},
         "workload": {"enabled": workload_enabled},
+        "gateway": gateway or {},
         "portal": {
             "session_secret": "b" * 48,
             "local_users": {USER: {"password_hash": hash_password(PASSWORD, iterations=1000),
@@ -166,11 +167,12 @@ def _free_port():
 
 
 @contextlib.contextmanager
-def serve(workload_enabled=False, seed=None):
+def serve(workload_enabled=False, seed=None, gateway=None):
     """Run the console on a free port. Yields (base_url, stub_trino)."""
     import uvicorn
 
-    app, trino = build_app(workload_enabled=workload_enabled, seed=seed)
+    app, trino = build_app(workload_enabled=workload_enabled, seed=seed,
+                           gateway=gateway)
     port = _free_port()
     with tempfile.TemporaryDirectory() as tmp:
         key, crt = _make_cert(tmp)

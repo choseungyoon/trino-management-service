@@ -25,6 +25,9 @@ KIND_JMX = "jmx"
 KIND_INFO = "info"
 KIND_HEALTH = "health"
 KIND_RESOURCE_GROUPS = "resource_groups"
+# Fleet-level, not per-cluster: there is one Gateway deployment behind a LB.
+KIND_GATEWAY = "gateway"
+GATEWAY_SCOPE = "*"
 
 
 def utcnow() -> datetime:

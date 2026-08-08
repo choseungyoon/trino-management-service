@@ -55,11 +55,19 @@ trino_facts:
   coordinator_counted_in_active_nodes: true
 
 gateway:
-  # Disabled until the running Gateway version is confirmed (B6).
+  # B6 is resolved (version 19 confirmed). Enable once the Gateway has an
+  # `API` role account for TMS — see runbooks/gateway-config-request.md.
+  #
   # While disabled, health test H-08 is removed from the catalogue entirely
-  # rather than reported as permanently UNKNOWN.
+  # rather than reported as permanently UNKNOWN, and the Gateway nav link is
+  # hidden rather than leading to a page that can only say "off".
   enabled: false
   base_url: ""
+  user: ""
+  # Password comes from TMS_GATEWAY_PASSWORD or config.secret.yaml.
+  # ⚠️ Gateway has no read-only role: the `API` role that lists backends can
+  # also change them. Protect this like the Trino credential.
+  poll_interval_seconds: 30
 
 workload:
   # FR-WORKLOAD — resource group tree from JMX.

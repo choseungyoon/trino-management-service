@@ -43,10 +43,14 @@ class CollectorService:
         repository,
         pollers: List[ClusterPoller],
         health_writer=None,
+        gateway_poller=None,
     ) -> None:
         self.config = config
         self.repository = repository
         self.pollers = pollers
+        # Fleet-level, so it is not one of the per-cluster pollers. None when
+        # gateway.enabled is false - then no Gateway request is ever made.
+        self.gateway_poller = gateway_poller
         # Health evaluation runs here rather than in the API because the engine
         # carries state (OOM counters, stabilisation counts) and the collector is
         # the only single-instance process.
@@ -95,6 +99,11 @@ class CollectorService:
                         self._evaluate_health(poller.cluster_name)
                 except Exception:  # noqa: BLE001 - one cluster must not stop the rest
                     log.exception("unhandled error polling %s", poller.cluster_name)
+            if self.gateway_poller is not None and not self._stopping:
+                try:
+                    self.gateway_poller.tick()
+                except Exception:  # noqa: BLE001 - the Gateway must not stop clusters
+                    log.exception("unhandled error polling the gateway")
             if self._stopping:
                 break
             time.sleep(self._sleep_for())
@@ -152,6 +161,29 @@ def build_pollers(config: Config, repository) -> List[ClusterPoller]:
     return pollers
 
 
+def build_gateway_poller(config, repository):
+    """None when the Gateway is disabled - then no request is ever made."""
+    if not config.gateway.enabled or not config.gateway.base_url:
+        return None
+    from tms.clients.gateway import GatewayClient
+    from tms.clients.transport import HttpxTransport
+    from tms.collector.gateway_poller import GatewayPoller
+
+    client = GatewayClient(
+        base_url=config.gateway.base_url,
+        user=config.gateway.user,
+        password=config.gateway.password.reveal(),
+        transport=HttpxTransport(verify_tls=config.trino.verify_tls),
+        verify_tls=config.trino.verify_tls,
+        connect_timeout=config.trino.connect_timeout_seconds,
+        read_timeout=config.trino.read_timeout_seconds,
+        write_timeout=config.trino.write_timeout_seconds,
+        read_retries=config.trino.read_retries,
+    )
+    return GatewayPoller(client, repository, clusters=config.clusters,
+                         interval=config.gateway.poll_interval_seconds)
+
+
 def run(argv: Optional[List[str]] = None) -> int:
     logging.basicConfig(
         level=os.environ.get("TMS_LOG_LEVEL", "INFO"),
@@ -192,7 +224,9 @@ def run(argv: Optional[List[str]] = None) -> int:
         ),
     )
     service = CollectorService(
-        config, repository, build_pollers(config, repository), health_writer=health_writer
+        config, repository, build_pollers(config, repository),
+        health_writer=health_writer,
+        gateway_poller=build_gateway_poller(config, repository),
     )
     signal.signal(signal.SIGTERM, service.request_stop)
     signal.signal(signal.SIGINT, service.request_stop)
