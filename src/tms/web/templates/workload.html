@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% import "_icons.html" as ui %}
+{% block title %}Workload · {{ selected_cluster }}{% endblock %}
+{% block heading %}Workload{% endblock %}
+
+{% block topbar_extra %}
+<nav class="segmented" aria-label="Cluster">
+  {% for name in cluster_names %}
+  <a href="/clusters/{{ name | urlencode }}/workload"
+     {% if selected_cluster == name %}aria-current="page"{% endif %}>{{ name }}</a>
+  {% endfor %}
+</nav>
+{% endblock %}
+
+{% block content %}
+{% if envelope.stale and workload.enabled %}
+<div class="banner banner--concerning" role="status">
+  {{ ui.icon('clock', 15, 2) }}
+  <div><b>Data is stale — last collected {{ envelope.collected_at | relative_time }}.</b>
+    Check that tms-collector is running.</div>
+</div>
+{% endif %}
+
+{% if not workload.enabled %}
+{# Off is a choice, not a fault. Say which, or people go hunting through
+   resource-groups.json for a problem that is not there. #}
+<div class="banner" role="status">
+  {{ ui.icon('info', 15, 2) }}
+  <div>
+    <b>Resource group collection is off.</b>
+    Enable it with <code class="mono">workload.enabled: true</code> once the
+    coordinator load budget has been re-measured in production
+    (NFR-PERF-03). Collection adds one JMX registry read plus one read per
+    group on every poll.
+  </div>
+</div>
+{% elif workload.unavailable_reason %}
+<div class="banner banner--bad" role="alert">
+  {{ ui.icon('bad', 15, 2) }}
+  <div>
+    <b>{{ workload.unavailable_reason }}</b>
+    {% if workload.advice %}<div>{{ workload.advice }}</div>{% endif %}
+  </div>
+</div>
+{% endif %}
+
+{% if workload.enabled and rows %}
+<div class="kpi-row">
+  <div class="kpi">
+    <div class="kpi__value">{{ workload.summary.groups | integer }}</div>
+    <div class="kpi__label">Groups seen</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi__value">{{ workload.summary.running | integer }}</div>
+    <div class="kpi__label">Running</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi__value">{{ workload.summary.queued | integer }}</div>
+    <div class="kpi__label">Queued</div>
+  </div>
+  <div class="kpi {% if workload.summary.blocked_groups %}kpi--alert{% endif %}">
+    <div class="kpi__value">{{ workload.summary.blocked_groups | integer }}</div>
+    <div class="kpi__label">Held back</div>
+  </div>
+</div>
+
+{% if workload.summary.blocked %}
+<div class="banner banner--concerning" role="status">
+  {{ ui.icon('concerning', 15, 2) }}
+  <div>
+    <b>{{ workload.summary.blocked | length }} group(s) are holding queries back.</b>
+    {% for item in workload.summary.blocked %}
+    <div><code class="mono">{{ item.id }}</code> — {{ bottleneck_text(item.reason) }}
+      ({{ item.queued | integer }} queued)</div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<div class="panel">
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Resource group</th>
+        <th class="num">Running</th>
+        <th class="num">Queued</th>
+        <th class="num">Concurrency</th>
+        <th class="num">Max queued</th>
+        <th class="num">CPU</th>
+        <th class="num">Memory</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr {% if row.bottleneck %}class="row--alert"{% endif %}>
+        <td>
+          <span class="mono" style="padding-left:{{ row.depth * 18 }}px">
+            {%- if row.depth %}└ {% endif -%}{{ row.name }}</span>
+        </td>
+        <td class="num">{{ row.running | integer }}</td>
+        <td class="num">{{ row.queued | integer }}</td>
+        <td class="num">
+          {%- if row.hard_concurrency_limit -%}
+            {{ row.hard_concurrency_limit | integer }}
+          {%- else -%}—{%- endif -%}
+        </td>
+        <td class="num">
+          {%- if row.max_queued -%}{{ row.max_queued | integer }}{%- else -%}—{%- endif -%}
+        </td>
+        <td class="num">{{ row.cpu_ms | duration }}</td>
+        <td class="num">{{ row.memory_bytes | data_size }}</td>
+        <td>
+          {% if row.bottleneck %}
+          <span class="pill pill--concerning">{{ bottleneck_text(row.bottleneck) }}</span>
+          {% else %}<span class="muted">—</span>{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{# The single most important caveat on this screen. Resource groups are created
+   lazily, so a configured group that has never admitted a query does not exist
+   as far as Trino's JMX registry is concerned. Presenting this as the full
+   configuration would have an operator conclude a group had disappeared. #}
+<p class="muted" style="margin-top:12px">
+  {{ ui.icon('info', 13, 2) }}
+  Only groups that have admitted at least one query appear here — Trino creates
+  resource groups lazily. This is not the full configured list.
+</p>
+{% elif workload.enabled and not workload.unavailable_reason %}
+<div class="empty">
+  {{ ui.icon('info', 22, 1.6) }}
+  <h2>No resource groups yet</h2>
+  <p>No group has admitted a query since the collector started, or
+     <code class="mono">resource-groups.json</code> is missing
+     <code class="mono">"jmxExport": true</code>.</p>
+</div>
+{% endif %}
+{% endblock %}

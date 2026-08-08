@@ -28,10 +28,12 @@ from typing import Any, Callable, Dict, List, Optional
 
 from tms.clients.errors import TrinoClientError
 from tms.clients.trino import NODE_MANAGER_MBEAN, TrinoClient
+from tms.collector.resourcegroups import collect as collect_resource_groups
 from tms.collector.snapshot import (
     KIND_INFO,
     KIND_JMX,
     KIND_QUERIES,
+    KIND_RESOURCE_GROUPS,
     Snapshot,
     SnapshotRepository,
     utcnow,
@@ -125,6 +127,7 @@ class ClusterPoller:
         jmx_cross_check_max_age: Optional[float] = None,
         wall_clock: Optional[Callable[[], datetime]] = None,
         h09_confirm_polls: int = 2,
+        resource_group_interval: Optional[float] = None,
     ) -> None:
         self.cluster_name = cluster_name
         self.client = client
@@ -154,6 +157,10 @@ class ClusterPoller:
         # Consecutive suspicious polls required before H-09 is believed.
         self.h09_confirm_polls = max(1, h09_confirm_polls)
         self._suspicious_polls = 0
+        # None disables resource group collection entirely - no extra requests
+        # reach the coordinator. Off until NFR-PERF-03 is re-measured in
+        # production (DESIGN_R2.md 1-4).
+        self.resource_group_interval = resource_group_interval
 
         if clock is None:
             import time
@@ -163,12 +170,15 @@ class ClusterPoller:
 
         self.query_interval = query_interval
         self._next_due = {KIND_QUERIES: 0.0, KIND_JMX: 0.0, KIND_INFO: 0.0}
+        if self.resource_group_interval:
+            self._next_due[KIND_RESOURCE_GROUPS] = 0.0
         # Last successful collection per kind - exported so sre-agent can alert
         # on "TMS went blind" rather than on the absence of data.
         self.last_success: Dict[str, Optional[float]] = {
             KIND_QUERIES: None,
             KIND_JMX: None,
             KIND_INFO: None,
+            KIND_RESOURCE_GROUPS: None,
         }
 
     # ----------------------------------------------------------- scheduling
@@ -178,17 +188,19 @@ class ClusterPoller:
     # apart. Observed live: with queries first, a short query that ended
     # between the two reads made the list look "filtered" and H-09 flapped
     # GOOD -> UNKNOWN -> GOOD on a perfectly healthy cluster.
-    _POLL_ORDER = (KIND_JMX, KIND_QUERIES, KIND_INFO)
+    _POLL_ORDER = (KIND_JMX, KIND_QUERIES, KIND_INFO, KIND_RESOURCE_GROUPS)
 
     def due_kinds(self) -> List[str]:
         now = self._clock()
-        return [kind for kind in self._POLL_ORDER if now >= self._next_due[kind]]
+        return [kind for kind in self._POLL_ORDER
+                if kind in self._next_due and now >= self._next_due[kind]]
 
     def _reschedule(self, kind: str) -> None:
         interval = {
             KIND_QUERIES: self.query_interval,
             KIND_JMX: self.jmx_interval,
             KIND_INFO: self.info_interval,
+            KIND_RESOURCE_GROUPS: self.resource_group_interval,
         }[kind]
         self._next_due[kind] = self._clock() + interval
 
@@ -345,6 +357,24 @@ class ClusterPoller:
             advice=advice,
         )
 
+    def poll_resource_groups(self) -> Snapshot:
+        """Enumerate resource group MBeans and rebuild the tree (FR-WORKLOAD).
+
+        Costs one registry enumeration plus one read per exported group, which
+        is why it runs on its own schedule and is off unless configured.
+        """
+        collection = collect_resource_groups(self.client)
+        if collection.groups:
+            self.last_success[KIND_RESOURCE_GROUPS] = self._clock()
+        return Snapshot(
+            cluster=self.cluster_name,
+            kind=KIND_RESOURCE_GROUPS,
+            collected_at=utcnow(),
+            payload=collection.as_payload(),
+            collection_error=collection.error,
+            advice=collection.advice,
+        )
+
     def _adapt_interval(self, response_bytes: int) -> None:
         """Back off when responses get large, recover when they shrink.
 
@@ -376,6 +406,8 @@ class ClusterPoller:
                 snapshot = self.poll_info()
             elif kind == KIND_JMX:
                 snapshot = self.poll_jmx()
+            elif kind == KIND_RESOURCE_GROUPS:
+                snapshot = self.poll_resource_groups()
             else:
                 snapshot = self.poll_queries(self._last_jmx_running_queries())
             self._reschedule(kind)

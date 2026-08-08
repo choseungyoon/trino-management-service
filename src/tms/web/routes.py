@@ -107,6 +107,7 @@ def register(app, service, config, authenticator, codec, session_cookie: str) ->
         "overview": max(int(collector_cfg.query_poll_interval_seconds), 5),
         "queries": max(int(collector_cfg.query_poll_interval_seconds), 5),
         "health": max(int(collector_cfg.jmx_poll_interval_seconds), 10),
+        "workload": max(int(config.workload.poll_interval_seconds), 10),
     }
 
     def base_context(request: Request, principal: Principal, page: str) -> Dict[str, Any]:
@@ -440,6 +441,28 @@ def register(app, service, config, authenticator, codec, session_cookie: str) ->
     @app.get("/clusters", response_class=HTMLResponse, include_in_schema=False)
     def clusters_redirect():
         return RedirectResponse("/", status_code=303)
+
+    @app.get("/clusters/{cluster}/workload", response_class=HTMLResponse,
+             include_in_schema=False)
+    def workload(request: Request, cluster: str):
+        principal, claims = principal_or_redirect(request)
+        if claims is None:
+            return principal
+        try:
+            envelope = service.get_workload(principal, cluster)
+        except ApiError as exc:
+            return _error_page(request, principal, exc)
+
+        data = envelope.get("data") or {}
+        context = base_context(request, principal, "workload")
+        context.update({
+            "envelope": envelope,
+            "workload": data,
+            "rows": views.flatten_groups(data.get("tree") or []),
+            "bottleneck_text": views.bottleneck_text,
+            "selected_cluster": cluster,
+        })
+        return render("workload.html", context)
 
     @app.get("/clusters/{cluster}/health", response_class=HTMLResponse, include_in_schema=False)
     def health(request: Request, cluster: str):

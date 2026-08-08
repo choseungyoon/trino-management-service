@@ -24,6 +24,7 @@ KIND_QUERIES = "queries"
 KIND_JMX = "jmx"
 KIND_INFO = "info"
 KIND_HEALTH = "health"
+KIND_RESOURCE_GROUPS = "resource_groups"
 
 
 def utcnow() -> datetime:

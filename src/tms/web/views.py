@@ -281,3 +281,38 @@ def expand_state_filter(group: Optional[str]) -> Optional[List[str]]:
     if not group:
         return None
     return list(QUERY_STATE_GROUPS.get(group, ()))or None
+
+
+BOTTLENECK_TEXT = {
+    "queue_full": "Queue full — new queries rejected",
+    "concurrency_limit": "At concurrency limit",
+    "memory_limit": "At memory limit",
+    "cpu_limit": "At CPU limit",
+}
+
+
+def bottleneck_text(reason: Any) -> str:
+    """Plain words for a diagnosis code.
+
+    An unknown code renders as itself rather than as an empty cell - a blank
+    status next to a highlighted row reads as "no problem", which is the
+    opposite of what happened.
+    """
+    if not reason:
+        return ""
+    return BOTTLENECK_TEXT.get(str(reason), str(reason))
+
+
+def flatten_groups(tree: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Depth-first order so the table reads as the tree it represents."""
+    rows: List[Dict[str, Any]] = []
+
+    def walk(node: Dict[str, Any]) -> None:
+        rows.append(node)
+        for child in node.get("children") or []:
+            walk(child)
+
+    for root in tree or []:
+        walk(root)
+    return rows
+

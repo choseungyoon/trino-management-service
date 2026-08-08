@@ -39,6 +39,7 @@ from tms.api.services import TmsService  # noqa: E402
 from tms.collector.snapshot import (  # noqa: E402
     KIND_HEALTH,
     KIND_QUERIES,
+    KIND_RESOURCE_GROUPS,
     InMemorySnapshotRepository,
     Snapshot,
     utcnow,
@@ -64,7 +65,7 @@ class StubTrino:
         return {"queryId": query_id, "query": "SELECT 1", "state": "RUNNING"}
 
 
-def build_service(roles=("admin",), with_data=True):
+def build_service(roles=("admin",), with_data=True, workload=None):
     repository = InMemorySnapshotRepository()
     now = utcnow()
     if with_data:
@@ -101,6 +102,7 @@ def build_service(roles=("admin",), with_data=True):
         "database": {"url": "postgresql://u:p@h:5432/d"},
         "collector": {"stale_threshold_seconds": 600},
         "deeplinks": {"superset_url": "https://superset.invalid/"},
+        "workload": workload or {},
         "portal": {
             "session_secret": "s" * 48,
             "local_users": {USER: {"password_hash": hash_password(PASSWORD, iterations=1000),
@@ -266,6 +268,49 @@ class WebRouteTest(unittest.IsolatedAsyncioTestCase):
             response = await c.post("/clusters/prod-a/queries/q1/kill", data={"reason": "nope"})
         self.assertEqual(403, response.status_code)
         self.assertEqual([], trino.killed)
+
+    # -------------------------------------------------------------- workload
+
+    async def test_workload_says_when_collection_is_off(self):
+        """Off is a configuration choice; empty is a possible misconfiguration.
+        They render identically in the data, so the page must distinguish them
+        or people go hunting through resource-groups.json for nothing."""
+        async with self.client() as c:
+            await self.login(c)
+            body = (await c.get("/clusters/prod-a/workload")).text
+        self.assertIn("collection is off", body)
+        self.assertNotIn("jmxExport", body)
+
+    async def test_workload_renders_the_group_tree(self):
+        config, service, _ = build_service(workload={"enabled": True})
+        service.repository.save(Snapshot(
+            "prod-a", KIND_RESOURCE_GROUPS, utcnow(),
+            payload={
+                "complete": False,
+                "summary": {"groups": 2, "running": 3, "queued": 4,
+                            "blocked_groups": 1,
+                            "blocked": [{"id": "global.adhoc",
+                                         "reason": "concurrency_limit", "queued": 4}]},
+                "groups": [], "tree": [{
+                    "id": "global", "name": "global", "depth": 0, "path": ["global"],
+                    "running": 3, "queued": 4, "hard_concurrency_limit": None,
+                    "max_queued": None, "cpu_ms": 1000, "memory_bytes": 1024,
+                    "bottleneck": None,
+                    "children": [{
+                        "id": "global.adhoc", "name": "adhoc", "depth": 1,
+                        "path": ["global", "adhoc"], "running": 3, "queued": 4,
+                        "hard_concurrency_limit": 3, "max_queued": 100,
+                        "cpu_ms": 900, "memory_bytes": 512,
+                        "bottleneck": "concurrency_limit", "children": []}],
+                }],
+            }))
+        app = create_app(config=config, service=service)
+        async with client_for(app) as c:
+            await sign_in(c)
+            body = (await c.get("/clusters/prod-a/workload")).text
+        self.assertIn("adhoc", body)
+        self.assertIn("At concurrency limit", body, "the diagnosis must be in words")
+        self.assertIn("lazily", body, "the incompleteness caveat must be on screen")
 
     # ----------------------------------------------------------------- theme
 

@@ -61,6 +61,20 @@ gateway:
   enabled: false
   base_url: ""
 
+workload:
+  # FR-WORKLOAD — resource group tree from JMX.
+  #
+  # Off by default on purpose. Collection costs one JMX registry enumeration
+  # plus one read per exported group on every poll, and NFR-PERF-03 has only
+  # ever been measured on a laptop against an idle single node — a figure that
+  # measurement itself records as a lower bound. Turn this on after the
+  # production measurement in PERF_MEASUREMENT.md §6-1.
+  #
+  # Also requires "jmxExport": true on every group in resource-groups.json;
+  # groups without it are invisible to TMS (TRINO_VERIFIED.md §T1-4).
+  enabled: false
+  poll_interval_seconds: 15
+
 health:
   # Consecutive polls a test must hold a state before the transition is
   # recorded. Stops a single spike from generating an event.

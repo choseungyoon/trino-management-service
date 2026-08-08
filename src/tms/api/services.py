@@ -36,7 +36,13 @@ from tms.api.permissions import (
 )
 from tms.clients.errors import TrinoClientError, TrinoNotFound
 from tms.clients.trino import build_kill_message
-from tms.collector.snapshot import KIND_HEALTH, KIND_QUERIES, Snapshot, utcnow
+from tms.collector.snapshot import (
+    KIND_HEALTH,
+    KIND_QUERIES,
+    KIND_RESOURCE_GROUPS,
+    Snapshot,
+    utcnow,
+)
 from tms.core.audit import (
     ACTION_AUDIT_EXPORT,
     ACTION_HEALTH_ROLLUP_TOGGLE,
@@ -436,6 +442,39 @@ class TmsService:
                 }
             )
         return envelope(oldest, rows, self._stale_threshold)
+
+    def get_workload(self, principal: Principal, cluster: str) -> Dict[str, Any]:
+        """Resource group tree for one cluster (FR-WORKLOAD).
+
+        `enabled` distinguishes "collection is switched off" from "nothing was
+        found". They look identical in the data - an empty tree either way -
+        but the first is a configuration choice and the second may be a missing
+        `jmxExport`. Telling an operator to check their config when the feature
+        is simply off would waste their time.
+        """
+        require(principal, VIEW_HEALTH)
+        self._cluster_or_404(cluster)
+        enabled = self.config.workload.enabled
+        snapshot = self.repository.load(cluster, KIND_RESOURCE_GROUPS)
+        if snapshot is None:
+            return envelope(
+                None,
+                {
+                    "tree": [], "groups": [], "summary": {}, "complete": False,
+                    "enabled": enabled,
+                    "unavailable_reason": (
+                        None if enabled else
+                        "Resource group collection is off (workload.enabled)."
+                    ),
+                },
+                self._stale_threshold,
+            )
+        payload = dict(snapshot.payload or {})
+        payload["enabled"] = enabled
+        if snapshot.collection_error:
+            payload["unavailable_reason"] = snapshot.collection_error
+            payload["advice"] = snapshot.advice
+        return envelope(snapshot, payload, self._stale_threshold)
 
     def get_health(self, principal: Principal, cluster: str) -> Dict[str, Any]:
         require(principal, VIEW_HEALTH)

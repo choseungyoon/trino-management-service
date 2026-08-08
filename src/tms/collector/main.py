@@ -141,6 +141,12 @@ def build_pollers(config: Config, repository) -> List[ClusterPoller]:
                 long_running_seconds=config.health.long_running_query_seconds,
                 response_backoff_bytes=config.collector.response_backoff_bytes,
                 response_backoff_interval=config.collector.response_backoff_interval_seconds,
+                # None when disabled - the poller then never issues a single
+                # resource group request (DESIGN_R2.md 1-4).
+                resource_group_interval=(
+                    config.workload.poll_interval_seconds
+                    if config.workload.enabled else None
+                ),
             )
         )
     return pollers

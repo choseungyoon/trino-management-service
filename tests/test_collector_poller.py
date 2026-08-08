@@ -23,6 +23,7 @@ from tms.collector.poller import (  # noqa: E402
     KIND_INFO,
     KIND_JMX,
     KIND_QUERIES,
+    KIND_RESOURCE_GROUPS,
     ClusterPoller,
     summarise_query,
 )
@@ -62,6 +63,10 @@ class FakeClient:
         if "list_queries" in self.raise_on:
             raise self.raise_on["list_queries"]
         return QueryListResult(self.queries, self.response_bytes, 0.01)
+
+    def list_mbean_names(self):
+        self.calls.append("list_mbean_names")
+        return getattr(self, "mbean_names", [])
 
     def get_mbean(self, object_name):
         self.calls.append("get_mbean:" + object_name)
@@ -449,3 +454,42 @@ class SnapshotTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class ResourceGroupSchedulingTest(unittest.TestCase):
+    """FR-WORKLOAD collection is opt-in.
+
+    It costs a registry enumeration plus one read per group on every poll, and
+    NFR-PERF-03 is still only measured on a laptop against an idle node. Until
+    that is re-measured in production the default must add no requests at all -
+    not a longer interval, none.
+    """
+
+    def test_disabled_by_default_issues_no_requests(self):
+        client = FakeClient(queries=[])
+        poller = make_poller(client)
+        poller.tick()
+        self.assertNotIn(KIND_RESOURCE_GROUPS, poller.due_kinds())
+        self.assertFalse(any("list_mbean_names" in call for call in client.calls))
+
+    def test_enabling_it_schedules_the_poll(self):
+        poller = make_poller(FakeClient(queries=[]), resource_group_interval=15.0)
+        self.assertIn(KIND_RESOURCE_GROUPS, poller.due_kinds())
+
+    def test_collected_snapshot_carries_the_tree(self):
+        name = ("trino.execution.resourcegroups:type=InternalResourceGroup,"
+                "name=global.adhoc")
+        client = FakeClient(queries=[], mbeans={name: {"RunningQueries": 2}})
+        client.mbean_names = [name]
+        poller = make_poller(client, resource_group_interval=15.0)
+        snapshot = poller.poll_resource_groups()
+        self.assertEqual(KIND_RESOURCE_GROUPS, snapshot.kind)
+        self.assertEqual(1, len(snapshot.payload["groups"]))
+        self.assertFalse(snapshot.payload["complete"],
+                         "lazily-created groups mean the set is never complete")
+
+    def test_missing_export_is_reported_with_advice(self):
+        client = FakeClient(queries=[])
+        client.mbean_names = ["java.lang:type=Memory"]
+        snapshot = make_poller(client, resource_group_interval=15.0).poll_resource_groups()
+        self.assertIn("jmxExport", snapshot.advice)

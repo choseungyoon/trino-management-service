@@ -121,6 +121,22 @@ class GatewayConfig:
 
 
 @dataclass(frozen=True)
+class WorkloadConfig:
+    """Resource group collection (FR-WORKLOAD).
+
+    Off by default. Collecting groups costs one MBean registry enumeration plus
+    one read per group on every poll, and NFR-PERF-03 has still only been
+    measured on a laptop against an idle single node - a number the measurement
+    itself records as a lower bound. Turning this on before that is re-measured
+    in production would add load on exactly the process whose load budget is
+    unverified. Enable it after TODO.md A-1.
+    """
+
+    enabled: bool = False
+    poll_interval_seconds: float = 15.0
+
+
+@dataclass(frozen=True)
 class HealthConfig:
     stabilization_polls: int = 3
     long_running_query_seconds: float = 300.0
@@ -163,6 +179,7 @@ class Config:
     collector: CollectorConfig
     trino_facts: TrinoFacts
     gateway: GatewayConfig
+    workload: WorkloadConfig
     health: HealthConfig
     deeplinks: DeeplinkConfig
     portal: PortalConfig
@@ -329,6 +346,14 @@ def build_config(raw: Dict[str, Any], where: str = "config.secret.yaml") -> Conf
     if gateway.enabled and not gateway.base_url:
         raise ConfigError("gateway.enabled is true but gateway.base_url is empty")
 
+    workload_raw = raw.get("workload") or {}
+    workload = WorkloadConfig(
+        enabled=bool(workload_raw.get("enabled", False)),
+        poll_interval_seconds=float(workload_raw.get("poll_interval_seconds", 15)),
+    )
+    if workload.poll_interval_seconds <= 0:
+        raise ConfigError("workload.poll_interval_seconds must be positive")
+
     collector = CollectorConfig(
         query_poll_interval_seconds=float(
             collector_raw.get("query_poll_interval_seconds", 5)
@@ -380,6 +405,7 @@ def build_config(raw: Dict[str, Any], where: str = "config.secret.yaml") -> Conf
             )
         ),
         gateway=gateway,
+        workload=workload,
         health=HealthConfig(
             stabilization_polls=int(health_raw.get("stabilization_polls", 3)),
             long_running_query_seconds=float(health_raw.get("long_running_query_seconds", 300)),

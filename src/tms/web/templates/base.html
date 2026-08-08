@@ -42,6 +42,7 @@
       <a href="/" {% if page == 'overview' %}aria-current="page"{% endif %}>{{ ui.icon('overview') }}Overview</a>
       <a href="/queries" {% if page == 'queries' %}aria-current="page"{% endif %}>{{ ui.icon('queries') }}Live Queries</a>
       <a href="/clusters/{{ cluster_names[0] }}/health" {% if page == 'health' %}aria-current="page"{% endif %}>{{ ui.icon('health') }}Health</a>
+      <a href="/clusters/{{ cluster_names[0] }}/workload" {% if page == 'workload' %}aria-current="page"{% endif %}>{{ ui.icon('queries') }}Workload</a>
       {% if 'view_audit' in principal.capabilities %}
       <a href="/audit" {% if page == 'audit' %}aria-current="page"{% endif %}>{{ ui.icon('audit') }}Audit Log</a>
       {% endif %}
