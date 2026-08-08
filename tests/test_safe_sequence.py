@@ -145,10 +145,11 @@ class DrainTest(unittest.TestCase):
         s.observe(running_queries=4)
         s.force_drained("stuck query, owner unreachable, incident 4821")
         self.assertEqual(DRAINED, s.state)
-        note = s.history[-1]["note"]
-        self.assertIn("FORCED", note)
-        self.assertIn("4", note)
-        self.assertIn("incident 4821", note)
+        entry = s.history[-1]
+        self.assertIn("FORCED", entry["message"])
+        self.assertIn("4", entry["message"])
+        self.assertIn("incident 4821", entry["message"])
+        self.assertEqual("warn", entry["level"], "a forced drain is not routine")
 
 
 class AbortTest(unittest.TestCase):
@@ -220,6 +221,52 @@ class ChecklistTest(unittest.TestCase):
         s.begin()
         s.begin_abort()
         self.assertTrue(all(status == "aborted" for _, _, status in s.steps()))
+
+
+class ProgressLogTest(unittest.TestCase):
+    """The log is the screen — an operator watches the restart happen."""
+
+    def test_every_entry_is_timestamped_and_stateful(self):
+        s = seq()
+        s.begin()
+        entry = s.history[-1]
+        self.assertIn("at", entry)
+        self.assertEqual(DRAINING, entry["state"])
+        self.assertEqual("info", entry["level"])
+
+    def test_the_drain_reports_progress_without_changing_state(self):
+        """Otherwise the screen sits still while the queue empties."""
+        s = seq()
+        s.begin()
+        s.observe(running_queries=3)
+        s.observe(running_queries=1)
+        self.assertEqual(DRAINING, s.state)
+        messages = [h["message"] for h in s.history]
+        self.assertIn("Waiting for 3 running queries to finish.", messages)
+        self.assertIn("Waiting for 1 running query to finish.", messages)
+
+    def test_the_log_reads_as_a_sequence_of_operations(self):
+        s = seq()
+        s.begin()
+        s.observe(running_queries=0, health_state="GOOD")
+        s.mark_restarting()
+        s.mark_restarted()
+        s.confirm_healthy()
+        s.complete()
+        messages = [h["message"] for h in s.history]
+        self.assertEqual("Blocking new queries to prod-a in the Gateway.", messages[0])
+        self.assertIn("empty", messages[1])
+        self.assertIn("Bringing prod-a down", messages[2])
+        self.assertIn("Checking health", messages[3])
+        self.assertIn("Health is GOOD", messages[4])
+        self.assertIn("back in rotation", messages[-1])
+
+    def test_abort_is_logged_as_a_warning(self):
+        s = seq()
+        s.begin()
+        s.begin_abort()
+        self.assertEqual("warn", s.history[-1]["level"])
+        self.assertIn("Restoring traffic", s.history[-1]["message"])
 
 
 if __name__ == "__main__":

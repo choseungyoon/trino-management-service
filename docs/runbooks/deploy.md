@@ -103,6 +103,7 @@ ls -l /opt/tms/venv/bin/tms-api /opt/tms/venv/bin/tms-collector
 | 3-4 | `psql -U tms_owner -d tms -v ON_ERROR_STOP=1 -f migrations/001_init.sql` |
 | 3-5 | `psql -U tms_owner -d tms -v ON_ERROR_STOP=1 -f migrations/002_grants.sql` |
 | 3-5b | `psql -U tms_owner -d tms -v ON_ERROR_STOP=1 -f migrations/003_snapshot_kinds.sql` — **R2 이상 필수** |
+| 3-5c | `004_restart_sequence.sql` + `005_restart_sequence_grants.sql` — **안전 시퀀스(FR-CO-02) 사용 시 필수** |
 | 3-6 | **append-only 검증** (db-setup.md §4) — 건너뛰지 말 것 |
 
 > **⛔ 3-3 을 빠뜨리면 조용히 깨진다.** `002_grants.sql` 이 `WARNING: no privileges were granted for "public"` 만 남기고 성공한 것처럼 끝난다. PG14 는 PUBLIC 의사 역할의 기본 USAGE 덕분에 우연히 동작하지만, 보안 강화로 `REVOKE ALL ON SCHEMA public FROM PUBLIC` 이 적용되는 순간 `tms_app` 이 모든 테이블에 접근하지 못한다. (2026-08-06 재현 확인)

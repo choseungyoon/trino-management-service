@@ -40,7 +40,8 @@ State machine
 Python 3.9 compatible.
 """
 
-from typing import Any, Dict, List, Optional, Tuple
+from datetime import datetime, timezone
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 # ------------------------------------------------------------------- states
 
@@ -71,6 +72,10 @@ STEP_LABELS = {
 }
 
 
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
 class SequenceError(Exception):
     """A transition that the sequence does not allow."""
 
@@ -92,10 +97,12 @@ class RestartSequence:
     """
 
     __slots__ = ("cluster", "reason", "actor", "state", "history",
-                 "drain_timeout_seconds", "running_queries", "health_state")
+                 "drain_timeout_seconds", "running_queries", "health_state",
+                 "_clock")
 
     def __init__(self, cluster: str, reason: str, actor: str,
-                 drain_timeout_seconds: float = 900.0) -> None:
+                 drain_timeout_seconds: float = 900.0,
+                 clock: Optional[Callable[[], datetime]] = None) -> None:
         if not (reason or "").strip():
             raise SequenceError("a reason is required to restart a cluster")
         self.cluster = cluster
@@ -106,11 +113,28 @@ class RestartSequence:
         self.drain_timeout_seconds = drain_timeout_seconds
         self.running_queries: Optional[int] = None
         self.health_state: Optional[str] = None
+        self._clock = clock or _now
 
     # ------------------------------------------------------------- helpers
 
+    def log(self, message: str, level: str = "info") -> None:
+        """Append a line to the running progress log.
+
+        The log is the screen. An operator watching a cluster get restarted
+        wants to see it happening, in the order it happens, in the words they
+        would use themselves - not a status field that silently changes value.
+        """
+        self.history.append({
+            "at": self._clock().isoformat(),
+            "state": self.state,
+            "level": level,
+            "message": message,
+        })
+
     def _record(self, step: str, note: str = "") -> None:
-        self.history.append({"state": step, "note": note})
+        self.state = step
+        if note:
+            self.log(note)
 
     def _require(self, *allowed: str) -> None:
         if self.state not in allowed:
@@ -140,8 +164,8 @@ class RestartSequence:
     def begin(self) -> None:
         """Step 1: the cluster has been deactivated in the Gateway."""
         self._require(PENDING)
-        self.state = DRAINING
-        self._record(DRAINING, "deactivated in the Gateway; new queries stop here")
+        self._record(DRAINING,
+                     "Blocking new queries to {} in the Gateway.".format(self.cluster))
 
     def observe(self, running_queries: int, health_state: Optional[str] = None) -> None:
         """Feed in what the collector currently sees."""
@@ -149,8 +173,13 @@ class RestartSequence:
         if health_state is not None:
             self.health_state = health_state
         if self.state == DRAINING and running_queries == 0:
-            self.state = DRAINED
-            self._record(DRAINED, "no queries left running")
+            self._record(DRAINED, "All running queries have finished. "
+                                  "{} is empty.".format(self.cluster))
+        elif self.state == DRAINING and running_queries > 0:
+            # Progress, not a state change - the operator wants to watch the
+            # queue drain rather than stare at an unchanging screen.
+            self.log("Waiting for {} running quer{} to finish.".format(
+                running_queries, "y" if running_queries == 1 else "ies"))
 
     def confirm_drained(self) -> None:
         """Step 2/3: intake stopped and the cluster is empty."""
@@ -164,8 +193,8 @@ class RestartSequence:
                     self.running_queries,
                     "y is" if self.running_queries == 1 else "ies are",
                     "it" if self.running_queries == 1 else "them"))
-        self.state = DRAINED
-        self._record(DRAINED, "confirmed empty")
+        self._record(DRAINED, "Confirmed: no queries are running on {}.".format(
+            self.cluster))
 
     def force_drained(self, override_reason: str) -> None:
         """Proceed with queries still running.
@@ -180,20 +209,22 @@ class RestartSequence:
         if not (override_reason or "").strip():
             raise SequenceError("forcing past a non-empty cluster requires its own reason")
         killed = self.running_queries or 0
-        self.state = DRAINED
-        self._record(DRAINED, "FORCED with {} quer{} still running: {}".format(
-            killed, "y" if killed == 1 else "ies", override_reason.strip()))
+        self._record(DRAINED, "FORCED past the drain with {} quer{} still "
+                              "running. They will be killed by the restart. "
+                              "Reason: {}".format(
+                                  killed, "y" if killed == 1 else "ies",
+                                  override_reason.strip()))
+        self.history[-1]["level"] = "warn"
 
     def mark_restarting(self) -> None:
         """Step 4 begins. The operator restarts the cluster themselves."""
         self._require(DRAINED)
-        self.state = RESTARTING
-        self._record(RESTARTING, "waiting for the operator to restart the cluster")
+        self._record(RESTARTING, "Bringing {} down and back up.".format(self.cluster))
 
     def mark_restarted(self) -> None:
         self._require(RESTARTING)
-        self.state = VERIFYING
-        self._record(VERIFYING, "restart reported; checking health")
+        self._record(VERIFYING, "{} restarted. Checking health before restoring "
+                                "traffic.".format(self.cluster))
 
     def confirm_healthy(self) -> None:
         """Step 5: health must be good before traffic returns."""
@@ -202,7 +233,7 @@ class RestartSequence:
             raise StepBlocked(
                 "health is {} - traffic is not restored until it is GOOD".format(
                     self.health_state or "unknown"))
-        self._record(VERIFYING, "health confirmed GOOD")
+        self.log("Health is GOOD.")
 
     def complete(self) -> None:
         """Step 6: the cluster has been reactivated in the Gateway."""
@@ -211,20 +242,21 @@ class RestartSequence:
             raise StepBlocked(
                 "refusing to restore traffic while health is {}".format(
                     self.health_state or "unknown"))
-        self.state = COMPLETED
-        self._record(COMPLETED, "reactivated in the Gateway")
+        self._record(COMPLETED,
+                     "{} is back in rotation. Traffic restored.".format(self.cluster))
 
     def begin_abort(self, note: str = "") -> None:
         if self.is_terminal:
             raise SequenceError("this sequence has already finished")
-        self.state = ABORTING
-        self._record(ABORTING, note or "aborting; traffic will be restored")
+        self._record(ABORTING, note or
+                     "Aborting. Restoring traffic to {} before stopping.".format(
+                         self.cluster))
+        self.history[-1]["level"] = "warn"
 
     def finish_abort(self) -> None:
         """Only reached once the cluster is active again."""
         self._require(ABORTING)
-        self.state = ABORTED
-        self._record(ABORTED, "traffic restored")
+        self._record(ABORTED, "Aborted. {} is back in rotation.".format(self.cluster))
 
     # ---------------------------------------------------------------- view
 
