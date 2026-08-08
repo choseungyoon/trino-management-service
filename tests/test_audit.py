@@ -12,6 +12,7 @@ The invariants, and what breaking each one would cost:
 """
 
 import os
+import pathlib
 import sys
 import unittest
 
@@ -203,15 +204,37 @@ class ActionTypeTest(unittest.TestCase):
             )
 
     def test_catalogue_matches_the_database_check_constraint(self):
-        """migrations/001_init.sql carries the same whitelist."""
+        """Code and database must agree on the whitelist.
+
+        The constraint is defined in 001 and may be amended by a later
+        migration, so the effective definition is the last one in migration
+        order - reading only 001 would go stale the first time an action type
+        is added, which is exactly what happened when CLUSTER_RESTART arrived.
+        """
+        import re
+
         repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        with open(os.path.join(repo_root, "migrations", "001_init.sql"), encoding="utf-8") as f:
-            migration = f.read()
+        migrations = sorted(
+            pathlib.Path(repo_root, "migrations").glob("*.sql"))
+        self.assertTrue(migrations, "no migrations found")
+
+        effective = None
+        source = None
+        pattern = re.compile(
+            r"CONSTRAINT\s+audit_action_type_valid\s+CHECK\s*\((.*?)\)\s*;?",
+            re.S | re.I)
+        for path in migrations:
+            text = path.read_text(encoding="utf-8")
+            for match in pattern.finditer(text):
+                effective, source = match.group(1), path.name
+
+        self.assertIsNotNone(
+            effective, "audit_action_type_valid is not defined in any migration")
         for action_type in ALLOWED_ACTION_TYPES:
             self.assertIn(
-                "'{}'".format(action_type),
-                migration,
-                "{} is missing from the database CHECK constraint".format(action_type),
+                "'{}'".format(action_type), effective,
+                "{} is in ALLOWED_ACTION_TYPES but missing from the CHECK "
+                "constraint (effective definition in {})".format(action_type, source),
             )
 
 
