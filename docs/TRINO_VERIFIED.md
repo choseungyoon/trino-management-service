@@ -547,6 +547,76 @@ REST API는 웹 UI와 **동일한 인증·인가**를 받는다. 역할은 셋�
 
 권한 부여 경로: preset user 정의 / LDAP 속성 / OAuth 클레임 (`privilegesField` 설정).
 
+### T2-3-1. Gateway 19 로컬 실측 (2026-08-08) — **문서로는 알 수 없던 사실 5건**
+
+프로덕션과 같은 **버전 19** 를 로컬에 설치해 직접 확인했다. 아래는 전부 실행 결과다.
+
+> **아티팩트 위치**: GitHub Releases 에 바이너리가 **없다**(v17~20 전부 `assets: []`). Maven Central 검색 색인도 15까지만 보인다. 실제 파일은 저장소에 있다 —
+> `https://repo1.maven.org/maven2/io/trino/gateway/gateway-ha/19/gateway-ha-19-jar-with-dependencies.jar`
+> 실행: `java -jar gateway-ha-19-jar-with-dependencies.jar config.yaml` (구버전의 `server` 서브커맨드는 없다).
+
+#### ⛔ (1) 인증 설정이 없으면 API 가 **무인증으로 쓰기까지** 허용한다
+
+`authentication` 블록 없이 기동한 상태에서 전부 성공했다.
+
+| 요청 | 결과 |
+|---|---|
+| `GET /gateway/backend/all` | **200** — 백엔드 목록 노출 |
+| `POST /gateway/backend/modify/add` | **200** — 백엔드 추가됨 |
+| `POST /gateway/backend/deactivate/{name}` | **200** — `active: false` 로 바뀜 |
+| `GET /webapp/getRoutingRules` | **200** — 라우팅 규칙 노출 |
+
+> **포트에 도달할 수 있는 누구든 전 클러스터의 쿼리 유입을 끊거나 백엔드를 바꿔치기할 수 있다.** 운영 Gateway 에 `authentication` 이 설정되어 있는지 **반드시 확인해야 한다.**
+
+#### ✅ (2) 라우팅 규칙 **조회 엔드포인트가 존재한다** — 문서에 없다
+
+```
+GET /webapp/getRoutingRules   → 200
+{"code":200,"msg":"Successful.","data":[
+  {"name":"adhoc-header","description":"...","priority":0,
+   "condition":"request.getHeader(\"X-Trino-Source\") == \"adhoc-test\"",
+   "actions":["result.put(\"routingGroup\", \"adhoc\")"]}]}
+```
+
+- `POST` 는 **405**. GET 전용이다.
+- `routingRules` 설정이 없으면 `RoutingRulesManager.getRoutingRules` 에서 NPE → **500**. 404 가 아니라 500 이라는 점이 단서였다.
+- 전제 설정: `routingRules.rulesEngineEnabled: true` + `rulesType: FILE` + `rulesConfigPath`.
+
+> **⛔ 이 발견은 `DESIGN_R2.md` 의 "FR-GW-05·FR-RV-01 구현 불가" 판정을 뒤집는다.** 다만 **문서화되지 않은 경로**이므로 버전업 시 예고 없이 사라질 수 있다. 사용한다면 실패를 정상 열화로 처리해야 한다.
+
+#### ⛔ (3) `modify/delete` 는 평문 이름을 받고, **무엇을 보내든 200 을 반환한다**
+
+| 본문 | 응답 | 실제 삭제 |
+|---|---|---|
+| `{"name":"x"}` (JSON) | 200 | **안 됨** |
+| `"x"` (JSON 문자열) | 200 | **안 됨** |
+| `x` (평문) | 200 | 됨 |
+
+> **200 은 삭제 성공을 뜻하지 않는다.** TMS 가 삭제를 구현한다면 **반드시 `backend/all` 을 다시 읽어 확인**해야 한다. 상태 코드만 믿으면 "삭제했습니다"라고 표시해놓고 아무 일도 안 일어난 상태가 된다.
+
+#### ⛔ (4) `monitorType: UI_API` 는 `backendState` 블록을 **요구한다**
+
+없으면 기동 자체가 실패한다 — `IllegalArgumentException: BackendStateConfiguration is required for monitor type: UI_API`. 이 블록에 코디네이터 조회용 계정(`username`/`password`/`ssl`)을 넣는다.
+
+#### ⛔ (5) 클러스터 통계 수집이 **TLS 검증에 실패하면 조용히 죽는다** — S1 이 무력화된다
+
+자체 서명 인증서를 쓰는 코디네이터를 향해 이렇게 됐다.
+
+```
+ClusterStatsHttpMonitor.monitor → SSLHandshakeException: PKIX path building failed
+ERROR ClusterStatsHttpMonitor  Received null/empty response for /ui/api/stats
+```
+
+기동 로그에는 `Using QueryCountBasedRouterProvider instead of default` 가 정상 출력된다. **설정은 적용됐는데 라우터의 입력이 0 이다.**
+
+> **S1(least-loaded 라우팅)을 적용할 때 가장 빠지기 쉬운 함정이다.** Gateway JVM 의 truststore 에 사내 CA 가 없으면, 설정을 다 해도 라우터가 통계 없이 동작한다. 적용 후 **`/ui/api/stats` 관련 오류가 로그에 없는지** 반드시 확인할 것.
+
+#### 부가 — `readyz` 는 백엔드가 없어도 200
+
+문서 기반으로 적어둔 "백엔드 등록·헬스체크 전 503" 은 실측과 다르다. 백엔드 0개 상태에서도 `livez`·`readyz` 모두 200 이었다. **readyz 를 라우팅 준비 상태의 근거로 쓰지 말 것.**
+
+---
+
 **⛔ 문서화된 엔드포인트는 위 8개가 전부다 — 2026-08-08 재확인 (`gateway-api.md`, `routing-rules.md`)**
 
 R2 설계에 필요한 두 경로가 **존재하지 않는다.**

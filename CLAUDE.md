@@ -94,6 +94,7 @@ TMS가 완전히 다운되어도 모든 쿼리는 정상 실행되어야 한다.
 | `docs/runbooks/deploy.md` | **사내 실환경 배포 가이드** — git pull → DB → 설정 → systemd → Trino 연결까지 전 과정 | 실환경 배포·업데이트 시 |
 | `docs/TODO.md` | **사내에서 진행할 작업 목록** — 사람·타팀 협조가 필요한 항목만 | 다음 할 일 확인 시 |
 | `docs/DESIGN_R2.md` | **Bolt 3 산출물** — R2 설계 및 착수 가능 여부 판정 | R2 착수 시 |
+| `docs/runbooks/gateway-config-request.md` | **Gateway 설정 요청서** — 로컬 19 실측 기반. 무인증 API 경고 포함 | 운영팀 협의 시 |
 
 ---
 
