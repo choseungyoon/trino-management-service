@@ -1,0 +1,232 @@
+# DESIGN_R2 — Bolt 3 산출물
+
+> **작성 2026-08-08** · 상태: **인간 검토 대기**
+> R1 은 실환경 배포 완료. 이 문서는 R2 착수 전 설계이며, **승인 전에는 구현하지 않는다.**
+> 전제 사실은 전부 `TRINO_VERIFIED.md` 에 실측으로 기록되어 있다. 여기서 새로 추측한 API 경로는 없다.
+
+---
+
+## 0. 요약 — 설계가 아니라 **범위**가 이번 Bolt 의 결론이다
+
+R2 를 설계하려고 사실을 확인해 보니, **요구사항 5개 중 온전히 만들 수 있는 것은 2개뿐**이다. 나머지는 API 가 없거나 데이터가 없다. 설계를 예쁘게 쓰는 것보다 이 사실을 정확히 드러내는 것이 이 문서의 주된 값이다.
+
+| 기능 | 판정 | 막는 것 |
+|---|---|---|
+| **FR-WORKLOAD** | 🟢 **착수 가능** (AC 2건 축소 필요) | 없음. 단 `jmxExport` 설정이 선행 |
+| **FR-GATEWAY** | 🟡 **부분 착수** (GW-04·GW-05 제외) | API 계정(B-1). 규칙 조회 API 부재 |
+| **FR-ROUTING-VIEW** | 🔴 **대부분 불가** | 규칙 조회 API 부재. RV-02 만 가능 |
+| **FR-SLO** | 🔴 **불가** | 워크로드 데이터 미수집 + 목표값 인간 결정 |
+| **FR-BENCHMARK** | ⚪ **범위 불일치** | 문서 간 R2/R3 불일치 (§7) |
+
+**권고 R2 1차 슬라이스: FR-WORKLOAD + FR-GATEWAY(축소).** 나머지는 선행 조건이 풀린 뒤 재평가한다.
+
+---
+
+## 1. FR-WORKLOAD — 리소스 그룹 뷰
+
+### 1-1. ⛔ 데이터 소스를 REST 에서 JMX 로 바꾼다
+
+`REQUIREMENTS.md` 와 `TRINO_VERIFIED.md` §T1-4 는 `GET /v1/resourceGroupState/{id}` 를 1차 소스로 지목하고 "점 포함 ID 를 그대로 쓴다"고 적고 있었다. **2026-08-08 실측으로 뒤집혔다.**
+
+```
+GET /v1/resourceGroupState/global                 -> 200
+GET /v1/resourceGroupState/global.adhoc           -> 404
+GET /v1/resourceGroupState/global.adhoc.dashboard -> 404
+```
+
+게다가 응답은 **root + 1단계**까지만 내려준다. `subGroups[0]` 에는 `subGroups` 키 자체가 없다. **즉 REST 로는 FR-WL-01(계층 시각화)이 성립하지 않는다.**
+
+**결정 W1 — 리소스 그룹 데이터는 JMX 열거로 수집한다.**
+
+```
+GET /v1/jmx/mbean                                    → 전체 MBean 목록
+  → objectName 이 "trino.execution.resourcegroups:type=InternalResourceGroup," 로 시작하는 것만 필터
+  → name= 의 점 경로가 곧 그룹 경로 → 트리 복원
+GET /v1/jmx/mbean/{objectName}                       → 그룹별 지표 31종
+```
+
+MBean 은 중첩되지 않고 그룹마다 독립 등록되며 `name=` 에 전체 경로가 들어간다(실측). 이것이 REST 의 깊이 제한을 우회하는 **유일한** 경로다.
+
+### 1-2. ⚠️ 선행 조건 — `jmxExport: true` (신규 SETUP S9)
+
+**리소스 그룹은 `jmxExport: true` 를 준 그룹만 MBean 이 만들어진다.** 설정하지 않으면 FR-WORKLOAD 는 데이터가 0이다. `rules.json` 권한과 같은 부류의 선행 조건이며, **운영팀 작업이다.**
+
+```json
+{ "name": "global", "jmxExport": true, "subGroups": [ ... ] }
+```
+
+> `resource-groups.json` 의 **모든 그룹**에 넣어야 한다. 빠진 그룹은 화면에서 사라진다.
+
+### 1-3. ⛔ 지연 생성 — "설정되었으나 유휴인 그룹"은 보이지 않는다
+
+실측: 설정에 있던 `global.etl` 은 쿼리가 한 번도 배정되지 않아 **MBean 도 REST 응답에도 나타나지 않았다.**
+
+**결정 W2 — 화면은 "활동한 그룹"만 보여주며, 그 사실을 명시한다.**
+
+TMS 는 Gateway 호스트도 Trino 호스트도 파일시스템 접근이 없으므로 `resource-groups.json` 을 읽을 수 없다. 따라서 **전체 설정 목록을 알 방법이 없다.** 화면에 "설정된 전체 그룹"인 것처럼 표시하면 운영자가 "etl 그룹이 사라졌다"고 오판한다. 목록 상단에 **"쿼리가 배정된 적 있는 그룹만 표시됩니다"** 를 고정 문구로 둔다.
+
+### 1-4. AC 축소 2건
+
+**FR-WL-02 — "5초 이내 갱신" → "JMX 주기(기본 15초) 이내 갱신"**
+
+그룹 수집은 `/v1/jmx/mbean` 열거 1회 + 그룹 수만큼 MBean 조회다. 그룹이 20개면 폴마다 21회 요청이다. 이를 5초 주기로 돌리면 **코디네이터 부하가 R1 대비 몇 배가 된다.** NFR-PERF-03 은 아직 프로덕션 실측 전이고(`TODO.md` A-1), 현재 수치 0.60%p 는 하한이다. **측정 전에 부하를 늘리지 않는다.**
+
+> A-1 실측 결과 여유가 크면 주기를 낮추는 것은 설정 한 줄이다. 반대 순서는 되돌리기 어렵다.
+
+**FR-WL-03 — "큐 대기시간 p50/p95" → "현재 큐 길이 + 가장 오래 대기 중인 쿼리의 나이"**
+
+MBean 에 큐 대기 백분위수가 없다. 있는 것은 `TimeBetweenStartsSec` 의 1/5/15분 EWMA 이고 이는 **쿼리 시작 간격**이지 대기시간이 아니다.
+
+`/v1/query` 의 `queuedTime` 으로 계산할 수는 있으나 **표본이 편향된다** — 이미 시작된 쿼리는 목록에서 사라지므로, 오래 기다린 쿼리일수록 표본에서 빠진다(생존 편향). 그렇게 계산한 p95 는 실제보다 낙관적이고, **그 방향의 오차는 병목을 놓치게 만든다.**
+
+정확한 백분위수는 완료 쿼리가 있어야 하고 그것은 히스토리 프로젝트 소관이다(D-001). **통합 시점으로 이월한다.**
+
+### 1-5. 만들 수 있는 것
+
+| ID | 구현 | 근거 |
+|---|---|---|
+| FR-WL-01 | 그룹 트리 | MBean `name=` 점 경로 복원 |
+| FR-WL-02 | 그룹별 running/queued | `RunningQueries`, `QueuedQueries` |
+| FR-WL-04 | **병목 진단** | `RunningQueries >= HardConcurrencyLimit` 이고 `QueuedQueries > 0` → "동시성 제한에 걸림". `WaitingQueuedQueries` 도 함께 표시 |
+| FR-WL-06 | 소비 랭킹 | `CpuUsageMillis`, `MemoryUsageBytes`, `PhysicalInputDataUsageBytes` |
+| FR-WL-05 | **현재** 쿼리만 | 실행 중 쿼리의 `resourceGroupId` 로 조인. 과거 쿼리는 D-001 이월 |
+
+FR-WL-04 가 이 기능의 핵심이다. "그룹이 느린 것"과 "제한에 막힌 것"은 조치가 완전히 다른데, 지금은 구별할 방법이 없다.
+
+### 1-6. ⚠️ 쓰기는 R2 에서 하지 않는다
+
+`HardConcurrencyLimit` 과 `MaxQueuedQueries` 는 JMX 로 **쓰기 가능**하다(실측). 병목이 보이면 바로 고치고 싶어지지만, R2 에서는 노출하지 않는다.
+
+**이유**: 이 값은 파일 설정에서 오므로 **재시작하면 되돌아갈 가능성이 높다(미검증)**. 되돌아가는 변경을 "적용됨"으로 보여주는 것은 비밀번호 해시 미반영과 같은 부류의 함정이다. 또한 이것은 **쿼리 유입 제어**라 절대규칙 5(안전 시퀀스) 검토가 필요하다.
+
+노출한다면 선행 조건: ① 재시작 후 값 유지 여부 실측 ② 되돌아간다면 화면에 명시 ③ `reason` + 감사 + admin.
+
+---
+
+## 2. FR-GATEWAY — 축소 착수
+
+### 2-1. 만들 수 있는 것
+
+| ID | 구현 | 상태 |
+|---|---|---|
+| FR-GW-01 | 백엔드 목록 | `GET /gateway/backend/all` — B-1 계정 필요 |
+| FR-GW-02 | routing group 트리 + 헬스 | 백엔드의 `routingGroup` + TMS 자체 헬스 조인 |
+| FR-GW-03 | **활성/비활성 토글** | `POST /gateway/backend/{deactivate,activate}/{name}` |
+| — | 클러스터 CRUD | `modify/{add,update,delete}` (D-008 부기) |
+
+### 2-2. ⛔ 제외 2건 — API 가 없다
+
+**FR-GW-05 (라우팅 규칙 조회) — 구현 불가.** `gateway-api.md` 와 `routing-rules.md` 를 재확인한 결과 **규칙 조회 엔드포인트가 존재하지 않는다.** 쓰기(`POST /webapp/updateRoutingRules`)만 있다. `rulesType: FILE` 이면 규칙은 Gateway 호스트의 파일에 있고, TMS 는 그 호스트에 접근하지 않는다. **추측 경로를 만들지 않는다.**
+
+> 현재 운영에서 **라우팅 그룹을 쓰지 않으므로**(B6 회신) 이 기능의 현재 가치는 사실상 0이다. 규칙을 도입한 뒤 재평가한다.
+
+**FR-GW-04 (databaseCache 동작 여부) — 관측 경로 없음.** 백엔드 DB 상태나 캐시 동작을 보고하는 엔드포인트가 없다. AC 는 이미 축소된 상태였으나(`백엔드 목록 캐시 폴백만 표시`) 그조차 직접 관측할 수 없다.
+
+**대안 (축소 제안)**: `GET /trino-gateway/readyz` 로 **Gateway 자체의 준비 상태**만 표시하고, `expireAfterWrite` 설정값을 화면에 함께 적어 "DB 장애 시 이 시간까지만 버팁니다"를 알린다. 캐시 동작 여부를 안다고 주장하지 않는다.
+
+### 2-3. Gateway 클라이언트 설계
+
+R1 의 `TrinoClient` 와 같은 골격을 쓴다 — 새로 발명하지 않는다.
+
+| 항목 | 결정 |
+|---|---|
+| 위치 | `src/tms/clients/gateway.py` |
+| 오류 분류 | `clients/errors.py` 재사용. 401/403/5xx 의미는 동일 |
+| 회로 차단기 | 재사용. Gateway 2대 중 1대 장애 시 다른 쪽으로 넘어가지 않는다 — **Gateway 는 LB 뒤에 있으므로 TMS 는 단일 URL 만 안다** |
+| 폴링 주체 | `tms-collector` 단독 (ARCHITECTURE A3). API 는 스냅샷만 읽는다 |
+| 폴링 주기 | 백엔드 목록 30초. 자주 바뀌지 않는다 |
+| 자격증명 | `TMS_GATEWAY_PASSWORD`. **`API` 역할은 변경 권한을 포함한다**(§T2-3) — `tms-svc` 와 동급 보호 |
+| 쓰기 | 사용자 요청 시에만. 타이머로 쓰지 않는다 |
+
+### 2-4. ⛔ 쓰기 액션 설계 — activate/deactivate 가 곧 안전 시퀀스다
+
+`deactivate` 는 단순 토글이 아니다. **절대규칙 5 안전 시퀀스의 1단계**이고, R3 FR-CLUSTER-OPS 가 이 위에 세워진다.
+
+**결정 G1 — R2 의 토글은 "유입 차단"까지만 책임진다.**
+
+```
+deactivate 요청
+  → reason 필수 (없으면 400) + 감사 기록 + admin 한정
+  → 확인 화면: "이 클러스터로 신규 쿼리가 가지 않습니다.
+                실행 중인 쿼리 N건은 계속 실행됩니다."
+  → 실행 후: 실행 중 쿼리 수를 화면에 계속 표시 (drain 관찰용)
+```
+
+**drain 완료를 TMS 가 판정하거나 자동으로 다음 단계를 진행하지 않는다.** R2 는 "유입을 끊었고 지금 N건이 남았다"까지만 보여준다. 재시작·종료는 R3 소관이며, 절대규칙 5 의 전체 시퀀스를 그때 구현한다.
+
+> 지금 토글만 만들고 "이제 재시작하면 된다"고 읽히게 두면, 안전 시퀀스를 건너뛰는 경로를 만든 셈이 된다.
+
+**결정 G2 — 클러스터 CRUD 는 Gateway API 경유로 만든다** (D-008 부기 판정).
+
+TMS 가 목록의 주인이 되지 않는다. 화면만 제공하고 Gateway 가 source of truth 다. `reason` + 감사가 붙는 것이 Gateway UI 대비 이점이다. **삭제는 `deactivate` 를 먼저 거치도록 강제한다** — 활성 클러스터를 바로 지우는 경로를 만들지 않는다.
+
+---
+
+## 3. FR-ROUTING-VIEW — RV-02 만 남는다
+
+| ID | 판정 |
+|---|---|
+| FR-RV-01 규칙 목록 | **불가** — 조회 API 없음 (§2-2) |
+| FR-RV-02 그룹별 클러스터·헬스 | **가능** — FR-GW-02 와 사실상 같은 화면 |
+| FR-RV-03 최근 라우팅 결정 샘플 | **불가** — Gateway 쿼리 히스토리 API 는 19에서 보안 강화됨(§T2-3). 인증 요건 미확인이고, 완료 쿼리는 D-001 소관 |
+
+**결정 R1 — FR-ROUTING-VIEW 를 독립 기능으로 만들지 않는다.** RV-02 를 FR-GW-02 에 흡수하고, 나머지는 라우팅 규칙을 실제로 도입한 뒤 재평가한다.
+
+---
+
+## 4. FR-SLO — R2 에서 제외
+
+세 가지가 동시에 막고 있다.
+
+1. **목표값이 `[NEEDS-HUMAN-DECISION]`** 이다. `REQUIREMENTS.md` 에 명시되어 있고 절대규칙 7 상 임의로 정할 수 없다.
+2. **근거 데이터가 없다.** `WORKLOAD_PROFILE.md` W2(피크 동시성·지연 분포)가 미수집이다. 근거 없이 정한 SLO 는 지켜도 의미가 없고 못 지켜도 원인을 모른다.
+3. **완료 쿼리가 필요하다.** 가용성·p95 지연·error budget 은 전부 완료 쿼리 기반이며 이는 히스토리 프로젝트 소관이다(D-001).
+
+**결정 S1 — FR-SLO 는 R2 에서 빼고, 히스토리 프로젝트 통합 이후로 이월한다.** 통합 시 W2 데이터가 함께 확보되므로 세 가지가 한 번에 풀린다.
+
+---
+
+## 5. 착수 순서
+
+```
+선행 (운영팀)     S9  resource-groups.json 에 jmxExport: true   → FR-WORKLOAD 전제
+                  B-1 Gateway API 계정 + TLS                     → FR-GATEWAY 전제
+                  A-1 NFR-PERF-03 실측                           → 폴링 주기 결정 근거
+
+W1  Gateway 클라이언트 (읽기)      clients/gateway.py + 오류 분류 재사용
+W2  리소스 그룹 수집               JMX 열거 → 트리 복원 → 스냅샷 저장
+W3  FR-WORKLOAD 화면               트리 + 병목 진단(FR-WL-04)
+W4  FR-GATEWAY 읽기 화면           백엔드 목록 + 그룹 트리 + 헬스 조인
+W5  activate/deactivate 쓰기       reason + 감사 + 확인 화면 (결정 G1)
+W6  클러스터 CRUD                  Gateway API 경유 (결정 G2)
+```
+
+W1~W3 은 B-1 회신 없이 착수 가능하다. W4 부터 Gateway 계정이 필요하다.
+
+---
+
+## 6. 완료 정의 (DoD) 초안
+
+- [ ] `TRINO_VERIFIED.md` 에 없는 API 경로를 쓰지 않았다
+- [ ] 리소스 그룹 수집이 NFR-PERF-03 예산 안에 있다 (A-1 실측 이후 재측정)
+- [ ] 쓰기 3종(activate/deactivate/CRUD) 전수: `reason` 없으면 400, 감사 기록, admin 한정
+- [ ] **삭제가 deactivate 를 우회할 수 없다**
+- [ ] 지연 생성으로 보이지 않는 그룹이 있다는 사실이 화면에 명시된다
+- [ ] Gateway 자격증명이 저장소에 없다
+- [ ] 핵심 로직 커버리지 80% 유지
+- [ ] 브라우저 테스트에 신규 화면 추가
+
+---
+
+## 7. ⚠️ 인간 결정이 필요한 항목
+
+| # | 항목 | 배경 |
+|---|---|---|
+| **H1** | **R2 범위 문서 불일치** | `BACKLOG.md` 는 R2 = WORKLOAD·ROUTING-VIEW·**ROUTING-SVC**·GATEWAY·SLO, `REQUIREMENTS.md` 릴리스 매핑은 R2 = WORKLOAD·ROUTING-VIEW·GATEWAY·SLO·**BENCHMARK** 다. ROUTING-SVC 와 BENCHMARK 의 소속이 문서마다 다르다. **어느 쪽이 맞는지 확정 필요** |
+| **H2** | FR-WL-02 AC 를 15초로 축소 | §1-4. A-1 실측 후 되돌릴 수 있다 |
+| **H3** | FR-WL-03 AC 를 큐 길이·최장 대기로 축소 | §1-4. 정확한 백분위수는 히스토리 통합 이후 |
+| **H4** | FR-GW-04·FR-GW-05, FR-RV-01·RV-03 제외 | §2-2, §3. API 부재. "확인 불가"를 기능으로 만들지 않는다 |
+| **H5** | FR-SLO 를 R2 에서 제외 | §4 |
+| **H6** | 리소스 그룹 한계 쓰기를 R2 에 넣을지 | §1-6. 넣는다면 재시작 후 유지 여부 실측이 선행 |
+
+**H1 은 착수 전에 답이 필요하다.** 나머지는 축소 제안이므로 이견이 없으면 그대로 진행한다.

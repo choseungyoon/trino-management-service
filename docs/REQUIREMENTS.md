@@ -179,8 +179,11 @@
 ~~**[VERIFY]** Trino 477의 리소스 그룹 상태 조회 방법~~
 **✅ Bolt 0 해소** — `TRINO_VERIFIED.md` §T1-4.
 
-- **1차 소스**: `GET /v1/resourceGroupState/{resourceGroupId}` → `ResourceGroupInfo` JSON. 보안 `MANAGEMENT_READ`. 경로 정규식이 `{resourceGroupId: .+}` 이므로 `global.pipeline.job` 처럼 점 포함 ID를 그대로 쓴다.
-- **2차 소스**: 리소스 그룹 JSON에 `"jmxExport": true` 설정 시 JMX export. **정확한 ObjectName 문자열은 확인 불가 → 실환경 `GET /v1/jmx/mbean` 열거로 확정할 것 (미해소 G-5).**
+- ~~**1차 소스**: `GET /v1/resourceGroupState/{resourceGroupId}`~~ — **⛔ 2026-08-08 실측으로 뒤집힘.** 점 포함 ID 는 404 이며(루트 그룹 이름만 받는다), 응답도 root + 1단계까지만 내려준다. **이 경로로는 FR-WL-01(계층 시각화)이 성립하지 않는다.** 상세는 `TRINO_VERIFIED.md` §T1-4 정정 블록.
+- **✅ 1차 소스는 JMX 다 (2026-08-08 확정, 미해소 G-5 해소)**. `jmxExport: true` 를 준 그룹마다 독립 MBean 이 등록되며 `name=` 에 전체 점 경로가 들어간다: `trino.execution.resourcegroups:type=InternalResourceGroup,name=global.adhoc.dashboard`. `GET /v1/jmx/mbean` 열거로 전체 트리를 복원한다.
+- **⚠️ 선행 조건**: `resource-groups.json` 의 모든 그룹에 `jmxExport: true` 가 필요하다 (신규 SETUP S9). 없으면 데이터가 0이다.
+- **⚠️ 지연 생성**: 쿼리가 배정된 적 없는 그룹은 MBean 도 REST 응답에도 나타나지 않는다. **"설정되었으나 유휴인 그룹"은 알 수 없다.**
+- 설계 판단은 `DESIGN_R2.md` §1 참조.
 - FR-WL-05(그룹↔쿼리 조인)는 `QueryCompletedEvent.context.resourceGroupId` 로 성립한다.
 
 **⚠️ 데이터 소스 변경 (중요)**: **Trino Gateway 19에서 리소스 그룹 관리 기능이 전면 제거되었다** ([#656](https://github.com/trinodb/trino-gateway/issues/656)). 릴리스 노트 원문: *"Resource groups are a Trino feature and must be managed through Trino directly."* → **FR-WORKLOAD은 Gateway가 아니라 Trino를 데이터 소스로 삼는다.**

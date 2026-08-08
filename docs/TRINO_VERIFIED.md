@@ -547,6 +547,17 @@ REST API는 웹 UI와 **동일한 인증·인가**를 받는다. 역할은 셋�
 
 권한 부여 경로: preset user 정의 / LDAP 속성 / OAuth 클레임 (`privilegesField` 설정).
 
+**⛔ 문서화된 엔드포인트는 위 8개가 전부다 — 2026-08-08 재확인 (`gateway-api.md`, `routing-rules.md`)**
+
+R2 설계에 필요한 두 경로가 **존재하지 않는다.**
+
+| 필요한 것 | 상태 |
+|---|---|
+| 라우팅 규칙 **조회** (FR-GW-05, FR-RV-01) | **없다.** `POST /webapp/updateRoutingRules`(쓰기)만 문서화되어 있고 GET 이 없다. `routing-rules.md` 에도 조회 경로가 없다 |
+| `databaseCache` **상태 조회** (FR-GW-04) | **없다.** 백엔드 DB 상태나 캐시 동작 여부를 보고하는 엔드포인트가 없다 |
+
+> `rulesType: FILE` 이면 규칙은 Gateway 호스트의 **파일**에 있고 기본 1분마다 재읽기된다. TMS 는 Gateway 호스트 파일시스템에 접근하지 않으므로(별도 VM) 이 파일을 읽을 수 없다. **추측 경로를 만들지 않는다** — 규칙 조회는 API 가 생기기 전까지 구현 불가다.
+
 > **⛔ "읽기 전용" 역할은 존재하지 않는다.** 백엔드 목록을 REST로 읽으려면 `API` 역할이 필요한데, 이 역할은 문서상 *configure* 권한이다 — 즉 **같은 자격증명으로 백엔드 추가·수정·삭제도 가능하다.** TMS가 Gateway 자격증명을 보유하면 그 자격증명은 라우팅을 바꿀 수 있는 권한이며, `tms-svc` 와 동급으로 보호해야 한다.
 > **전제**: *"All authentication and authorization mechanisms require configuring TLS as the foundational layer."* Gateway에 TLS가 켜져 있어야 인증이 동작한다.
 
