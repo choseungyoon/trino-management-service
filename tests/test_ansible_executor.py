@@ -23,7 +23,8 @@ from tms.ops.ansible import (  # noqa: E402
 )
 from tms.ops.executor import FAILED, RUNNING, SUCCEEDED  # noqa: E402
 
-HOSTS = {"prod-a": "trino-a-coord", "prod-b": "trino-b-coord"}
+INVENTORIES = {"prod-a": "/etc/tms/ansible/cluster1.ini",
+               "prod-b": "/etc/tms/ansible/cluster2.ini"}
 
 
 class FakeRunner:
@@ -42,8 +43,8 @@ class FakeRunner:
 
 def executor(runner=None, **kwargs):
     return AnsibleRestartExecutor(
-        playbook="/opt/tms/ansible/restart.yml", cluster_hosts=HOSTS,
-        inventory=None, runner=runner or FakeRunner(), **kwargs)
+        playbook="/opt/tms/ansible/restart.yml", cluster_inventories=INVENTORIES,
+        runner=runner or FakeRunner(), **kwargs)
 
 
 def wait(ex, sequence_id):
@@ -55,13 +56,14 @@ def wait(ex, sequence_id):
 class ConfigurationTest(unittest.TestCase):
     def test_playbook_must_be_absolute(self):
         with self.assertRaises(AnsibleError):
-            AnsibleRestartExecutor(playbook="restart.yml", cluster_hosts=HOSTS,
+            AnsibleRestartExecutor(playbook="restart.yml", cluster_inventories=INVENTORIES,
                                    runner=FakeRunner())
 
     def test_playbook_is_configuration_not_input(self):
         """There is no argument anywhere that selects a playbook."""
         ex = executor()
-        self.assertEqual("/opt/tms/ansible/restart.yml", ex.build_command("prod-a")[1])
+        command = ex.build_command("prod-a")
+        self.assertEqual("/opt/tms/ansible/restart.yml", command[-1])
 
 
 class TargetingTest(unittest.TestCase):
@@ -70,11 +72,12 @@ class TargetingTest(unittest.TestCase):
     def test_unknown_cluster_is_refused(self):
         with self.assertRaises(AnsibleError) as caught:
             executor().build_command("not-a-cluster")
-        self.assertIn("not in config.yaml", str(caught.exception))
+        self.assertIn("no configured inventory", str(caught.exception))
 
-    def test_the_configured_host_is_used_not_the_supplied_name(self):
+    def test_the_cluster_name_never_reaches_the_command_line(self):
+        """The name only picks an inventory file; the target comes from there."""
         command = executor().build_command("prod-a")
-        self.assertIn("trino-a-coord", command)
+        self.assertIn("/etc/tms/ansible/cluster1.ini", command)
         self.assertNotIn("prod-a", command)
 
     def test_injection_attempts_are_refused_before_anything_runs(self):
@@ -94,13 +97,16 @@ class TargetingTest(unittest.TestCase):
                 ex.build_command(name)
         self.assertEqual([], runner.commands, "nothing was executed")
 
-    def test_a_malformed_configured_host_is_also_refused(self):
+    def test_a_relative_inventory_path_is_refused(self):
         """Defence in depth: bad configuration must not become a command."""
-        ex = AnsibleRestartExecutor(playbook="/opt/tms/p.yml",
-                                    cluster_hosts={"prod-a": "host; rm -rf /"},
-                                    runner=FakeRunner())
         with self.assertRaises(AnsibleError):
-            ex.build_command("prod-a")
+            AnsibleRestartExecutor(playbook="/opt/tms/p.yml",
+                                   cluster_inventories={"prod-a": "cluster1.ini"},
+                                   runner=FakeRunner())
+
+    def test_each_cluster_gets_its_own_inventory(self):
+        ex = executor()
+        self.assertIn("/etc/tms/ansible/cluster2.ini", ex.build_command("prod-b"))
 
     def test_command_is_a_list_so_there_is_no_shell_to_escape(self):
         command = executor().build_command("prod-a")

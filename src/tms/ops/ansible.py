@@ -15,9 +15,16 @@ that reason:
 * **No shell, ever.** `subprocess` is called with an argument list. There is no
   string a cluster name could break out of.
 * **The cluster must be one TMS already knows.** The name is matched against
-  the configured clusters before it reaches a command line, and the value
-  passed to Ansible is the configured `ansible_host`, not the string the
-  request carried.
+  the configured clusters before it reaches a command line, and what is passed
+  to Ansible is the configured inventory *path* for that cluster, not the
+  string the request carried.
+
+The platform team keeps one inventory file per cluster (`cluster1.ini`,
+`cluster2.ini`, ...) holding that cluster's coordinator and worker addresses,
+and the playbook restarts workers in sequence and the coordinator last. So the
+target is chosen by picking an inventory file, not by filtering a shared one -
+there is no host name on the command line at all, which removes a whole class
+of targeting mistake.
 * **Timeouts.** A playbook that hangs must fail the step, not strand a
   deactivated cluster forever.
 * **Never claim an unverified success.** If TMS restarts while a playbook is
@@ -73,8 +80,7 @@ class AnsibleRestartExecutor(RestartExecutor):
     def __init__(
         self,
         playbook: str,
-        cluster_hosts: Dict[str, str],
-        inventory: Optional[str] = None,
+        cluster_inventories: Dict[str, str],
         binary: str = "ansible-playbook",
         timeout_seconds: float = 900.0,
         extra_vars: Optional[Dict[str, str]] = None,
@@ -86,12 +92,16 @@ class AnsibleRestartExecutor(RestartExecutor):
                 "cluster_ops.ansible.playbook must be an absolute path")
         if runner is None and not os.path.isfile(playbook):
             raise AnsibleError("playbook not found: {}".format(playbook))
-        if inventory and runner is None and not os.path.exists(inventory):
-            raise AnsibleError("inventory not found: {}".format(inventory))
 
         self.playbook = playbook
-        self.cluster_hosts = dict(cluster_hosts or {})
-        self.inventory = inventory
+        self.cluster_inventories = dict(cluster_inventories or {})
+        for cluster, path in self.cluster_inventories.items():
+            if not os.path.isabs(path):
+                raise AnsibleError(
+                    "inventory for {!r} must be an absolute path".format(cluster))
+            if runner is None and not os.path.isfile(path):
+                raise AnsibleError(
+                    "inventory not found for {!r}: {}".format(cluster, path))
         self.binary = binary
         self.timeout_seconds = timeout_seconds
         self.extra_vars = dict(extra_vars or {})
@@ -103,22 +113,20 @@ class AnsibleRestartExecutor(RestartExecutor):
     # --------------------------------------------------------------- command
 
     def build_command(self, cluster: str) -> List[str]:
-        """Argument list for one cluster. Raises before building anything odd."""
-        host = self.cluster_hosts.get(cluster)
-        if host is None:
-            # The name is not one TMS is configured for. Refuse rather than
-            # passing an unknown string to a tool with SSH access.
-            raise AnsibleError(
-                "unknown cluster {!r} - it is not in config.yaml, so TMS will "
-                "not target it".format(cluster))
-        if not SAFE_NAME.match(host):
-            raise AnsibleError(
-                "ansible_host {!r} for cluster {!r} has an unexpected shape"
-                .format(host, cluster))
+        """Argument list for one cluster. Raises before building anything odd.
 
-        command = [self.binary, self.playbook, "--limit", host]
-        if self.inventory:
-            command += ["--inventory", self.inventory]
+        The cluster name selects a configured inventory file and then plays no
+        further part - it never reaches the command line.
+        """
+        inventory = self.cluster_inventories.get(cluster)
+        if inventory is None:
+            # Not a cluster TMS is configured for. Refuse rather than hand an
+            # unknown string to a tool that holds SSH keys.
+            raise AnsibleError(
+                "unknown cluster {!r} - it has no configured inventory, so TMS "
+                "will not target it".format(cluster))
+
+        command = [self.binary, "--inventory", inventory, self.playbook]
         for key, value in sorted(self.extra_vars.items()):
             command += ["--extra-vars", "{}={}".format(key, value)]
         return command
