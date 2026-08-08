@@ -102,6 +102,7 @@ ls -l /opt/tms/venv/bin/tms-api /opt/tms/venv/bin/tms-collector
 | 3-3 | **`ALTER SCHEMA public OWNER TO tms_owner;`** |
 | 3-4 | `psql -U tms_owner -d tms -v ON_ERROR_STOP=1 -f migrations/001_init.sql` |
 | 3-5 | `psql -U tms_owner -d tms -v ON_ERROR_STOP=1 -f migrations/002_grants.sql` |
+| 3-5b | `psql -U tms_owner -d tms -v ON_ERROR_STOP=1 -f migrations/003_snapshot_kinds.sql` — **R2 이상 필수** |
 | 3-6 | **append-only 검증** (db-setup.md §4) — 건너뛰지 말 것 |
 
 > **⛔ 3-3 을 빠뜨리면 조용히 깨진다.** `002_grants.sql` 이 `WARNING: no privileges were granted for "public"` 만 남기고 성공한 것처럼 끝난다. PG14 는 PUBLIC 의사 역할의 기본 USAGE 덕분에 우연히 동작하지만, 보안 강화로 `REVOKE ALL ON SCHEMA public FROM PUBLIC` 이 적용되는 순간 `tms_app` 이 모든 테이블에 접근하지 못한다. (2026-08-06 재현 확인)
@@ -702,6 +703,8 @@ sudo systemctl restart tms-collector tms-api
 ```
 
 마이그레이션이 추가된 릴리스는 **재시작 전에** `migrations/` 의 새 파일을 `tms_owner` 로 적용한다.
+
+> **⚠️ R2 로 올릴 때 `003_snapshot_kinds.sql` 을 빼먹으면 조용히 깨진다.** collector 가 새 스냅샷을 쓰고 PostgreSQL 이 거부하는데, collector 는 로그만 남기고 계속 돈다(저장 실패가 폴링을 멈추면 안 되므로). Workload·Gateway 화면이 **아무 오류 없이 빈 채로** 남는다.
 
 **중지**
 
