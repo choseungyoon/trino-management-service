@@ -45,22 +45,24 @@
 {% endif %}
 
 {% if workload.enabled and rows %}
-<div class="kpi-row">
-  <div class="kpi">
-    <div class="kpi__value">{{ workload.summary.groups | integer }}</div>
-    <div class="kpi__label">Groups seen</div>
-  </div>
-  <div class="kpi">
-    <div class="kpi__value">{{ workload.summary.running | integer }}</div>
-    <div class="kpi__label">Running</div>
-  </div>
-  <div class="kpi">
-    <div class="kpi__value">{{ workload.summary.queued | integer }}</div>
-    <div class="kpi__label">Queued</div>
-  </div>
-  <div class="kpi {% if workload.summary.blocked_groups %}kpi--alert{% endif %}">
-    <div class="kpi__value">{{ workload.summary.blocked_groups | integer }}</div>
-    <div class="kpi__label">Held back</div>
+<div class="panel">
+  <div class="facts">
+    <div class="fact">
+      <div class="fact__value num">{{ workload.summary.groups | integer }}</div>
+      <div class="fact__key">Groups seen</div>
+    </div>
+    <div class="fact">
+      <div class="fact__value num">{{ workload.summary.running | integer }}</div>
+      <div class="fact__key">Running</div>
+    </div>
+    <div class="fact">
+      <div class="fact__value num">{{ workload.summary.queued | integer }}</div>
+      <div class="fact__key">Queued</div>
+    </div>
+    <div class="fact">
+      <div class="fact__value num">{{ workload.summary.blocked_groups | integer }}</div>
+      <div class="fact__key">Held back</div>
+    </div>
   </div>
 </div>
 
@@ -93,7 +95,7 @@
     </thead>
     <tbody>
       {% for row in rows %}
-      <tr {% if row.bottleneck %}class="row--alert"{% endif %}>
+      <tr>
         <td>
           <span class="mono" style="padding-left:{{ row.depth * 18 }}px">
             {%- if row.depth %}└ {% endif -%}{{ row.name }}</span>
@@ -112,7 +114,8 @@
         <td class="num">{{ row.memory_bytes | data_size }}</td>
         <td>
           {% if row.bottleneck %}
-          <span class="pill pill--concerning">{{ bottleneck_text(row.bottleneck) }}</span>
+          <span class="status status--concerning">{{ ui.icon('concerning', 12, 2) }}
+            {{ bottleneck_text(row.bottleneck) }}</span>
           {% else %}<span class="muted">—</span>{% endif %}
         </td>
       </tr>

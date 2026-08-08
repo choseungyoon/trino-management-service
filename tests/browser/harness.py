@@ -77,7 +77,7 @@ def _query(qid, user, source, elapsed_ms, long_running=False, state="RUNNING"):
     }
 
 
-def build_app():
+def build_app(workload_enabled=False, seed=None):
     repository = InMemorySnapshotRepository()
     now = utcnow()
 
@@ -127,12 +127,16 @@ def build_app():
         "database": {"url": "postgresql://u:p@h:5432/d"},
         "collector": {"query_poll_interval_seconds": 5, "stale_threshold_seconds": 600},
         "deeplinks": {"superset_url": "https://superset.invalid/"},
+        "workload": {"enabled": workload_enabled},
         "portal": {
             "session_secret": "b" * 48,
             "local_users": {USER: {"password_hash": hash_password(PASSWORD, iterations=1000),
                                    "roles": ["admin"]}},
         },
     })
+    for snapshot in seed or []:
+        repository.save(snapshot)
+
     trino = StubTrino()
     audit = InMemoryAuditRepository()
     service = TmsService(
@@ -162,11 +166,11 @@ def _free_port():
 
 
 @contextlib.contextmanager
-def serve():
-    """Run the console on a free port. Yields the base URL."""
+def serve(workload_enabled=False, seed=None):
+    """Run the console on a free port. Yields (base_url, stub_trino)."""
     import uvicorn
 
-    app, trino = build_app()
+    app, trino = build_app(workload_enabled=workload_enabled, seed=seed)
     port = _free_port()
     with tempfile.TemporaryDirectory() as tmp:
         key, crt = _make_cert(tmp)
