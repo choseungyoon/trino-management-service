@@ -25,6 +25,7 @@ Python 3.9 compatible.
 
 import argparse
 import os
+import shutil
 import stat
 import sys
 from typing import Any, Callable, List, Optional, Tuple
@@ -270,6 +271,128 @@ def check_live(report: Report, config, insecure: bool) -> None:
                            "{}건".format(len(queries.json())))
 
 
+def check_cluster_ops(report: Report, config) -> None:
+    """Restart execution (FR-CO-02). Everything here fails at the worst moment
+    otherwise - mid-restart, with a cluster already out of rotation."""
+    ops = getattr(config, "cluster_ops", None)
+    if ops is None or ops.restart_mode == "manual":
+        report.add(OK, "cluster_ops", "manual — TMS 가 게이트만 지킨다")
+        return
+
+    report.add(WARN, "cluster_ops",
+               "ansible — TMS 호스트가 전 Trino 노드에 SSH 접근을 갖는다 (D-009)")
+    settings = ops.ansible
+    if not os.path.isfile(settings.playbook):
+        report.add(FAIL, "cluster_ops.ansible.playbook",
+                   "{} 가 없다 — manual 로 폴백한다".format(settings.playbook))
+    else:
+        report.add(OK, "playbook", settings.playbook)
+
+    if shutil.which(settings.binary) is None and not os.path.isfile(settings.binary):
+        report.add(FAIL, "cluster_ops.ansible.binary",
+                   "{} 를 찾을 수 없다".format(settings.binary))
+
+    for cluster in config.cluster_names:
+        path = settings.inventories.get(cluster)
+        if not path:
+            report.add(FAIL, "인벤토리",
+                       "{} 에 대한 항목이 없다 — 기동이 실패한다".format(cluster))
+        elif not os.path.isfile(path):
+            report.add(FAIL, "인벤토리", "{}: {} 가 없다".format(cluster, path))
+        else:
+            report.add(OK, "인벤토리", "{}: {}".format(cluster, path))
+
+
+def check_fleet(report: Report, config) -> None:
+    """Node inventory (FR-FL-01). Parses the inventories so an empty fleet
+    screen is diagnosed here rather than after a poll interval."""
+    fleet = getattr(config, "fleet", None)
+    if fleet is None or not fleet.enabled:
+        report.add(OK, "fleet", "비활성 — Fleet 화면은 표시되지 않는다")
+        return
+    from tms.fleet.inventory import load_inventory
+
+    if "{address}" not in fleet.node_url_template:
+        report.add(FAIL, "fleet.node_url_template",
+                   "{address} 가 없다 — 전 노드가 'No answer' 로 보인다")
+
+    for cluster in config.cluster_names:
+        path = fleet.inventories.get(cluster)
+        if not path:
+            report.add(WARN, "fleet 인벤토리",
+                       "{} 항목이 없다 — 이 클러스터는 Fleet 에 나오지 않는다".format(cluster))
+            continue
+        if not os.path.isfile(path):
+            report.add(FAIL, "fleet 인벤토리", "{}: {} 가 없다".format(cluster, path))
+            continue
+        nodes = load_inventory(path, cluster)
+        workers = sum(1 for n in nodes if n.role == "worker")
+        if not nodes:
+            report.add(FAIL, "fleet 인벤토리",
+                       "{}: 파싱 결과가 비었다 — [coordinator]/[workers] 섹션을 "
+                       "읽는다".format(cluster))
+        else:
+            report.add(OK, "fleet 인벤토리",
+                       "{}: 노드 {}개 (워커 {})".format(cluster, len(nodes), workers))
+            expected = config.cluster(cluster).expected_workers
+            if expected and workers != expected:
+                report.add(WARN, "워커 수 불일치",
+                           "{}: 인벤토리 {} vs expected_workers {}".format(
+                               cluster, workers, expected))
+
+
+# Every migration that must be applied, and the object each one creates. Kept
+# here rather than as a version number because the real question an operator
+# has is "which file did I forget", and a version table would need its own
+# migration to introduce.
+_REQUIRED_OBJECTS = (
+    ("001_init.sql", "table", "audit_action"),
+    ("001_init.sql", "table", "collector_snapshot"),
+    ("001_init.sql", "table", "health_event"),
+    ("001_init.sql", "table", "health_test_override"),
+    ("003_snapshot_kinds.sql", "kind", "resource_groups"),
+    ("004_restart_sequence.sql", "table", "restart_sequence"),
+    ("004_restart_sequence.sql", "table", "restart_sequence_event"),
+    ("006_cluster_restart_action.sql", "action", "CLUSTER_RESTART"),
+    ("007_restart_event_output_level.sql", "level", "output"),
+    ("008_snapshot_kind_fleet.sql", "kind", "fleet"),
+    ("009_node_shutdown_action.sql", "action", "NODE_SHUTDOWN"),
+)
+
+_CONSTRAINT_FOR = {
+    "kind": "collector_snapshot_kind_valid",
+    "action": "audit_action_type_valid",
+    "level": "restart_sequence_event_level_valid",
+}
+
+
+def _missing_migrations(cur) -> List[str]:
+    """Which migration files have not been applied.
+
+    ⛔ This is the check that matters most on an upgrade. A missing constraint
+    value does not raise anywhere an operator will see: the collector logs the
+    rejection and keeps polling, so the symptom is a screen that stays empty
+    with nothing obviously wrong. It has happened twice.
+    """
+    cur.execute("SELECT table_name FROM information_schema.tables "
+                "WHERE table_schema NOT IN ('pg_catalog','information_schema')")
+    tables = {row[0] for row in cur.fetchall()}
+
+    cur.execute("SELECT conname, pg_get_constraintdef(oid) FROM pg_constraint")
+    constraints = {name: definition for name, definition in cur.fetchall()}
+
+    missing = []
+    for migration, kind, value in _REQUIRED_OBJECTS:
+        if kind == "table":
+            ok = value in tables
+        else:
+            definition = constraints.get(_CONSTRAINT_FOR[kind], "")
+            ok = "'{}'".format(value) in definition
+        if not ok and migration not in missing:
+            missing.append(migration)
+    return missing
+
+
 def check_database(report: Report, config) -> None:
     url = config.database_url.reveal()
     if not url:
@@ -295,8 +418,24 @@ def check_database(report: Report, config) -> None:
         report.add(FAIL, "DB 스키마",
                    "테이블 {}/4 개만 있다 — migrations/001_init.sql 을 적용하라"
                    .format(found))
+        return
+    report.add(OK, "DB", "접속 및 테이블 4개 확인")
+
+    try:
+        with psycopg.connect(url, connect_timeout=5) as conn:
+            with conn.cursor() as cur:
+                missing = _missing_migrations(cur)
+    except Exception as exc:  # noqa: BLE001
+        report.add(WARN, "마이그레이션", "확인 실패: {}".format(
+            str(exc).strip().splitlines()[0]))
+        return
+
+    if missing:
+        report.add(FAIL, "마이그레이션 누락",
+                   "{} — 적용하지 않으면 해당 화면이 **오류 없이 빈 채로** "
+                   "남는다".format(", ".join(missing)))
     else:
-        report.add(OK, "DB", "접속 및 테이블 4개 확인")
+        report.add(OK, "마이그레이션", "필요한 스키마가 모두 적용되어 있다")
 
 
 # --------------------------------------------------------------------- main
@@ -336,6 +475,8 @@ def run(argv: Optional[List[str]] = None) -> int:
         lambda: check_portal(report, config),
         lambda: check_intervals(report, config),
         lambda: check_gateway(report, config),
+        lambda: check_cluster_ops(report, config),
+        lambda: check_fleet(report, config),
         lambda: check_deeplinks(report, config),
     ]
     for check in static_checks:

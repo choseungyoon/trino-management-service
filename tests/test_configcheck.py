@@ -190,3 +190,43 @@ class ExitCodeTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MigrationCoverageTest(unittest.TestCase):
+    """`tms-config-check` must know about every migration.
+
+    Fourth instance of the drift shape that has bitten this project three
+    times. Here the failure is subtler: config-check would report "필요한
+    스키마가 모두 적용되어 있다" while a migration it has never heard of sits
+    unapplied - a green check that means nothing.
+    """
+
+    def test_every_migration_is_checked_for(self):
+        import pathlib
+
+        from tms.core.configcheck import _REQUIRED_OBJECTS
+
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        on_disk = {p.name for p in pathlib.Path(root, "migrations").glob("*.sql")}
+        checked = {name for name, _kind, _value in _REQUIRED_OBJECTS}
+
+        # 002 grants privileges and 005 extends them; neither creates an object
+        # a client connection can observe, so they are legitimately unchecked.
+        grants_only = {"002_grants.sql", "005_restart_sequence_grants.sql"}
+        unchecked = on_disk - checked - grants_only
+        self.assertEqual(
+            set(), unchecked,
+            "these migrations exist but tms-config-check does not verify them, "
+            "so it would report a clean schema while they are unapplied: "
+            "{}".format(sorted(unchecked)))
+
+    def test_the_checked_migrations_all_exist(self):
+        import pathlib
+
+        from tms.core.configcheck import _REQUIRED_OBJECTS
+
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        for name, _kind, _value in _REQUIRED_OBJECTS:
+            self.assertTrue(
+                pathlib.Path(root, "migrations", name).is_file(),
+                "config-check refers to {} which is not in migrations/".format(name))
