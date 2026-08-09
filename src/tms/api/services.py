@@ -64,6 +64,43 @@ log = logging.getLogger(__name__)
 MAX_PAGE_SIZE = 500
 
 
+def summarise(queries: List[Dict[str, Any]]) -> Dict[str, int]:
+    """The same counts the collector writes, over an already-narrowed list.
+
+    Kept identical in shape to the collector's summary so the screen cannot
+    tell which one it is looking at.
+    """
+    from tms.collector.poller import QUEUED_STATES, RUNNING_STATES
+
+    return {
+        "running": sum(1 for q in queries if q.get("state") in RUNNING_STATES),
+        "queued": sum(1 for q in queries if q.get("state") in QUEUED_STATES),
+        "long_running": sum(1 for q in queries if q.get("long_running")),
+        "total": len(queries),
+    }
+
+
+def in_resource_group(query: Dict[str, Any], group_id: str) -> bool:
+    """Is this query in `group_id`, or in a group beneath it?
+
+    Trino reports the group as a path array (`["global", "adhoc"]`); the
+    workload screen names it by the dotted path. Matching has to be on the
+    whole path:
+
+    * A bare segment test (`"adhoc" in path`) matches `global.adhoc` *and*
+      `etl.adhoc` - two different groups, possibly with different limits. An
+      operator clicking one group and being shown another's queries would draw
+      the wrong conclusion about which limit is biting.
+    * Subtree rather than exact match, because a parent's queries really are
+      the ones in its children - Trino admits queries to leaf groups.
+    """
+    path = query.get("resource_group_id") or []
+    if not isinstance(path, (list, tuple)) or not group_id:
+        return False
+    dotted = ".".join(str(part) for part in path)
+    return dotted == group_id or dotted.startswith(group_id + ".")
+
+
 def require(principal: Principal, capability: str) -> None:
     if not principal.can(capability):
         raise Forbidden(
@@ -187,23 +224,25 @@ class TmsService:
             )
 
         queries = list(snapshot.payload.get("queries") or [])
-        if state:
-            wanted = set(state)
-            queries = [q for q in queries if q.get("state") in wanted]
+        # Narrow by everything except state first. The state chips *are* the
+        # state filter and their counts are the summary, so they have to count
+        # within whatever else is applied - otherwise arriving from the
+        # workload screen shows "All 47" above three rows, and the operator
+        # reads the cluster as far busier than what they are looking at.
         if user:
             queries = [q for q in queries if q.get("user") == user]
         if resource_group:
-            queries = [
-                q
-                for q in queries
-                if resource_group in (q.get("resource_group_id") or [])
-            ]
+            queries = [q for q in queries if in_resource_group(q, resource_group)]
         if min_elapsed_seconds is not None:
             floor_ms = min_elapsed_seconds * 1000.0
-            queries = [
-                q for q in queries if (q.get("elapsed_ms") or 0) >= floor_ms
-            ]
+            queries = [q for q in queries if (q.get("elapsed_ms") or 0) >= floor_ms]
 
+        scoped = queries
+        if state:
+            wanted = set(state)
+            queries = [q for q in queries if q.get("state") in wanted]
+
+        scoped_is_everything = not (user or resource_group or min_elapsed_seconds)
         limit = max(1, min(int(limit), MAX_PAGE_SIZE))
         truncated = len(queries) > limit
         queries = queries[:limit]
@@ -214,7 +253,8 @@ class TmsService:
         return envelope(
             snapshot,
             {
-                "summary": snapshot.payload.get("summary") or {},
+                "summary": (snapshot.payload.get("summary") or {}) if scoped_is_everything
+                           else summarise(scoped),
                 "queries": queries,
                 "truncated": truncated,
             },
@@ -473,7 +513,54 @@ class TmsService:
         if snapshot.collection_error:
             payload["unavailable_reason"] = snapshot.collection_error
             payload["advice"] = snapshot.advice
+        self._add_queue_age(cluster, payload)
         return envelope(snapshot, payload, self._stale_threshold)
+
+    def _add_queue_age(self, cluster: str, payload: Dict[str, Any]) -> None:
+        """How long the longest-waiting query in each group has been queued.
+
+        FR-WL-03 asked for p50/p95 queue time. Trino's resource group MBeans do
+        not expose queue-time distributions at all, so DESIGN_R2 reduced the AC
+        to the current queue and the age of its oldest member - which is the
+        number an operator actually acts on. "12 queued" is a fact; "12 queued,
+        oldest waiting 14 minutes" is a decision.
+
+        Joined from the live query snapshot rather than collected separately:
+        `queued_ms` and `resource_group_id` are already on every row, so this
+        costs nothing on the coordinator. Read-side only.
+
+        ⛔ The two snapshots are written by different polls. If the query one is
+        missing or untrustworthy, every group gets None and the column renders
+        blank - a queue age carried over from an unusable read is worse than no
+        queue age, because it looks current.
+        """
+        groups = payload.get("groups") or []
+        if not groups:
+            return
+        queries_snapshot = self.repository.load(cluster, KIND_QUERIES)
+        if queries_snapshot is None or not queries_snapshot.trustworthy:
+            return
+
+        oldest: Dict[str, float] = {}
+        for query in (queries_snapshot.payload or {}).get("queries") or []:
+            if query.get("state") != "QUEUED":
+                continue
+            path = query.get("resource_group_id") or []
+            if not isinstance(path, (list, tuple)) or not path:
+                continue
+            waited = query.get("queued_ms")
+            if waited is None:
+                continue
+            # Credit every ancestor too: a parent group's queue really is the
+            # union of its children's, and the tree is read top-down.
+            for depth in range(1, len(path) + 1):
+                key = ".".join(str(part) for part in path[:depth])
+                if waited > oldest.get(key, -1):
+                    oldest[key] = waited
+
+        for group in groups:
+            group["oldest_queued_ms"] = oldest.get(group.get("id"))
+        payload["queue_age_at"] = queries_snapshot.collected_at.isoformat()
 
     def get_workload(self, principal: Principal, cluster: str) -> Dict[str, Any]:
         """Resource group tree for one cluster (FR-WORKLOAD).
@@ -506,7 +593,54 @@ class TmsService:
         if snapshot.collection_error:
             payload["unavailable_reason"] = snapshot.collection_error
             payload["advice"] = snapshot.advice
+        self._add_queue_age(cluster, payload)
         return envelope(snapshot, payload, self._stale_threshold)
+
+    def _add_queue_age(self, cluster: str, payload: Dict[str, Any]) -> None:
+        """How long the longest-waiting query in each group has been queued.
+
+        FR-WL-03 asked for p50/p95 queue time. Trino's resource group MBeans do
+        not expose queue-time distributions at all, so DESIGN_R2 reduced the AC
+        to the current queue and the age of its oldest member - which is the
+        number an operator actually acts on. "12 queued" is a fact; "12 queued,
+        oldest waiting 14 minutes" is a decision.
+
+        Joined from the live query snapshot rather than collected separately:
+        `queued_ms` and `resource_group_id` are already on every row, so this
+        costs nothing on the coordinator. Read-side only.
+
+        ⛔ The two snapshots are written by different polls. If the query one is
+        missing or untrustworthy, every group gets None and the column renders
+        blank - a queue age carried over from an unusable read is worse than no
+        queue age, because it looks current.
+        """
+        groups = payload.get("groups") or []
+        if not groups:
+            return
+        queries_snapshot = self.repository.load(cluster, KIND_QUERIES)
+        if queries_snapshot is None or not queries_snapshot.trustworthy:
+            return
+
+        oldest: Dict[str, float] = {}
+        for query in (queries_snapshot.payload or {}).get("queries") or []:
+            if query.get("state") != "QUEUED":
+                continue
+            path = query.get("resource_group_id") or []
+            if not isinstance(path, (list, tuple)) or not path:
+                continue
+            waited = query.get("queued_ms")
+            if waited is None:
+                continue
+            # Credit every ancestor too: a parent group's queue really is the
+            # union of its children's, and the tree is read top-down.
+            for depth in range(1, len(path) + 1):
+                key = ".".join(str(part) for part in path[:depth])
+                if waited > oldest.get(key, -1):
+                    oldest[key] = waited
+
+        for group in groups:
+            group["oldest_queued_ms"] = oldest.get(group.get("id"))
+        payload["queue_age_at"] = queries_snapshot.collected_at.isoformat()
 
     def get_health(self, principal: Principal, cluster: str) -> Dict[str, Any]:
         require(principal, VIEW_HEALTH)

@@ -45,10 +45,22 @@
     {{ chip.label }} <span class="chip__n">{{ chip.count | integer }}</span>
   </a>
   {% endfor %}
+  {% if group_filter %}
+  {# Arriving from the workload screen. Without this the list looks like the
+     whole cluster, and an operator would read a filtered handful of queries as
+     "the cluster is nearly idle". #}
+  <span class="filters__sep" aria-hidden="true"></span>
+  <a class="chip chip--on" href="?{% if selected_cluster %}cluster={{ selected_cluster | urlencode }}{% endif %}"
+     title="Remove this filter">
+    group <span class="mono">{{ group_filter }}</span>
+    <span aria-hidden="true">×</span><span class="sr-only">(remove)</span>
+  </a>
+  {% endif %}
   <span class="filters__sep" aria-hidden="true"></span>
   <form class="search" method="get" action="/queries" role="search">
     {% if selected_cluster %}<input type="hidden" name="cluster" value="{{ selected_cluster }}">{% endif %}
     {% if active_state %}<input type="hidden" name="state" value="{{ active_state }}">{% endif %}
+    {% if group_filter %}<input type="hidden" name="group" value="{{ group_filter }}">{% endif %}
     {{ ui.icon('search', 12, 2) }}
     <label class="sr-only" for="q">Filter by user</label>
     <input id="q" name="user" value="{{ user_filter or '' }}" placeholder="Filter by user…">

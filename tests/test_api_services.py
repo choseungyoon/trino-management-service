@@ -36,6 +36,7 @@ from tms.clients.errors import TrinoForbidden, TrinoNotFound  # noqa: E402
 from tms.collector.snapshot import (  # noqa: E402
     KIND_HEALTH,
     KIND_QUERIES,
+    KIND_RESOURCE_GROUPS,
     InMemorySnapshotRepository,
     Snapshot,
     utcnow,
@@ -109,14 +110,16 @@ def build_service(writable_audit=True, config_overrides=None):
     return service, snapshots, audit_repository, clients
 
 
-def query_snapshot(cluster="prod-a", queries=None, error=None, age_seconds=0):
+def query_snapshot(cluster="prod-a", queries=None, error=None, age_seconds=0,
+                   summary=None):
     return Snapshot(
         cluster=cluster,
         kind=KIND_QUERIES,
         collected_at=utcnow() - timedelta(seconds=age_seconds),
         payload={
             "queries": queries if queries is not None else [],
-            "summary": {"running": len(queries or []), "queued": 0, "total": len(queries or [])},
+            "summary": summary if summary is not None else {
+                "running": len(queries or []), "queued": 0, "total": len(queries or [])},
         },
         collection_error=error,
         advice="Check rules.json" if error else None,
@@ -272,9 +275,33 @@ class ListQueriesTest(unittest.TestCase):
         self.assertEqual(
             len(service.list_queries(VIEWER, "prod-a", min_elapsed_seconds=300)["data"]["queries"]), 1
         )
+        # Group filtering is on the whole dotted path, not a segment.
         self.assertEqual(
-            len(service.list_queries(VIEWER, "prod-a", resource_group="adhoc")["data"]["queries"]), 1
+            len(service.list_queries(
+                VIEWER, "prod-a", resource_group="global.adhoc")["data"]["queries"]), 1
         )
+
+    def test_group_filter_matches_the_path_not_a_segment(self):
+        """`global.adhoc` and `etl.adhoc` are different groups with possibly
+        different limits. Matching the bare segment `adhoc` would show one
+        group's queries under the other, and the operator would conclude the
+        wrong limit was biting."""
+        service, snapshots, _, _ = build_service()
+        snapshots.save(query_snapshot(queries=[
+            sample_query("q1", state="QUEUED", rg=["global", "adhoc"]),
+            sample_query("q2", state="QUEUED", rg=["etl", "adhoc"]),
+            sample_query("q3", state="QUEUED", rg=["global", "adhoc", "small"]),
+        ]))
+
+        def ids(group):
+            return sorted(q["query_id"] for q in service.list_queries(
+                VIEWER, "prod-a", resource_group=group)["data"]["queries"])
+
+        self.assertEqual(["q1", "q3"], ids("global.adhoc"))
+        self.assertEqual(["q2"], ids("etl.adhoc"))
+        # A parent's queue really is its children's - Trino admits to leaves.
+        self.assertEqual(["q1", "q3"], ids("global"))
+        self.assertEqual([], ids("adhoc"), "a bare segment is not a group")
 
     def test_deeplinks_are_attached(self):
         service, snapshots, _, _ = build_service()
@@ -409,3 +436,87 @@ class LinkHubTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class WorkloadJoinTest(unittest.TestCase):
+    """FR-WL-03 (reduced) and the summary the chips are built from."""
+
+    def _service(self, groups, queries):
+        service, snapshots, _, _ = build_service()
+        snapshots.save(Snapshot("prod-a", KIND_RESOURCE_GROUPS, utcnow(), payload={
+            "tree": [], "groups": groups, "summary": {}, "complete": False,
+        }))
+        if queries is not None:
+            snapshots.save(query_snapshot(queries=queries))
+        return service
+
+    def test_queue_age_is_the_oldest_queued_query_in_the_group(self):
+        """FR-WL-03 asked for p50/p95, which Trino's group MBeans do not expose
+        at all. The reduced AC is the number an operator acts on: "12 queued"
+        is a fact, "oldest waiting 14 minutes" is a decision."""
+        service = self._service(
+            [{"id": "global"}, {"id": "global.adhoc"}],
+            [sample_query("q1", state="QUEUED", rg=["global", "adhoc"]),
+             sample_query("q2", state="QUEUED", rg=["global", "adhoc"])])
+        service.repository.load("prod-a", KIND_QUERIES).payload["queries"][0]["queued_ms"] = 5000.0
+        service.repository.load("prod-a", KIND_QUERIES).payload["queries"][1]["queued_ms"] = 90000.0
+
+        groups = {g["id"]: g for g in
+                  service.get_workload(VIEWER, "prod-a")["data"]["groups"]}
+        self.assertEqual(90000.0, groups["global.adhoc"]["oldest_queued_ms"])
+        # A parent's queue is the union of its children's.
+        self.assertEqual(90000.0, groups["global"]["oldest_queued_ms"])
+
+    def test_running_queries_do_not_count_as_queue_age(self):
+        service = self._service(
+            [{"id": "global.adhoc"}],
+            [sample_query("q1", state="RUNNING", rg=["global", "adhoc"])])
+        groups = service.get_workload(VIEWER, "prod-a")["data"]["groups"]
+        self.assertIsNone(groups[0]["oldest_queued_ms"])
+
+    def test_no_query_snapshot_means_no_queue_age_rather_than_a_stale_one(self):
+        """The two snapshots come from different polls. A queue age carried
+        over from an unusable read looks current, which is worse than blank."""
+        service = self._service([{"id": "global.adhoc"}], None)
+        data = service.get_workload(VIEWER, "prod-a")["data"]
+        self.assertNotIn("oldest_queued_ms", data["groups"][0])
+        self.assertIsNone(data.get("queue_age_at"))
+
+    def test_the_summary_counts_within_the_applied_filters(self):
+        """Arriving from the workload screen must not show "All 47" above three
+        rows - the operator would read the cluster as far busier than what they
+        are looking at."""
+        service, snapshots, _, _ = build_service()
+        snapshots.save(query_snapshot(queries=[
+            sample_query("q1", state="RUNNING", rg=["global", "adhoc"]),
+            sample_query("q2", state="QUEUED", rg=["global", "adhoc"]),
+            sample_query("q3", state="RUNNING", rg=["etl", "nightly"]),
+            sample_query("q4", state="RUNNING", rg=["etl", "nightly"]),
+        ]))
+        summary = service.list_queries(
+            VIEWER, "prod-a", resource_group="global.adhoc")["data"]["summary"]
+        self.assertEqual({"running": 1, "queued": 1, "long_running": 0, "total": 2}, summary)
+
+    def test_the_state_chips_still_count_across_states(self):
+        """The chips are the state filter, so they must not count within it -
+        otherwise selecting Running shows "Queued 0" and hides the queue."""
+        service, snapshots, _, _ = build_service()
+        snapshots.save(query_snapshot(queries=[
+            sample_query("q1", state="RUNNING", rg=["global", "adhoc"]),
+            sample_query("q2", state="QUEUED", rg=["global", "adhoc"]),
+        ]))
+        summary = service.list_queries(
+            VIEWER, "prod-a", resource_group="global.adhoc",
+            state=["RUNNING"])["data"]["summary"]
+        self.assertEqual(1, summary["queued"], "the queue is still reported")
+        self.assertEqual(2, summary["total"])
+
+    def test_an_unfiltered_summary_is_the_collectors_own(self):
+        """No recomputation when nothing is narrowed: the collector's summary is
+        derived from the full result, before any page limit."""
+        service, snapshots, _, _ = build_service()
+        snapshots.save(query_snapshot(
+            queries=[sample_query("q1")],
+            summary={"running": 41, "queued": 5, "long_running": 2, "total": 46}))
+        self.assertEqual(
+            46, service.list_queries(VIEWER, "prod-a")["data"]["summary"]["total"])

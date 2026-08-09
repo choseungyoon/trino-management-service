@@ -336,6 +336,11 @@ svg { display: block; flex: none; }
 .chip:hover { color: var(--tx); border-color: var(--tx-3); }
 .chip__n { font-variant-numeric: tabular-nums; }
 .chip[aria-pressed="true"] { border-color: var(--ac); color: var(--ac); background: var(--ac-soft); }
+/* An applied filter that came from another screen, not a toggle in this row -
+   it reads as "this is on, click to remove". */
+.chip--on { border-color: var(--ac); color: var(--ac); background: var(--ac-soft); }
+.chip--on .mono { font-size: 11px; }
+
 .chip--alert .chip__n { color: var(--warn); }
 .filters__sep { width: 1px; height: 20px; background: var(--line); margin: 0 4px; }
 
@@ -388,6 +393,17 @@ svg { display: block; flex: none; }
 }
 .row-btn:hover { border-color: var(--line-2); color: var(--tx); background: var(--panel-2); }
 .row-btn--kill:hover { color: var(--bad); border-color: var(--bad); }
+
+/* Sortable column headings. The arrow only appears on the active column, so
+   the header row does not turn into a field of arrows. */
+.sortable { color: inherit; text-decoration: none; display: inline-flex; gap: 4px; align-items: center; }
+.sortable:hover { color: var(--tx); }
+.sortable--on { color: var(--ac); font-weight: 700; }
+
+/* A resource group is a link to its own queries; it should look like one
+   without shouting, since the column is read as data first. */
+.group-link { color: inherit; text-decoration: none; display: inline-block; }
+.group-link:hover { color: var(--ac); text-decoration: underline; }
 
 /* ── Health ─────────────────────────────────────────────────────────── */
 

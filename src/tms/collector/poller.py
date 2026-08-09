@@ -51,8 +51,14 @@ JMX_MBEANS = (
     "trino.memory:name=ClusterMemoryManager",
 )
 
-_RUNNING_STATES = ("RUNNING", "FINISHING")
-_QUEUED_STATES = ("QUEUED", "WAITING_FOR_RESOURCES")
+# Which Trino states count as running or queued in the summary. Public because
+# the API recomputes the same counts when a filter narrows the list, and two
+# copies of this would quietly disagree - the screen would show one set of
+# numbers unfiltered and a differently-derived set filtered.
+RUNNING_STATES = ("RUNNING", "FINISHING")
+QUEUED_STATES = ("QUEUED", "WAITING_FOR_RESOURCES")
+_RUNNING_STATES = RUNNING_STATES
+_QUEUED_STATES = QUEUED_STATES
 
 
 def _get(mapping: Any, *path: str) -> Any:

@@ -316,3 +316,54 @@ def flatten_groups(tree: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         walk(root)
     return rows
 
+
+# Sortable columns for FR-WL-06, and the only values `sort` may take.
+WORKLOAD_COLUMNS = (
+    {"key": "running", "label": "Running"},
+    {"key": "queued", "label": "Queued"},
+    {"key": "oldest_queued_ms", "label": "Queue age"},
+    {"key": "cpu_ms", "label": "CPU"},
+    {"key": "memory_bytes", "label": "Memory"},
+    {"key": "input_bytes", "label": "Input"},
+)
+_SORTABLE = {column["key"] for column in WORKLOAD_COLUMNS}
+
+
+def column_label(key):
+    """Human name for a sort column, for the heading that says what you sorted by.
+
+    Used verbatim rather than lower-cased - "Ranked by cpu" reads as a typo
+    where "Ranked by CPU" reads as the column it names.
+    """
+    for column in WORKLOAD_COLUMNS:
+        if column["key"] == key:
+            return column["label"]
+    return ""
+
+
+def order_groups(tree, groups, sort=None, descending=True):
+    """Rows for the workload table, and whether they are a ranking.
+
+    ⛔ Sorting a tree is a lie. Indentation says "this group is inside that
+    one", and once the rows are reordered by CPU that relationship no longer
+    holds - the child may sit above a different parent, or above none.
+
+    So ranking is a different view, not a reordered tree: it returns the flat
+    group list and tells the caller to stop drawing hierarchy. Default is still
+    the tree, because "where does this group sit" is the more common question.
+
+    Returns (rows, ranked).
+    """
+    if sort not in _SORTABLE:
+        return flatten_groups(tree), False
+
+    # Missing is missing, not zero. A group with no reading is unknown, and
+    # ranking it as the smallest would assert it is idle - which shows up as
+    # "least CPU" putting the groups TMS knows nothing about at the top.
+    # Unknowns therefore sit at the end in both directions, rather than being
+    # folded into the ordering.
+    known = [g for g in groups if g.get(sort) is not None]
+    unknown = [g for g in groups if g.get(sort) is None]
+    known.sort(key=lambda g: g[sort], reverse=bool(descending))
+    return known + unknown, True
+

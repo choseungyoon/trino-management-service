@@ -79,17 +79,47 @@
 </div>
 {% endif %}
 
+{% macro sort_link(key, label, numeric=true) -%}
+{%- set active = sort == key -%}
+{# Clicking the active column flips direction; a new column starts descending,
+   because "who is using the most" is the question being asked. #}
+<th {% if numeric %}class="num"{% endif %}
+    {% if active %}aria-sort="{{ 'descending' if sort_desc else 'ascending' }}"{% endif %}>
+  <a class="sortable{% if active %} sortable--on{% endif %}"
+     href="?sort={{ key }}&amp;desc={{ 0 if active and sort_desc else 1 }}">{{ label }}
+    {%- if active %}<span aria-hidden="true">{{ '↓' if sort_desc else '↑' }}</span>{% endif -%}
+  </a>
+</th>
+{%- endmacro %}
+
 <div class="panel">
+  <div class="panel__head">
+    <span class="panel__title">{{ 'Ranked by ' ~ sort_label if ranked else 'Resource groups' }}</span>
+    <span class="panel__sub">
+      {% if ranked %}
+      hierarchy is not shown while ranked — a sorted tree would put children
+      under the wrong parents
+      {% else %}
+      click a column to rank; click a group to see its queries
+      {% endif %}
+    </span>
+    <span class="spacer"></span>
+    {% if ranked %}
+    <a class="btn btn--sm btn--ghost" href="?">Back to the tree</a>
+    {% endif %}
+  </div>
+  <div class="table-scroll">
   <table class="table">
     <thead>
       <tr>
         <th>Resource group</th>
-        <th class="num">Running</th>
-        <th class="num">Queued</th>
+        {{ sort_link('running', 'Running') }}
+        {{ sort_link('queued', 'Queued') }}
+        {{ sort_link('oldest_queued_ms', 'Queue age') }}
         <th class="num">Concurrency</th>
         <th class="num">Max queued</th>
-        <th class="num">CPU</th>
-        <th class="num">Memory</th>
+        {{ sort_link('cpu_ms', 'CPU') }}
+        {{ sort_link('memory_bytes', 'Memory') }}
         <th>Status</th>
       </tr>
     </thead>
@@ -97,11 +127,23 @@
       {% for row in rows %}
       <tr>
         <td>
-          <span class="mono" style="padding-left:{{ row.depth * 18 }}px">
-            {%- if row.depth %}└ {% endif -%}{{ row.name }}</span>
+          {# Straight to this group's live queries. Trino admits queries to
+             leaf groups, so a parent shows its subtree. #}
+          <a class="mono group-link"
+             href="/clusters/{{ selected_cluster | urlencode }}/queries?group={{ row.id | urlencode }}"
+             {% if not ranked %}style="padding-left:{{ row.depth * 18 }}px"{% endif %}>
+            {%- if row.depth and not ranked %}└ {% endif -%}
+            {{ row.id if ranked else row.name }}</a>
         </td>
         <td class="num">{{ row.running | integer }}</td>
         <td class="num">{{ row.queued | integer }}</td>
+        <td class="num">
+          {%- if row.oldest_queued_ms -%}
+            <span class="{{ 'elapsed--long' if row.oldest_queued_ms > 60000 else '' }}"
+                  title="The longest-waiting queued query in this group">
+              {{- row.oldest_queued_ms | duration -}}</span>
+          {%- else -%}<span class="muted">—</span>{%- endif -%}
+        </td>
         <td class="num">
           {%- if row.hard_concurrency_limit -%}
             {{ row.hard_concurrency_limit | integer }}
@@ -122,6 +164,7 @@
       {% endfor %}
     </tbody>
   </table>
+  </div>
 </div>
 
 {# The single most important caveat on this screen. Resource groups are created
@@ -132,6 +175,11 @@
   {{ ui.icon('info', 13, 2) }}
   Only groups that have admitted at least one query appear here — Trino creates
   resource groups lazily. This is not the full configured list.
+  {% if workload.queue_age_at %}
+  Queue age comes from the live query poll ({{ workload.queue_age_at | relative_time }}),
+  not from the group metrics, so it can be a few seconds out of step with the
+  other columns.
+  {% endif %}
 </p>
 {% elif workload.enabled and not workload.unavailable_reason %}
 <div class="empty">

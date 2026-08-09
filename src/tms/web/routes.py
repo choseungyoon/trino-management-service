@@ -319,13 +319,15 @@ def register(app, service, config, authenticator, codec, session_cookie: str,
 
     @app.get("/clusters/{cluster}/queries", response_class=HTMLResponse, include_in_schema=False)
     def cluster_queries(request: Request, cluster: str, state: Optional[str] = None,
-                        user: Optional[str] = None, long_running: Optional[str] = None):
+                        user: Optional[str] = None, long_running: Optional[str] = None,
+                        group: Optional[str] = None):
         return queries(request, cluster=cluster, state=state, user=user,
-                       long_running=long_running)
+                       long_running=long_running, group=group)
 
     @app.get("/queries", response_class=HTMLResponse, include_in_schema=False)
     def queries(request: Request, cluster: Optional[str] = None, state: Optional[str] = None,
-                user: Optional[str] = None, long_running: Optional[str] = None):
+                user: Optional[str] = None, long_running: Optional[str] = None,
+                group: Optional[str] = None):
         principal, claims = principal_or_redirect(request)
         if claims is None:
             return principal
@@ -338,7 +340,8 @@ def register(app, service, config, authenticator, codec, session_cookie: str,
         try:
             if cluster:
                 envelope = service.list_queries(principal, cluster, state=states, user=user,
-                                                min_elapsed_seconds=min_elapsed, limit=200)
+                                                min_elapsed_seconds=min_elapsed,
+                                                resource_group=group, limit=200)
                 data = envelope.get("data") or {}
                 for row in data.get("queries") or []:
                     row["cluster"] = cluster
@@ -349,7 +352,8 @@ def register(app, service, config, authenticator, codec, session_cookie: str,
                 any_trustworthy = not data.get("unavailable_reason")
             else:
                 envelope = service.list_queries_all(principal, state=states, user=user,
-                                                    min_elapsed_seconds=min_elapsed, limit=200)
+                                                    min_elapsed_seconds=min_elapsed,
+                                                    resource_group=group, limit=200)
                 data = envelope.get("data") or {}
                 degraded = [c for c in data.get("clusters") or [] if c.get("unavailable_reason")]
                 any_trustworthy = any(
@@ -360,7 +364,7 @@ def register(app, service, config, authenticator, codec, session_cookie: str,
         except Forbidden as exc:
             return _error_page(request, principal, exc)
 
-        base_params = {"cluster": cluster or "", "user": user or ""}
+        base_params = {"cluster": cluster or "", "user": user or "", "group": group or ""}
         context = base_context(request, principal, "queries")
         context.update({
             "envelope": envelope,
@@ -371,6 +375,7 @@ def register(app, service, config, authenticator, codec, session_cookie: str,
             "selected_cluster": cluster,
             "active_state": state,
             "user_filter": user,
+            "group_filter": group,
             "chips": views.query_chips(data.get("summary") or {}, base_params, state,
                                        bool(long_running)),
             "can_kill": principal.can(KILL_QUERY),
@@ -479,7 +484,8 @@ def register(app, service, config, authenticator, codec, session_cookie: str,
 
     @app.get("/clusters/{cluster}/workload", response_class=HTMLResponse,
              include_in_schema=False)
-    def workload(request: Request, cluster: str):
+    def workload(request: Request, cluster: str, sort: Optional[str] = None,
+                 desc: int = 1):
         principal, claims = principal_or_redirect(request)
         if claims is None:
             return principal
@@ -489,11 +495,20 @@ def register(app, service, config, authenticator, codec, session_cookie: str,
             return _error_page(request, principal, exc)
 
         data = envelope.get("data") or {}
+        rows, ranked = views.order_groups(
+            data.get("tree") or [], data.get("groups") or [], sort, bool(desc))
         context = base_context(request, principal, "workload")
         context.update({
             "envelope": envelope,
             "workload": data,
-            "rows": views.flatten_groups(data.get("tree") or []),
+            "rows": rows,
+            # Ranked means the hierarchy is gone: the template stops indenting
+            # and says so, rather than showing a tree in an order it is not in.
+            "ranked": ranked,
+            "sort": sort or "",
+            "sort_desc": bool(desc),
+            "sort_label": views.column_label(sort),
+            "columns": views.WORKLOAD_COLUMNS,
             "bottleneck_text": views.bottleneck_text,
             "selected_cluster": cluster,
         })

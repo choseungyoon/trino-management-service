@@ -19,6 +19,7 @@ sys.path.insert(
     os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"),
 )
 
+from tms.web import views  # noqa: E402
 from tms.web.views import (  # noqa: E402
     audit_chips,
     cluster_summary,
@@ -235,3 +236,50 @@ class ExpandStateFilterTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OrderGroupsTest(unittest.TestCase):
+    """FR-WL-06. Ranking is a different view, not a reordered tree."""
+
+    TREE = [{"id": "global", "depth": 0, "children": [
+        {"id": "global.adhoc", "depth": 1, "children": []},
+        {"id": "global.etl", "depth": 1, "children": []},
+    ]}]
+    GROUPS = [{"id": "global", "cpu_ms": 5}, {"id": "global.adhoc", "cpu_ms": 100},
+              {"id": "global.etl", "cpu_ms": None}]
+
+    def test_the_default_is_the_tree(self):
+        rows, ranked = views.order_groups(self.TREE, self.GROUPS)
+        self.assertFalse(ranked)
+        self.assertEqual(["global", "global.adhoc", "global.etl"],
+                         [r["id"] for r in rows])
+
+    def test_ranking_flattens_and_says_so(self):
+        """Indentation claims "this group is inside that one". Once rows are
+        reordered by CPU that is no longer true, so the caller is told to stop
+        drawing the hierarchy rather than drawing a false one."""
+        rows, ranked = views.order_groups(self.TREE, self.GROUPS, "cpu_ms")
+        self.assertTrue(ranked)
+        self.assertEqual(["global.adhoc", "global", "global.etl"],
+                         [r["id"] for r in rows])
+
+    def test_a_missing_value_ranks_last_not_as_zero(self):
+        """A group with no CPU reading is unknown, not idle - ranking it as the
+        least busy would be an assertion TMS cannot make."""
+        rows, _ = views.order_groups(self.TREE, self.GROUPS, "cpu_ms", descending=True)
+        self.assertEqual("global.etl", rows[-1]["id"])
+        rows, _ = views.order_groups(self.TREE, self.GROUPS, "cpu_ms", descending=False)
+        self.assertEqual("global.etl", rows[-1]["id"],
+                         "still last when ascending; it is absent, not small")
+
+    def test_an_unknown_sort_key_falls_back_to_the_tree(self):
+        """The key comes from a query string. Anything not in the whitelist is
+        ignored rather than reaching a sort over arbitrary attributes."""
+        for key in ("", "secret", "__class__", "id"):
+            _rows, ranked = views.order_groups(self.TREE, self.GROUPS, key)
+            self.assertFalse(ranked, key)
+
+    def test_every_sortable_column_has_a_label(self):
+        for column in views.WORKLOAD_COLUMNS:
+            self.assertTrue(views.column_label(column["key"]))
+        self.assertEqual("", views.column_label("nope"))
