@@ -564,39 +564,72 @@ dialog::backdrop { background: rgba(4, 6, 10, .55); backdrop-filter: blur(1px); 
    already knows from watching a playbook run. The log is a terminal because
    that is literally what it is showing. */
 
-.seq { display: grid; grid-template-columns: minmax(320px, 380px) 1fr; gap: 16px; align-items: start; }
+/* Steps left, log right. The breakpoint is low on purpose: stacking them puts
+   the progress log below the fold, and watching it is the whole point. */
+.seq { display: grid; grid-template-columns: minmax(300px, 360px) 1fr; gap: 16px; align-items: start; }
+@media (max-width: 760px) {
+  .seq { grid-template-columns: 1fr; }
+  .console { height: min(50vh, 420px); }
+}
 .seq__after { display: flex; gap: 8px; }
 /* The console fills the panel to its edges, so the panel has to clip it or the
    log's own scroll area squares off the rounded corners. */
 .seq__log { overflow: hidden; }
 .seq__steps { align-self: start; }
 
-.steps { list-style: none; padding: 14px 16px; margin: 0; display: grid; gap: 2px; }
-.step { display: grid; grid-template-columns: 20px 1fr; gap: 10px; align-items: start; padding: 6px 0; font-size: 12.5px; }
-.step__mark { display: grid; place-items: center; height: 18px; }
-.step__mark svg { stroke: currentColor; }
-.step__mark > i { width: 6px; height: 6px; border-radius: 50%; background: var(--line-2); }
-.step__label { color: var(--tx-3); line-height: 1.45; }
-
-.step--done .step__mark { color: var(--good); }
-.step--done .step__label { color: var(--tx-2); }
-.step--current .step__label { color: var(--tx); font-weight: 700; }
-.step--aborted .step__mark { color: var(--unk); }
-
-/* The one step being waited on is the only moving thing on the page.
-   Matched at `.step__mark > i` specificity on purpose: the bare `.step__pulse`
-   class loses to the pending-dot rule above and renders grey, which is the one
-   colour it must not be. */
-.step__mark > i.step__pulse {
-  width: 8px; height: 8px; background: var(--ac);
-  animation: seq-pulse 1.6s ease-in-out infinite;
+/* The six steps as a numbered rail.
+   Numbering is information here, not decoration: the order is the feature, so
+   a step's position is something the reader needs. The connector makes it read
+   as one procedure rather than six unrelated lines. */
+.steps { list-style: none; padding: 16px 18px 14px; margin: 0; }
+.step {
+  position: relative;
+  display: grid; grid-template-columns: 22px 1fr auto; gap: 12px;
+  align-items: start; padding: 0 0 16px;
 }
+.step:last-child { padding-bottom: 0; }
+
+/* The connector runs from this marker to the next one, so the last step has
+   none - a rail trailing off the end reads as an unfinished list. */
+.step:not(:last-child)::before {
+  content: ""; position: absolute; left: 10px; top: 22px; bottom: 2px;
+  width: 2px; background: var(--line); border-radius: 1px;
+}
+.step--done:not(:last-child)::before { background: var(--good); opacity: .35; }
+
+.step__mark {
+  width: 22px; height: 22px; border-radius: 50%;
+  display: grid; place-items: center; position: relative; z-index: 1;
+  border: 1.5px solid var(--line-2); background: var(--panel);
+  color: var(--tx-3);
+}
+.step__n { font-size: 10.5px; font-weight: 700; line-height: 1; }
+.step__label { font-size: 12.5px; color: var(--tx-3); line-height: 1.45; padding-top: 3px; }
+
+.step--done .step__mark { border-color: var(--good); color: var(--good); background: var(--good-bg); }
+.step--done .step__label { color: var(--tx-2); }
+
+.step--current .step__mark {
+  border-color: var(--ac); color: var(--ac); background: var(--ac-soft);
+  animation: seq-pulse 1.8s ease-in-out infinite;
+}
+.step--current .step__label { color: var(--tx); font-weight: 700; }
+.step__now {
+  font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--ac); padding-top: 5px; white-space: nowrap;
+}
+
+.step--aborted .step__mark { border-color: var(--unk); color: var(--unk); background: var(--unk-bg); }
+.step--aborted .step__label { color: var(--tx-3); text-decoration: line-through; }
+
+/* Before anything has run: every step is ahead of you, none is "pending" in
+   the sense of blocked. */
+.step--preview .step__mark { border-style: dashed; }
+
 @keyframes seq-pulse {
   0%, 100% { box-shadow: 0 0 0 0 var(--ac-ring); }
   50%      { box-shadow: 0 0 0 5px transparent; }
 }
-
-.steps--preview .step__mark > i { background: var(--line-2); }
 
 .seq__facts { display: grid; grid-template-columns: 1fr 1fr; border-top: 1px solid var(--line); }
 .seq__facts .fact { border-right: 1px solid var(--line); }
@@ -618,14 +651,31 @@ dialog::backdrop { background: rgba(4, 6, 10, .55); backdrop-filter: blur(1px); 
 .seq__force > summary:hover, .seq__abort > summary:hover { color: var(--tx); }
 .seq__force > form, .seq__abort > form { padding-top: 8px; }
 
-.seq__live { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--ac); font-weight: 600; }
-.seq__live > i { width: 6px; height: 6px; border-radius: 50%; background: var(--ac); animation: seq-pulse 1.6s ease-in-out infinite; }
+.seq__live { display: inline-flex; align-items: center; gap: 6px; font-size: 10.5px; color: var(--ac); font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.seq__live > i { width: 6px; height: 6px; border-radius: 50%; background: var(--ac); animation: seq-pulse 1.8s ease-in-out infinite; }
 
-.seq__intro { padding: 4px 16px 16px; display: grid; gap: 14px; }
-.seq__intro .steps { padding: 10px 0; }
-.seq__intro form { max-width: 62ch; }
+/* Progress header — status, then the four facts asked about a restart that is
+   taking too long. Sits above the terminal, the way a job runner does it. */
+.seq__loghead { border-bottom: 1px solid var(--line); }
+.seq__logtitle { display: flex; align-items: center; gap: 10px; padding: 12px 16px; }
+.seq__meta {
+  display: flex; flex-wrap: wrap; gap: 0; margin: 0;
+  border-top: 1px solid var(--line);
+}
+.seq__meta > div {
+  padding: 9px 16px; min-width: 116px;
+  border-right: 1px solid var(--line);
+}
+.seq__meta dt {
+  font-size: 10px; letter-spacing: .05em; text-transform: uppercase; color: var(--tx-3);
+}
+.seq__meta dd { margin: 2px 0 0; font-size: 12.5px; font-weight: 600; }
+.seq__why {
+  padding: 8px 16px; font-size: 11.5px; color: var(--tx-2);
+  border-top: 1px solid var(--line);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 
-.restart-start { display: grid; gap: 16px; }
 
 /* The console. Fixed height so the page does not grow without bound while a
    playbook talks, and scrolled to the newest line by tms.js. */
@@ -646,6 +696,11 @@ dialog::backdrop { background: rgba(4, 6, 10, .55); backdrop-filter: blur(1px); 
 .console__line--warn .console__text { color: var(--warn); font-family: var(--font); font-size: 12px; }
 .console__line--error .console__text { color: var(--bad); font-family: var(--font); font-size: 12px; }
 .console__line--output .console__text { color: var(--tx-2); }
+
+/* Idle: the panel keeps its place so the layout does not rearrange itself the
+   moment a restart starts. The monospace is for machine output only - UI copy
+   set in it reads as if the terminal were talking. */
+.console--idle { display: grid; place-items: center; font-family: var(--font); }
 
 .console__line--cursor .console__text > i {
   display: inline-block; width: 7px; height: 13px; background: var(--ac);
@@ -686,10 +741,7 @@ dialog::backdrop { background: rgba(4, 6, 10, .55); backdrop-filter: blur(1px); 
   .fact:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
   .test-row { grid-template-columns: 1fr; }
   .kv { grid-template-columns: repeat(2, 1fr); }
-  /* The log below the checklist rather than beside it — side by side, neither
-     column is wide enough to read. */
-  .seq { grid-template-columns: 1fr; }
-  .console { height: min(50vh, 420px); }
+  .seq__meta > div { min-width: 50%; }
 }
 @media (prefers-reduced-motion: reduce) {
   * { animation-duration: .01ms !important; transition-duration: .01ms !important; }

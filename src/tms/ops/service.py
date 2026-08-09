@@ -21,6 +21,7 @@ Python 3.9 compatible.
 """
 
 import logging
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from tms.api.errors import Forbidden, InvalidRequest, NotFound, UpstreamUnavailable
@@ -44,6 +45,31 @@ from tms.ops.sequence import (
 )
 
 log = logging.getLogger(__name__)
+
+
+def _elapsed_ms(started_at, finished_at):
+    """How long the restart has taken, or took.
+
+    Counts to *now* while it is still running, so the header answers "how long
+    has this cluster been out of rotation" - which is the question an operator
+    watching a stalled drain is actually asking.
+    """
+    if not started_at:
+        return None
+    try:
+        start = datetime.fromisoformat(started_at)
+        end = datetime.fromisoformat(finished_at) if finished_at else _now(start)
+    except (TypeError, ValueError):
+        return None
+    return max(0.0, (end - start).total_seconds() * 1000.0)
+
+
+def _now(reference):
+    """Now, in the same awareness as the stored timestamp."""
+    if reference.tzinfo is None:
+        return datetime.now()
+    return datetime.now(timezone.utc)
+
 
 class RestartService:
     def __init__(self, config, repository, snapshots, gateway_client,
@@ -202,11 +228,12 @@ class RestartService:
     def _payload(self, stored) -> Dict[str, Any]:
         payload = stored.as_dict()
         payload["steps"] = [
-            {"state": state, "label": label, "status": status}
-            for state, label, status in stored.sequence.steps()
+            {"state": state, "label": label, "status": status, "number": index + 1}
+            for index, (state, label, status) in enumerate(stored.sequence.steps())
         ]
         payload["executor"] = self.executor.describe(stored.sequence.cluster)
         payload["automated"] = self.executor.automated
+        payload["duration_ms"] = _elapsed_ms(stored.started_at, stored.finished_at)
         return payload
 
     def get(self, principal: Principal, sequence_id: Any) -> Dict[str, Any]:

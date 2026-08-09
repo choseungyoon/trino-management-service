@@ -21,20 +21,7 @@
       {% endif %}
     </div>
 
-    <ol class="steps">
-      {% for step in sequence.steps %}
-      <li class="step step--{{ step.status }}">
-        <span class="step__mark" aria-hidden="true">
-          {% if step.status == 'done' %}{{ ui.icon('good', 13, 2.2) }}
-          {% elif step.status == 'current' %}<i class="step__pulse"></i>
-          {% elif step.status == 'aborted' %}{{ ui.icon('close', 11, 2.2) }}
-          {% endif %}
-        </span>
-        <span class="step__label">{{ step.label }}</span>
-        {% if step.status == 'current' %}<span class="sr-only">(current step)</span>{% endif %}
-      </li>
-      {% endfor %}
-    </ol>
+    {% with steps = sequence.steps %}{% include "_restart_steps.html" %}{% endwith %}
 
     {# What TMS currently knows about the cluster. Every gate below is decided
        on these two numbers, so they are shown rather than left implied. #}
@@ -153,31 +140,5 @@
     {% endif %}
   </section>
 
-  <section class="panel seq__log">
-    <div class="panel__head">
-      <span class="panel__title">Progress</span>
-      <span class="panel__sub">{{ sequence.actor }}, {{ sequence.started_at | relative_time }} — {{ sequence.reason }}</span>
-      <span class="spacer"></span>
-      {% if not sequence.is_terminal %}
-      <span class="seq__live" role="status">
-        <i aria-hidden="true"></i>live
-      </span>
-      {% endif %}
-    </div>
-
-    <div class="console" id="console" tabindex="0" role="log" aria-label="Restart progress">
-      {% for line in sequence.history %}
-      <div class="console__line console__line--{{ line.level }}">
-        <span class="console__time num">{{ line.at | time_only }}</span>
-        <span class="console__text">{{ line.message }}</span>
-      </div>
-      {% endfor %}
-      {% if not sequence.is_terminal %}
-      <div class="console__line console__line--cursor" aria-hidden="true">
-        <span class="console__time num"></span>
-        <span class="console__text"><i></i></span>
-      </div>
-      {% endif %}
-    </div>
-  </section>
+  {% include "_restart_console.html" %}
 </div>

@@ -1,0 +1,31 @@
+{% import "_icons.html" as ui %}
+{#
+  The six steps as a numbered rail.
+
+  Numbering is not decoration here: this is a fixed sequence whose order is the
+  feature, so the position of a step is information the reader needs. The rail
+  connecting the markers is what makes it read as one procedure rather than six
+  unrelated lines.
+
+  Callers pass `steps` — rows of {number, label, status}. `status` is absent on
+  the preview shown before a restart begins.
+#}
+<ol class="steps">
+  {% for step in steps %}
+  <li class="step step--{{ step.status | default('preview', true) }}">
+    <span class="step__mark" aria-hidden="true">
+      {% if step.status == 'done' %}
+        {{ ui.icon('good', 14, 2.4) }}
+      {% elif step.status == 'aborted' %}
+        {{ ui.icon('close', 12, 2.4) }}
+      {% else %}
+        <span class="step__n num">{{ step.number }}</span>
+      {% endif %}
+    </span>
+    <span class="step__label">{{ step.label }}</span>
+    {% if step.status == 'current' %}
+    <span class="step__now">in progress<span class="sr-only"> (current step)</span></span>
+    {% endif %}
+  </li>
+  {% endfor %}
+</ol>

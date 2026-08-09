@@ -112,7 +112,8 @@ def checklist():
     the one place that must not lie about the order is the screen you read
     before deciding to take a cluster out of rotation.
     """
-    return [{"state": state, "label": CHECKLIST_LABELS[state]} for state in STEP_ORDER]
+    return [{"state": state, "label": CHECKLIST_LABELS[state], "number": index + 1}
+            for index, state in enumerate(STEP_ORDER)]
 
 
 def _now() -> datetime:

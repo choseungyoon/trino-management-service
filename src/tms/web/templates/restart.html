@@ -48,28 +48,26 @@
 {% endif %}
 
 {% else %}
-<div class="restart-start">
-  <section class="panel">
+{# Same two-column shape as a running restart: steps and controls on the
+   left, progress on the right. The panel is idle rather than absent so the
+   layout does not rearrange itself the moment someone starts a restart. #}
+<div class="seq">
+  <section class="panel seq__steps">
     <div class="panel__head">
-      <span class="panel__title">Restart {{ selected_cluster }}</span>
+      <span class="panel__title">{{ selected_cluster }}</span>
       <span class="panel__sub">six steps, in order, none of them skippable</span>
     </div>
 
-    <div class="seq__intro">
-      {# The order is the feature. Someone about to take a cluster out of
-         rotation should see what TMS is going to do before they start, not
-         discover it one button at a time.
+    {# The order is the feature. Someone about to take a cluster out of
+       rotation should see what TMS is going to do before they start, not
+       discover it one button at a time.
 
-         Rendered from the same source as the live checklist. A second
-         hand-written copy would eventually describe a procedure the code no
-         longer follows, on the one screen that must not lie about it. #}
-      <ol class="steps steps--preview">
-        {% for step in preview_steps %}
-        <li class="step"><span class="step__mark" aria-hidden="true"><i></i></span>
-          <span class="step__label">{{ step.label }}</span></li>
-        {% endfor %}
-      </ol>
+       Rendered from the same source as the live checklist — a second
+       hand-written copy would eventually describe a procedure the code no
+       longer follows, on the one screen that must not lie about it. #}
+    {% with steps = preview_steps %}{% include "_restart_steps.html" %}{% endwith %}
 
+    <div class="seq__act">
       {% if can_manage %}
       <form method="post" action="/clusters/{{ selected_cluster | urlencode }}/restart"
             class="stack">
@@ -84,9 +82,8 @@
               Queries already running keep going; TMS waits for them.</span>
           </div>
         </div>
-        <button class="btn btn--danger" type="submit" data-busy="Stopping traffic…">
-          Begin the restart sequence
-        </button>
+        <button class="btn btn--danger btn--block" type="submit"
+                data-busy="Stopping traffic…">Begin the restart sequence</button>
       </form>
       {% else %}
       <div class="field__hint">
@@ -97,50 +94,52 @@
     </div>
   </section>
 
-  <section class="panel">
-    <div class="panel__head">
-      <span class="panel__title">Earlier restarts</span>
-      <span class="panel__sub">{{ selected_cluster }}</span>
-    </div>
-    {% if recent %}
-    <div class="table-scroll">
-      <table class="table">
-        <thead>
-          <tr><th>State</th><th>Started</th><th>By</th><th>Reason</th><th></th></tr>
-        </thead>
-        <tbody>
-          {% for item in recent %}
-          <tr>
-            <td>
-              {% if item.state == 'COMPLETED' %}
-              <span class="status status--good">{{ ui.icon('good', 12, 2) }}Completed</span>
-              {% elif item.state == 'ABORTED' %}
-              <span class="status status--unknown">{{ ui.icon('close', 12, 2) }}Aborted</span>
-              {% else %}
-              <span class="status status--concerning">{{ ui.icon('clock', 12, 2) }}{{ item.state | title }}</span>
-              {% endif %}
-            </td>
-            <td class="num">{{ item.started_at | clock }}</td>
-            <td>{{ item.actor }}</td>
-            <td class="muted">{{ item.reason | truncate(90) }}</td>
-            <td class="row-actions">
-              <a class="btn btn--sm btn--ghost" href="/restarts/{{ item.id }}">Open</a>
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    {% else %}
-    <div class="empty">
-      {{ ui.icon('history', 20, 1.6) }}
-      <div class="empty__title">No restarts recorded</div>
-      <div class="empty__desc">
-        Restarts run through TMS appear here with who ran them and why.
-      </div>
-    </div>
-    {% endif %}
-  </section>
+  {% with sequence = None %}{% include "_restart_console.html" %}{% endwith %}
 </div>
+
+<section class="panel">
+  <div class="panel__head">
+    <span class="panel__title">Earlier restarts</span>
+    <span class="panel__sub">{{ selected_cluster }}</span>
+  </div>
+  {% if recent %}
+  <div class="table-scroll">
+    <table class="table">
+      <thead>
+        <tr><th>State</th><th>Started</th><th>By</th><th>Reason</th><th></th></tr>
+      </thead>
+      <tbody>
+        {% for item in recent %}
+        <tr>
+          <td>
+            {% if item.state == 'COMPLETED' %}
+            <span class="status status--good">{{ ui.icon('good', 12, 2) }}Completed</span>
+            {% elif item.state == 'ABORTED' %}
+            <span class="status status--unknown">{{ ui.icon('close', 12, 2) }}Aborted</span>
+            {% else %}
+            <span class="status status--concerning">{{ ui.icon('clock', 12, 2) }}{{ item.state | title }}</span>
+            {% endif %}
+          </td>
+          <td class="num">{{ item.started_at | clock }}</td>
+          <td>{{ item.actor }}</td>
+          <td class="muted">{{ item.reason | truncate(90) }}</td>
+          <td class="row-actions">
+            <a class="btn btn--sm btn--ghost" href="/restarts/{{ item.id }}">Open</a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty">
+    {{ ui.icon('history', 20, 1.6) }}
+    <div class="empty__title">No restarts recorded</div>
+    <div class="empty__desc">
+      Restarts run through TMS appear here with who ran them and why.
+    </div>
+  </div>
+  {% endif %}
+</section>
 {% endif %}
 {% endblock %}
