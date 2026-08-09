@@ -209,7 +209,15 @@ _정적 정보 (Ansible inventory 소스)_: hostname/IP, role(coordinator/worker
 
 _런타임 정보 (실시간 조회 소스)_: Trino 버전, systemd 유닛 상태, 프로세스 uptime, **discovery 조인 여부**, config 체크섬(FR-FLEET-DRIFT 연동), last seen
 
-**조인 여부 조회 설계**: `system.runtime.nodes` 시스템 테이블 조회를 1차 소스로 사용한다. `/v1/node` REST 엔드포인트는 decommission된 노드가 오래 남는 등 알려진 신뢰성 문제가 있어 보조 소스로만 사용한다. 개별 노드 상태(ACTIVE/STARTING/SHUTTING_DOWN/FAILED)는 `/v1/info/state`로 조회한다.
+~~**조인 여부 조회 설계**: `system.runtime.nodes` 를 1차 소스로, `/v1/node` 를 보조 소스로 사용한다.~~
+**⛔ 2026-08-09 실측으로 두 전제가 모두 뒤집혔다 (`TRINO_VERIFIED.md` §T1-2-1).**
+
+- `/v1/node` 는 **477 에 없다 (404).** 보조 소스가 아니라 소스가 아니다.
+- `system.runtime.nodes` 는 **`ExecuteQuery` 권한을 요구**하며 TMS 계정은 갖고 있지 않다.
+
+**실제 구현 (2026-08-09)**: 정적 정보는 **Ansible 인벤토리**, 런타임 정보는 **각 노드의 `GET /v1/info`**(`PUBLIC`, 자격증명 불필요). 개별 노드 상태는 같은 응답의 `state` 다.
+
+**미충족 AC**: FR-FL-02(어느 워커가 미조인인지)는 `ExecuteQuery` 없이 불가능하다. 코디네이터 MBean 은 개수만 주고 식별자를 주지 않는다. TMS 는 개수 불일치를 표시하고 **화면에 이 한계를 명시**한다.
 
 **금지**: 본 화면에 CPU/Network/Disk 사용률 그래프를 넣지 않는다. Grafana 딥링크로 대체한다 (비목표 원칙 유지).
 

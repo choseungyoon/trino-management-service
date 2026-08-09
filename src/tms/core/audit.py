@@ -40,6 +40,9 @@ ACTION_AUDIT_EXPORT = "AUDIT_EXPORT"
 # R3 FR-CO-02. Every step of a restart sequence is audited under this
 # type; the step itself is in `details`.
 ACTION_CLUSTER_RESTART = "CLUSTER_RESTART"
+# FR-FL-03. Taking a worker out of the cluster is a write like any other:
+# reason, audit, admin only.
+ACTION_NODE_SHUTDOWN = "NODE_SHUTDOWN"
 
 ALLOWED_ACTION_TYPES = frozenset(
     [
@@ -49,12 +52,14 @@ ALLOWED_ACTION_TYPES = frozenset(
         ACTION_HEALTH_THRESHOLD_CHANGE,
         ACTION_AUDIT_EXPORT,
         ACTION_CLUSTER_RESTART,
+        ACTION_NODE_SHUTDOWN,
     ]
 )
 
 TARGET_QUERY = "query"
 TARGET_CLUSTER = "cluster"
 TARGET_HEALTH_TEST = "health_test"
+TARGET_NODE = "node"
 
 # The reason is forwarded to Trino and shown to the user whose query was killed,
 # so it is capped and flattened to a single line.

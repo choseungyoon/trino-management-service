@@ -22,6 +22,16 @@ sys.path.insert(
     os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"),
 )
 
+from tms.collector.snapshot import (  # noqa: E402
+    ALLOWED_KINDS,
+    KIND_FLEET,
+    KIND_GATEWAY,
+    KIND_HEALTH,
+    KIND_INFO,
+    KIND_JMX,
+    KIND_QUERIES,
+    KIND_RESOURCE_GROUPS,
+)
 from tms.collector.units import (  # noqa: E402
     parse_data_size_bytes,
     parse_duration_ms,
@@ -106,3 +116,43 @@ class TruncateUtf8Test(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class SnapshotKindDriftTest(unittest.TestCase):
+    """The code and the database must agree on the snapshot kinds.
+
+    Third instance of this bug shape, and the nastiest: a rejected kind is
+    *quiet*. The collector logs the constraint violation and carries on, so the
+    only symptom is a screen that never fills in. Migration 003 exists because
+    it already happened once.
+    """
+
+    def _effective_constraint(self):
+        import pathlib
+        import re
+
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        pattern = re.compile(
+            r"CONSTRAINT\s+collector_snapshot_kind_valid\s+CHECK\s*\((.*?)\)\s*;",
+            re.S | re.I)
+        found = None
+        for path in sorted(pathlib.Path(root, "migrations").glob("*.sql")):
+            for match in pattern.finditer(path.read_text(encoding="utf-8")):
+                found = (match.group(1), path.name)
+        return found
+
+    def test_every_kind_the_code_writes_is_accepted_by_the_schema(self):
+        effective = self._effective_constraint()
+        self.assertIsNotNone(effective, "the kind constraint is not defined anywhere")
+        definition, source = effective
+        for kind in ALLOWED_KINDS:
+            self.assertIn(
+                "'{}'".format(kind), definition,
+                "snapshot kind {!r} is in ALLOWED_KINDS but the CHECK constraint "
+                "in {} would reject it - and the rejection is silent".format(kind, source))
+
+    def test_the_constants_are_all_in_the_whitelist(self):
+        """A kind constant that is not in ALLOWED_KINDS escapes the check above."""
+        for kind in (KIND_QUERIES, KIND_JMX, KIND_INFO, KIND_HEALTH,
+                     KIND_RESOURCE_GROUPS, KIND_GATEWAY, KIND_FLEET):
+            self.assertIn(kind, ALLOWED_KINDS)

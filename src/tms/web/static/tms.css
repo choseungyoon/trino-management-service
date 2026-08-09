@@ -575,6 +575,12 @@ dialog::backdrop { background: rgba(4, 6, 10, .55); backdrop-filter: blur(1px); 
 .auth-card__note { font-size: 11px; margin-top: 14px; color: var(--tx-3); line-height: 1.5; }
 
 
+/* ── Fleet ──────────────────────────────────────────────────────────── */
+/* The confirm form opens in place, under the node it is about, so the host
+   name it names is directly above it. A modal would take that away. */
+.fleet__confirm > td { background: var(--panel-2); box-shadow: inset 2px 0 0 var(--bad); }
+.fleet__confirm form { max-width: 68ch; padding: 4px 0 6px; }
+
 /* ── Safe restart sequence ──────────────────────────────────────────── */
 /* Checklist on the left, live log on the right — the shape an operator
    already knows from watching a playbook run. The log is a terminal because

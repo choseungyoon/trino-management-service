@@ -174,6 +174,51 @@ cluster_ops:
 
 > 첫 실전 재시작은 **한가한 시간에, 예비 클러스터로** 하는 것을 권한다. 시퀀스가 막는 것은 실수지, 계획 부족이 아니다.
 
+### B-4. Fleet (FR-FL-01 / FR-FL-03) 실환경 연결 `[신규 2026-08-09]`
+
+**B-4-1. 마이그레이션** — 008(`fleet` 스냅샷 종류), 009(`NODE_SHUTDOWN` 감사 액션).
+
+```bash
+for f in 008_snapshot_kind_fleet 009_node_shutdown_action; do
+  psql -h <db-host> -U tms_owner -d tms -v ON_ERROR_STOP=1 -f migrations/$f.sql
+done
+```
+
+> 로컬 검증 중 이걸 빠뜨렸더니 **화면이 조용히 비어 있었다.** 콜렉터가 제약 위반을 로그에 남기고 계속 돌기 때문이다. 그래서 코드-DB 화이트리스트 대조 테스트를 추가했지만, **적용 자체는 사람이 해야 한다.**
+
+**B-4-2. 설정** — `fleet.enabled: true`, 인벤토리 경로, `node_url_template`.
+
+```yaml
+fleet:
+  enabled: true
+  inventories:
+    prod-a: /etc/tms/ansible/cluster1.ini
+  node_url_template: "https://{address}:8443"   # 실제 워커 포트/스킴으로
+```
+
+- [ ] **TMS 호스트에서 워커 HTTP 포트에 도달 가능한지 확인.** 지금까지 TMS 는 코디네이터만 봤다. 방화벽이 막고 있으면 전 워커가 "No answer" 로 뜬다
+- [ ] `node_url_template` 의 포트·스킴 확인 — 틀리면 장애처럼 보인다
+
+**B-4-3. ⛔ Graceful shutdown 권한 — 이게 실제 관문이다**
+
+`PUT /v1/info/state` 는 `MANAGEMENT_WRITE` 이고, 로컬 실측에서 TMS 계정은 **403 "Management only resource"** 를 받았다. 필요한 것:
+
+- [ ] **모든 워커에** `etc/access-control.properties` 배포 (문서 원문: *"These configuration must be present on all workers."*)
+- [ ] Rego 정책에 TMS 계정의 **`WriteSystemInformation`** 허용 추가
+- [ ] **⚠️ 미해소 G-4 검증**: 공식 문서는 graceful shutdown 관련해 `allow-all`/`file` 만 언급하고 **OPA 를 언급하지 않는다.** OPA 로 인가된다는 결론은 소스 근거다. **한 대의 워커로 먼저 실증할 것**
+- [ ] **⚠️ 신규 실패 모드**: 워커의 OPA 가 죽으면 shutdown 이 거부된다. 워커 OPA 헬스를 감시 대상에 넣을 것
+
+**B-4-4. `[인간 결정]` `ExecuteQuery` 를 TMS 에 줄 것인가**
+
+FR-FL-02(어느 워커가 discovery 미조인인지)는 `system.runtime.nodes` 가 필요하고, 그건 **TMS 가 프로덕션에서 SQL 을 실행할 수 있게 된다**는 뜻이다. 지금은 주지 않는 쪽으로 구현했고, 화면이 그 한계를 명시한다.
+
+| | 주지 않으면 (현재) | 주면 |
+|---|---|---|
+| 얻는 것 | 개수 불일치만 안다 | 미조인 워커를 **이름으로** 짚는다 |
+| 비용 | 없음 | TMS 침해 시 임의 SQL 실행. 폴링마다 쿼리 히스토리에 기록 |
+
+**권고: 지금은 주지 않는다.** 개수 불일치만으로도 "워커 한 대가 빠졌다"는 알 수 있고, 어느 대인지는 Ansible 로 확인하는 편이 싸다.
+
 ---
 
 ## C. 인프라 선행 작업 (SETUP)

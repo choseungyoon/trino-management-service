@@ -102,8 +102,28 @@ def build_restart_service(config: Config, service: TmsService):
     )
 
 
+def build_fleet_service(config: Config, service: TmsService):
+    """Fleet inventory and node lifecycle (FR-FL-01/03), or None when off.
+
+    Unlike restarts this needs no Gateway: shutting a worker down drains it
+    without touching routing, because the cluster stays up throughout.
+    """
+    if not getattr(config, "fleet", None) or not config.fleet.enabled:
+        return None
+    from tms.clients.transport import HttpxTransport
+    from tms.fleet.service import FleetService
+
+    return FleetService(
+        config=config,
+        snapshots=service.repository,
+        audit_guard=service.audit,
+        transport_factory=lambda: HttpxTransport(verify_tls=config.trino.verify_tls),
+        stale_threshold=config.collector.stale_threshold_seconds,
+    )
+
+
 def create_app(config: Optional[Config] = None, service: Optional[TmsService] = None,
-               restarts: Optional[Any] = None):
+               restarts: Optional[Any] = None, fleet: Optional[Any] = None):
     from fastapi import Body, Depends, FastAPI, Query, Request, Response
     from fastapi.responses import JSONResponse
 
@@ -139,6 +159,8 @@ def create_app(config: Optional[Config] = None, service: Optional[TmsService] = 
 
     if restarts is None:
         restarts = build_restart_service(config, service)
+    if fleet is None:
+        fleet = build_fleet_service(config, service)
 
     app = FastAPI(title="TMS", version="0.1.0", docs_url=None, redoc_url=None)
 
@@ -427,7 +449,7 @@ def create_app(config: Optional[Config] = None, service: Optional[TmsService] = 
         from tms.web.routes import register as register_web
 
         register_web(app, service, config, authenticator, codec, SESSION_COOKIE,
-                     restarts=restarts)
+                     restarts=restarts, fleet=fleet)
 
     return app
 

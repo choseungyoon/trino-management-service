@@ -117,6 +117,43 @@ default void shutdown() {}
 
 ---
 
+### T1-2-1. 노드 인벤토리 소스 — **실측 2026-08-09. 문서 가정 2건 정정**
+
+로컬 Trino 477 상대 실측이다. **`REQUIREMENTS.md` 의 FR-FL-01 설계 근거 두 가지가 모두 틀렸다.**
+
+| 소스 | 문서가 말한 것 | 실측 결과 |
+|---|---|---|
+| `GET /v1/node` | "decommission 노드가 남는 등 **신뢰성 문제**가 있어 보조 소스로만" | **404. 477 에 존재하지 않는다.** 보조 소스가 아니라 소스가 아니다 |
+| `SELECT * FROM system.runtime.nodes` | "**1차 소스**로 사용한다" | `PERMISSION_DENIED: Access Denied: Cannot execute query`. **`ExecuteQuery` 권한이 필요**하며 TMS 서비스 계정은 갖고 있지 않다 |
+
+```
+GET /v1/node        → 404      (/v1/node/ , /v1/node/failed 도 동일)
+GET /ui/api/node    → 401      (Web UI 전용. 관리 API 가 아니다)
+```
+
+**그래서 TMS 가 실제로 쓰는 소스** — 인증 없이, 쿼리 없이 노드별 사실을 얻는다.
+
+| 필드 | 소스 |
+|---|---|
+| host / IP, role, 소속 클러스터 | **Ansible 인벤토리 파일** (요구사항이 지목한 정적 정보 소스) |
+| nodeId, state, 버전, environment, uptime, coordinator 여부 | **각 노드의 `GET /v1/info`** — `PUBLIC` 이므로 **자격증명 없이 200** |
+
+```
+$ curl -s https://<node>:8443/v1/info      # 인증 헤더 전혀 없음
+{"nodeId":"local-coordinator-1","state":"ACTIVE","nodeVersion":{"version":"477"},
+ "environment":"tmslocal","coordinator":true,"coordinatorId":"h83jm",
+ "starting":false,"uptime":"1.10d"}
+```
+
+**`trino.node:name=CoordinatorNodeManager` 는 개수만 준다** — 실측 속성 5개:
+`ActiveNodeCount`, `InactiveNodeCount`, `ShuttingDownNodeCount`, `DrainingNodeCount`, `DrainedNodeCount`. **노드 식별자는 없다.**
+
+> ⛔ **따라서 FR-FL-02(어느 워커가 discovery 에 조인하지 않았는가)는 `ExecuteQuery` 없이는 불가능하다.** TMS 는 "12대 중 11대가 조인했다"까지 말할 수 있고 **어느 한 대인지는 말할 수 없다.** 화면이 그 한계를 명시한다.
+>
+> `ExecuteQuery` 를 TMS 에 부여하면 TMS 가 프로덕션에서 SQL 을 실행할 수 있게 된다 — 필드 하나를 위해 침해 시 파급을 넓히는 것이므로 **플랫폼팀 결정 사항**이다 (`TODO.md` B-4).
+
+---
+
 ### T1-3. 런타임 로그 레벨 변경 — **부분 지원. 확인(소스)**
 
 > **BOLT_0.md T1-3 특별 지침에 대한 답: "OSS에 동등 API가 없다"는 가정은 틀렸다. 단, "REST API"는 없다.**

@@ -29,6 +29,20 @@ KIND_RESOURCE_GROUPS = "resource_groups"
 KIND_GATEWAY = "gateway"
 GATEWAY_SCOPE = "*"
 
+# Per-node facts from each node's own /v1/info (FR-FL-01). Cluster-scoped, so
+# one row holds the whole fleet for that cluster.
+KIND_FLEET = "fleet"
+
+# ⛔ Mirrored by the CHECK constraint on collector_snapshot.kind. A kind added
+# here without a migration is rejected by the database, and the collector logs
+# it and carries on - so the screen simply stays empty forever with nothing
+# obviously wrong. That has happened once already (migration 003).
+# `tests/test_collector_units.py` compares the two.
+ALLOWED_KINDS = (
+    KIND_QUERIES, KIND_JMX, KIND_INFO, KIND_HEALTH,
+    KIND_RESOURCE_GROUPS, KIND_GATEWAY, KIND_FLEET,
+)
+
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)

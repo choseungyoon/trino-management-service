@@ -49,12 +49,13 @@ def build_templates():
 
 
 def register(app, service, config, authenticator, codec, session_cookie: str,
-             restarts=None) -> None:
+             restarts=None, fleet=None) -> None:
     """Mount the UI on an existing FastAPI app.
 
-    `restarts` is the FR-CO-02 sequence service, or None when it cannot run
-    (no Gateway, no database). None is a real state the screens handle, not an
-    error - the console still shows everything else.
+    `restarts` is the FR-CO-02 sequence service and `fleet` the FR-FLEET one.
+    Either may be None when it cannot run (no Gateway, no inventory). None is a
+    real state the screens handle, not an error - the console still shows
+    everything else.
     """
     from fastapi import Form, Request
     from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
@@ -116,6 +117,9 @@ def register(app, service, config, authenticator, codec, session_cookie: str,
         "health": max(int(collector_cfg.jmx_poll_interval_seconds), 10),
         "workload": max(int(config.workload.poll_interval_seconds), 10),
         "gateway": max(int(config.gateway.poll_interval_seconds), 15),
+        # A draining worker takes minutes; the operator watches this page while
+        # it does, so it tracks the fleet poll rather than sitting frozen.
+        "fleet": max(int(config.fleet.poll_interval_seconds), 15),
         # "restart" is deliberately absent. That page refreshes itself by
         # swapping two panels (tms.js), because a whole-page reload every few
         # seconds would throw away the operator's place in a progress log that
@@ -140,6 +144,7 @@ def register(app, service, config, authenticator, codec, session_cookie: str,
             # link to a page that can only say "disabled" is noise.
             "gateway_enabled": config.gateway.enabled,
             "restarts_enabled": restarts is not None,
+            "fleet_enabled": fleet is not None,
             # A cluster held out of rotation is invisible on every other
             # screen: the remaining clusters are green, so the console looks
             # healthy while traffic is being refused. The banner follows the
@@ -588,6 +593,65 @@ def register(app, service, config, authenticator, codec, session_cookie: str,
                                                    1 if enabled.lower() == "true" else 0),
             status_code=303,
         )
+
+    # ── fleet (FR-FL-01, FR-FL-03) ─────────────────────────────────────
+
+    @app.get("/clusters/{cluster}/fleet", response_class=HTMLResponse,
+             include_in_schema=False)
+    def fleet_page(request: Request, cluster: str, host: Optional[str] = None,
+                   error: Optional[str] = None):
+        principal, claims = principal_or_redirect(request)
+        if claims is None:
+            return principal
+        if fleet is None:
+            return _error_page(request, principal, NotFound(
+                "Fleet collection is off (fleet.enabled)."))
+        try:
+            envelope = fleet.get_fleet(principal, cluster)
+        except ApiError as exc:
+            return _error_page(request, principal, exc)
+
+        data = envelope.get("data") or {}
+        context = base_context(request, principal, "fleet")
+        context.update({
+            "envelope": envelope,
+            "fleet": data,
+            "nodes": data.get("nodes") or [],
+            "selected_cluster": cluster,
+            "can_manage": principal.can(MANAGE_HEALTH),
+            # Set when the confirm form is open for one node.
+            "confirm_host": host,
+            "error": error,
+        })
+        return render("fleet.html", context)
+
+    @app.post("/clusters/{cluster}/fleet/{host}/shutdown", include_in_schema=False)
+    def fleet_shutdown(request: Request, cluster: str, host: str,
+                       reason: str = Form("")):
+        principal, claims = principal_or_redirect(request)
+        if claims is None:
+            return principal
+        if fleet is None:
+            return _error_page(request, principal, NotFound("Fleet is not configured."))
+        try:
+            result = fleet.shutdown_node(principal, cluster, host, reason=reason)
+        except ApiError as exc:
+            # Back to the form with the node still selected, so the reason the
+            # operator typed is not the only thing they lose.
+            return RedirectResponse(
+                "/clusters/{}/fleet?host={}&error={}".format(
+                    _quote(cluster), _quote(host), _quote(exc.message)),
+                status_code=303)
+        except Exception as exc:  # noqa: BLE001
+            log.exception("shutdown of %s failed", host)
+            return RedirectResponse(
+                "/clusters/{}/fleet?error={}".format(_quote(cluster), _quote(str(exc))),
+                status_code=303)
+
+        response = RedirectResponse("/clusters/" + _quote(cluster) + "/fleet",
+                                    status_code=303)
+        _flash(response, "good", result["note"])
+        return response
 
     # ── safe restart sequence (FR-CO-02) ───────────────────────────────
     #

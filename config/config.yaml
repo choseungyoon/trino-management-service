@@ -83,6 +83,44 @@ workload:
   enabled: false
   poll_interval_seconds: 15
 
+fleet:
+  # FR-FL-01 / FR-FL-03 — node inventory and graceful shutdown.
+  #
+  # ⛔ Measured on Trino 477 (TRINO_VERIFIED.md T1-2-1), correcting two
+  # assumptions in REQUIREMENTS:
+  #   * `GET /v1/node` does not exist — it 404s.
+  #   * `system.runtime.nodes` needs the ExecuteQuery permission, which TMS
+  #     does not have and should not be given for one field.
+  #
+  # So TMS takes the node list from the Ansible inventory and asks each node
+  # about itself through `GET /v1/info`, which is PUBLIC — no credentials are
+  # sent to workers on any poll.
+  #
+  # The cost of that: TMS cannot say *which* worker failed to join discovery
+  # (FR-FL-02). It shows the coordinator's node counts as a cross-check and
+  # says so on the screen rather than leaving a gap to be misread.
+  enabled: false
+
+  # Node membership changes on the timescale of a deployment, not a query, and
+  # each poll fans out to every node. Slow on purpose.
+  poll_interval_seconds: 60
+
+  # Usually the same files as cluster_ops.ansible.inventories. Kept separate so
+  # that seeing the fleet does not require permission to restart it.
+  inventories: {}
+  #   prod-a: /etc/tms/ansible/cluster1.ini
+  #   prod-b: /etc/tms/ansible/cluster2.ini
+
+  # An inventory carries addresses, not schemes or ports. Assuming one would
+  # make every node look unreachable on a cluster that disagreed — which reads
+  # as an outage rather than a typo — so this is required when enabled.
+  node_url_template: ""      # e.g. "https://{address}:8443"
+
+  # A worker takes at least 2 x shutdown.grace-period plus its running tasks to
+  # exit (four minutes on Trino's defaults). A shorter deadline times out on a
+  # perfectly healthy shutdown.
+  shutdown_timeout_seconds: 900
+
 cluster_ops:
   # FR-CO-02 — the safe restart sequence.
   #

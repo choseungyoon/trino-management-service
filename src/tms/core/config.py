@@ -144,6 +144,31 @@ class WorkloadConfig:
 
 
 @dataclass(frozen=True)
+class FleetConfig:
+    """Node inventory and lifecycle (FR-FLEET).
+
+    Its own section rather than borrowing `cluster_ops.ansible.inventories`,
+    because seeing the fleet and restarting it are different privileges: an
+    operator should be able to look at the nodes on a deployment where TMS is
+    not allowed to touch them. The two usually point at the same files.
+
+    `node_url_template` exists because an inventory carries addresses, not
+    ports or schemes. Building `https://{address}:8443` by assumption would
+    make every node look unreachable on a cluster that runs plain HTTP - which
+    reads as an outage rather than as a misconfiguration.
+    """
+
+    enabled: bool = False
+    poll_interval_seconds: float = 60.0
+    inventories: Dict[str, str] = field(default_factory=dict)
+    node_url_template: str = ""
+    # Trino needs at least 2 x shutdown.grace-period plus running tasks before
+    # a worker exits - four minutes on the defaults (TRINO_VERIFIED T1-2). A
+    # shorter deadline times out on a perfectly healthy shutdown.
+    shutdown_timeout_seconds: float = 900.0
+
+
+@dataclass(frozen=True)
 class AnsibleConfig:
     """Where the restart playbook lives, and which inventory targets what.
 
@@ -219,6 +244,7 @@ class Config:
     gateway: GatewayConfig
     workload: WorkloadConfig
     cluster_ops: ClusterOpsConfig
+    fleet: FleetConfig
     health: HealthConfig
     deeplinks: DeeplinkConfig
     portal: PortalConfig
@@ -367,6 +393,36 @@ def _build_clusters(raw: Dict[str, Any]) -> List[ClusterConfig]:
     return clusters
 
 
+def _build_fleet(raw: Dict[str, Any]) -> FleetConfig:
+    enabled = bool(raw.get("enabled", False))
+    inventories = {str(k): str(v) for k, v in (raw.get("inventories") or {}).items()}
+    template = str(raw.get("node_url_template") or "")
+    interval = float(raw.get("poll_interval_seconds", 60))
+    timeout = float(raw.get("shutdown_timeout_seconds", 900))
+
+    if enabled:
+        if not inventories:
+            raise ConfigError("fleet.enabled is true but fleet.inventories is empty")
+        for cluster, path in sorted(inventories.items()):
+            if not os.path.isabs(path):
+                raise ConfigError(
+                    "fleet.inventories[{}] must be an absolute path".format(cluster))
+        if "{address}" not in template:
+            # Refused rather than defaulted: a wrong scheme or port makes every
+            # node look down, which reads as an outage instead of a typo.
+            raise ConfigError(
+                "fleet.node_url_template must contain {address}, "
+                "e.g. 'https://{address}:8443'")
+        if interval <= 0:
+            raise ConfigError("fleet.poll_interval_seconds must be positive")
+        if timeout <= 0:
+            raise ConfigError("fleet.shutdown_timeout_seconds must be positive")
+
+    return FleetConfig(enabled=enabled, poll_interval_seconds=interval,
+                       inventories=inventories, node_url_template=template,
+                       shutdown_timeout_seconds=timeout)
+
+
 def _build_cluster_ops(raw: Dict[str, Any], whole: Dict[str, Any]) -> ClusterOpsConfig:
     """Validate the restart-execution settings, refusing half-configured ones.
 
@@ -449,6 +505,7 @@ def build_config(raw: Dict[str, Any], where: str = "config.secret.yaml") -> Conf
         raise ConfigError("workload.poll_interval_seconds must be positive")
 
     cluster_ops = _build_cluster_ops(raw.get("cluster_ops") or {}, raw)
+    fleet = _build_fleet(raw.get("fleet") or {})
 
     collector = CollectorConfig(
         query_poll_interval_seconds=float(
@@ -503,6 +560,7 @@ def build_config(raw: Dict[str, Any], where: str = "config.secret.yaml") -> Conf
         gateway=gateway,
         workload=workload,
         cluster_ops=cluster_ops,
+        fleet=fleet,
         health=HealthConfig(
             stabilization_polls=int(health_raw.get("stabilization_polls", 3)),
             long_running_query_seconds=float(health_raw.get("long_running_query_seconds", 300)),

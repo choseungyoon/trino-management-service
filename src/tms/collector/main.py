@@ -44,6 +44,7 @@ class CollectorService:
         pollers: List[ClusterPoller],
         health_writer=None,
         gateway_poller=None,
+        fleet_pollers=None,
     ) -> None:
         self.config = config
         self.repository = repository
@@ -51,6 +52,10 @@ class CollectorService:
         # Fleet-level, so it is not one of the per-cluster pollers. None when
         # gateway.enabled is false - then no Gateway request is ever made.
         self.gateway_poller = gateway_poller
+        # One per cluster, on their own (much slower) schedule: node membership
+        # changes on the timescale of a deployment, not a query.
+        self.fleet_pollers = list(fleet_pollers or [])
+        self._fleet_due = 0.0
         # Health evaluation runs here rather than in the API because the engine
         # carries state (OOM counters, stabilisation counts) and the collector is
         # the only single-instance process.
@@ -79,6 +84,43 @@ class CollectorService:
             overrides=overrides,
         )
 
+    def _poll_fleet(self) -> None:
+        """Contact every node, at most once per fleet interval.
+
+        Its own clock rather than the main loop's: a fleet poll fans out to
+        every node in the cluster, and doing that on the query cadence would
+        multiply TMS's request count by the worker count for data that barely
+        changes.
+        """
+        if not self.fleet_pollers or self._stopping:
+            return
+        now = time.monotonic()
+        if now < self._fleet_due:
+            return
+        interval = min(p.interval for p in self.fleet_pollers)
+        self._fleet_due = now + max(interval, 5.0)
+        for poller in self.fleet_pollers:
+            if self._stopping:
+                break
+            try:
+                poller.tick(node_counts=self._node_counts(poller.cluster))
+            except Exception:  # noqa: BLE001 - one cluster must not stop the rest
+                log.exception("unhandled error polling the fleet of %s", poller.cluster)
+
+    def _node_counts(self, cluster: str) -> dict:
+        """The coordinator's own node counts, from the JMX snapshot the query
+        collector already wrote. Read rather than re-fetched: asking twice for
+        the same numbers is load TMS does not need to add."""
+        from tms.collector.snapshot import KIND_JMX
+
+        try:
+            snapshot = self.repository.load(cluster, KIND_JMX)
+        except Exception:  # noqa: BLE001
+            return {}
+        beans = ((snapshot.payload if snapshot else {}) or {}).get("mbeans") or {}
+        node_manager = beans.get("trino.node:name=CoordinatorNodeManager") or {}
+        return {k: v for k, v in node_manager.items() if k.endswith("NodeCount")}
+
     def request_stop(self, *_args) -> None:
         log.info("shutdown requested, finishing the current tick")
         self._stopping = True
@@ -104,6 +146,7 @@ class CollectorService:
                     self.gateway_poller.tick()
                 except Exception:  # noqa: BLE001 - the Gateway must not stop clusters
                     log.exception("unhandled error polling the gateway")
+            self._poll_fleet()
             if self._stopping:
                 break
             time.sleep(self._sleep_for())
@@ -158,6 +201,32 @@ def build_pollers(config: Config, repository) -> List[ClusterPoller]:
                 ),
             )
         )
+    return pollers
+
+
+def build_fleet_pollers(config, repository):
+    """One poller per cluster with an inventory. Empty when fleet is off."""
+    if not getattr(config, "fleet", None) or not config.fleet.enabled:
+        return []
+    from tms.clients.transport import HttpxTransport
+    from tms.collector.fleet_poller import FleetPoller
+    from tms.fleet.inventory import load_fleet
+
+    fleet = load_fleet(config.fleet.inventories)
+    pollers = []
+    for cluster in config.clusters:
+        nodes = fleet.get(cluster.name)
+        if nodes is None:
+            log.warning("fleet.inventories has no entry for %s", cluster.name)
+            continue
+        pollers.append(FleetPoller(
+            cluster=cluster.name, nodes=nodes, repository=repository,
+            url_template=config.fleet.node_url_template,
+            transport_factory=lambda: HttpxTransport(
+                verify_tls=config.trino.verify_tls),
+            interval=config.fleet.poll_interval_seconds,
+            verify_tls=config.trino.verify_tls,
+        ))
     return pollers
 
 
@@ -216,6 +285,7 @@ def run(argv: Optional[List[str]] = None) -> int:
         config, repository, build_pollers(config, repository),
         health_writer=health_writer,
         gateway_poller=build_gateway_poller(config, repository),
+        fleet_pollers=build_fleet_pollers(config, repository),
     )
     signal.signal(signal.SIGTERM, service.request_stop)
     signal.signal(signal.SIGINT, service.request_stop)

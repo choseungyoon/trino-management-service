@@ -1,0 +1,181 @@
+{% extends "base.html" %}
+{% import "_icons.html" as ui %}
+{% block title %}Fleet · {{ selected_cluster }}{% endblock %}
+{% block heading %}Fleet{% endblock %}
+
+{% block topbar_extra %}
+<nav class="segmented" aria-label="Cluster">
+  {% for name in cluster_names %}
+  <a href="/clusters/{{ name | urlencode }}/fleet"
+     {% if selected_cluster == name %}aria-current="page"{% endif %}>{{ name }}</a>
+  {% endfor %}
+</nav>
+{% endblock %}
+
+{% block content %}
+{% if error %}
+<div class="banner banner--bad" role="alert">
+  {{ ui.icon('bad', 15, 2) }}
+  <div>{{ error }}</div>
+</div>
+{% endif %}
+
+{% if fleet.unavailable_reason %}
+<div class="banner banner--concerning" role="status">
+  {{ ui.icon('concerning', 15, 2) }}
+  <div><b>{{ fleet.unavailable_reason }}</b>
+    {% if fleet.advice %}<div>{{ fleet.advice }}</div>{% endif %}</div>
+</div>
+{% endif %}
+
+{# Disagreements across nodes. Each of these is invisible in a single row and
+   obvious across the fleet, and each one is a real incident shape. #}
+{% for note in fleet.notes or [] %}
+<div class="banner banner--concerning" role="status">
+  {{ ui.icon('concerning', 15, 2) }}<div>{{ note }}</div>
+</div>
+{% endfor %}
+
+{% if nodes %}
+<div class="panel">
+  <div class="facts">
+    <div class="fact">
+      <div class="fact__value num">{{ fleet.summary.total | integer }}</div>
+      <div class="fact__key">In the inventory</div>
+    </div>
+    <div class="fact">
+      <div class="fact__value num">{{ fleet.summary.reachable | integer }}</div>
+      <div class="fact__key">Answering</div>
+    </div>
+    <div class="fact">
+      <div class="fact__value num {{ 'fact__planned' if fleet.summary.unreachable else '' }}">
+        {{ fleet.summary.unreachable | integer }}</div>
+      <div class="fact__key">Not answering</div>
+    </div>
+    <div class="fact">
+      {# Draining is deliberate, so it is amber and never red. #}
+      <div class="fact__value num {{ 'fact__planned' if fleet.summary.shutting_down else '' }}">
+        {{ fleet.summary.shutting_down | integer }}</div>
+      <div class="fact__key">Shutting down</div>
+    </div>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="table-scroll">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Node</th><th>Role</th><th>State</th><th>Version</th>
+          <th>Environment</th><th class="num">Uptime</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for node in nodes %}
+        <tr>
+          <td>
+            <span class="mono">{{ node.host }}</span>
+            {% if node.address != node.host %}
+            <div class="muted mono">{{ node.address }}</div>
+            {% endif %}
+          </td>
+          <td>
+            <span class="tag">{{ node.role }}</span>
+          </td>
+          <td>
+            {% if not node.reachable %}
+            <span class="status status--unknown" title="{{ node.error }}">
+              {{ ui.icon('unknown', 12, 2) }}No answer</span>
+            {% elif node.state == 'SHUTTING_DOWN' %}
+            <span class="status status--concerning">{{ ui.icon('clock', 12, 2) }}Draining</span>
+            {% elif node.state == 'ACTIVE' %}
+            <span class="status status--good">{{ ui.icon('good', 12, 2) }}Active</span>
+            {% else %}
+            <span class="status status--unknown">{{ node.state or 'Unknown' }}</span>
+            {% endif %}
+          </td>
+          <td class="mono">{{ node.version or '—' }}</td>
+          <td class="mono">{{ node.environment or '—' }}</td>
+          <td class="num">{{ node.uptime or '—' }}</td>
+          <td class="row-actions">
+            {% if can_manage and node.role == 'worker' and node.reachable
+                  and node.state != 'SHUTTING_DOWN' %}
+            <a class="btn btn--sm"
+               href="?host={{ node.host | urlencode }}">Shut down</a>
+            {% endif %}
+          </td>
+        </tr>
+
+        {% if confirm_host == node.host %}
+        <tr class="fleet__confirm">
+          <td colspan="7">
+            <form method="post" class="stack"
+                  action="/clusters/{{ selected_cluster | urlencode }}/fleet/{{ node.host | urlencode }}/shutdown">
+              <div class="field">
+                <label for="reason">Why is {{ node.host }} being shut down?
+                  <span class="req">*</span></label>
+                <textarea id="reason" name="reason" rows="2" required
+                          placeholder="e.g. scaling down for the weekend, CHG-4482"></textarea>
+                <div class="field__hint">
+                  {{ ui.icon('concerning', 12, 2) }}
+                  <span>Trino drains it first: it stops accepting new tasks,
+                    finishes the ones it has, then exits. That takes at least
+                    twice <code class="mono">shutdown.grace-period</code> — about
+                    four minutes on the defaults — and the node stays listed
+                    until it goes. <b>Running queries are not killed.</b></span>
+                </div>
+              </div>
+              <div class="row">
+                <button class="btn btn--danger" type="submit" data-busy="Draining…">
+                  Drain and shut down {{ node.host }}
+                </button>
+                <a class="btn btn--ghost"
+                   href="/clusters/{{ selected_cluster | urlencode }}/fleet">Cancel</a>
+              </div>
+            </form>
+          </td>
+        </tr>
+        {% endif %}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{# What this screen cannot tell you. Stated rather than left to be inferred
+   from a missing column - an omitted fact reads as a fact that is fine. #}
+<div class="panel">
+  <div class="panel__head">
+    <span class="panel__title">What this screen does not know</span>
+  </div>
+  <div class="seq__act">
+    {% for limit in fleet.limits or [] %}
+    <p class="seq__act-why">{{ limit }}</p>
+    {% endfor %}
+    {% if fleet.node_counts %}
+    <div class="kv">
+      {% for key, value in (fleet.node_counts | dictsort) %}
+      <div class="kv__cell">
+        <div class="kv__key">{{ key | replace('NodeCount', '') }}</div>
+        <div class="kv__value num">{{ value | integer }}</div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+{% elif not fleet.unavailable_reason %}
+<div class="panel">
+  <div class="empty">
+    {{ ui.icon('unknown', 20, 1.6) }}
+    <div class="empty__title">No nodes collected yet</div>
+    <div class="empty__desc">
+      The collector reads the Ansible inventory for this cluster and then asks
+      each node what it is. Give it one poll interval, then check
+      <code class="mono">fleet.inventories</code>.
+    </div>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
