@@ -128,6 +128,52 @@ monitor:
 - [ ] 적용 + Gateway 재시작
 - [ ] 검증: 적용 전후 두 클러스터의 `RunningQueries` 비교 — 느린 쪽 러닝 쿼리가 상대적으로 낮아져야 한다
 
+### B-3. 안전 재시작 (FR-CO-02) 실환경 연결 `[신규 2026-08-09]`
+
+기능은 구현·검증 완료다. **로컬에서 Gateway 19 · Trino 477 · PostgreSQL 로 전 과정을 브라우저로 통과**시켰다 (스트리밍 출력, 자동 진행, 감사 기록 포함). 사내에서 남은 것은 **연결 3가지**다.
+
+**B-3-1. 마이그레이션 적용** — 004~007. 004·005 는 재시작 시퀀스 테이블과 권한, 006 은 `CLUSTER_RESTART` 감사 액션, 007 은 진행 로그의 `output` 레벨이다.
+
+```bash
+for f in 004_restart_sequence 005_restart_sequence_grants \
+         006_cluster_restart_action 007_restart_event_output_level; do
+  psql -h <db-host> -U tms_owner -d tms -v ON_ERROR_STOP=1 -f migrations/$f.sql
+done
+```
+
+검증 — `tms_app` 이 이벤트 테이블을 **고치거나 지울 수 없어야** 한다. 진행 로그는 감사 기록과 같은 등급의 append-only 다.
+
+```sql
+-- tms_app 으로 접속해서, 둘 다 실패해야 정상
+UPDATE restart_sequence_event SET message = 'tampered';
+DELETE FROM restart_sequence_event;
+```
+
+**B-3-2. Gateway 연결** — 이 기능은 **Gateway 없이는 아예 켜지지 않는다.** 유입을 끊을 방법이 없는 재시작은 실행 중 쿼리를 전멸시키므로, 화면은 버튼 대신 이유를 표시한다. 즉 **B-1 이 선행**이다.
+
+**B-3-3. 실행 방식 선택 (D-009)**
+
+기본값 `manual` 이면 TMS 가 게이트를 지키고 재시작은 사람이 한다. **추가 권한이 전혀 필요 없고, 사고를 막는 부분은 자동/수동이 동일하다.** 먼저 이 모드로 한 번 돌려보길 권한다.
+
+Ansible 자동 실행으로 바꾸려면:
+
+```yaml
+cluster_ops:
+  restart_mode: ansible
+  ansible:
+    playbook: /etc/tms/ansible/restart-cluster.yml   # 절대경로
+    inventories:
+      prod-a: /etc/tms/ansible/cluster1.ini          # 클러스터마다 필수
+      prod-b: /etc/tms/ansible/cluster2.ini
+```
+
+- [ ] **⛔ 결정 확인**: 이것은 TMS 호스트가 **전 Trino 노드에 SSH 접근**을 갖는다는 뜻이다. 편의가 아니라 보안 결정이며 D-009 에 기록되어 있다
+- [ ] 모든 클러스터에 인벤토리 항목 존재 (하나라도 빠지면 **기동이 실패한다** — 클러스터를 이미 빼놓은 뒤 재시작을 거부당하는 것보다 낫다)
+- [ ] 플레이북이 TMS 서비스 계정으로 실행 가능한지 확인
+- [ ] 진행 로그에 비밀이 새는지 눈으로 확인. 마스킹은 최선 노력이며 **로그 자체를 민감 정보로 취급**한다
+
+> 첫 실전 재시작은 **한가한 시간에, 예비 클러스터로** 하는 것을 권한다. 시퀀스가 막는 것은 실수지, 계획 부족이 아니다.
+
 ---
 
 ## C. 인프라 선행 작업 (SETUP)

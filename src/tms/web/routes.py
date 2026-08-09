@@ -24,6 +24,7 @@ from tms.api.permissions import (
     VIEW_AUDIT,
     Principal,
 )
+from tms.ops.sequence import checklist as sequence_checklist
 from tms.web import views
 from tms.web.formatting import FILTERS
 
@@ -47,8 +48,14 @@ def build_templates():
     return templates
 
 
-def register(app, service, config, authenticator, codec, session_cookie: str) -> None:
-    """Mount the UI on an existing FastAPI app."""
+def register(app, service, config, authenticator, codec, session_cookie: str,
+             restarts=None) -> None:
+    """Mount the UI on an existing FastAPI app.
+
+    `restarts` is the FR-CO-02 sequence service, or None when it cannot run
+    (no Gateway, no database). None is a real state the screens handle, not an
+    error - the console still shows everything else.
+    """
     from fastapi import Form, Request
     from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
     from fastapi.staticfiles import StaticFiles
@@ -109,6 +116,10 @@ def register(app, service, config, authenticator, codec, session_cookie: str) ->
         "health": max(int(collector_cfg.jmx_poll_interval_seconds), 10),
         "workload": max(int(config.workload.poll_interval_seconds), 10),
         "gateway": max(int(config.gateway.poll_interval_seconds), 15),
+        # "restart" is deliberately absent. That page refreshes itself by
+        # swapping two panels (tms.js), because a whole-page reload every few
+        # seconds would throw away the operator's place in a progress log that
+        # is still being written to.
     }
 
     def base_context(request: Request, principal: Principal, page: str) -> Dict[str, Any]:
@@ -128,6 +139,12 @@ def register(app, service, config, authenticator, codec, session_cookie: str) ->
             # The nav hides the Gateway link when the integration is off - a
             # link to a page that can only say "disabled" is noise.
             "gateway_enabled": config.gateway.enabled,
+            "restarts_enabled": restarts is not None,
+            # A cluster held out of rotation is invisible on every other
+            # screen: the remaining clusters are green, so the console looks
+            # healthy while traffic is being refused. The banner follows the
+            # operator around until the sequence is finished.
+            "active_restarts": restarts.active() if restarts is not None else [],
             "flash": _take_flash(request),
             # Drives data-refresh in base.html, which tms.js reads. Without it
             # the auto-refresh timer never starts and every screen is frozen
@@ -556,6 +573,166 @@ def register(app, service, config, authenticator, codec, session_cookie: str) ->
                                                    1 if enabled.lower() == "true" else 0),
             status_code=303,
         )
+
+    # ── safe restart sequence (FR-CO-02) ───────────────────────────────
+    #
+    # One page for the whole procedure. The left column is the checklist -
+    # where the sequence has got to and what it is waiting for - and the right
+    # column is the live log, the way an operator watches a playbook run.
+    #
+    # Every step is its own POST to its own URL with the sequence in a known
+    # state, so a stale tab cannot replay step 4 onto a cluster that has since
+    # moved on: the state machine refuses it. Without JavaScript the page
+    # simply reloads on a timer.
+
+    def _restart_page(request: Request, principal: Principal, cluster: str,
+                      error: Optional[str] = None, status_code: int = 200,
+                      sequence_id: Optional[Any] = None):
+        context = base_context(request, principal, "restart")
+        context.update({
+            "selected_cluster": cluster,
+            "error": error,
+            "envelope": None,
+            "sequence": None,
+            "can_manage": principal.can(MANAGE_HEALTH),
+            "recent": [],
+            "preview_steps": sequence_checklist(),
+        })
+        if restarts is None:
+            return render("restart.html", context, status_code=status_code)
+
+        try:
+            if sequence_id is not None:
+                context["sequence"] = restarts.refresh(principal, sequence_id)
+            else:
+                active = [s for s in restarts.active() if s["cluster"] == cluster]
+                if active:
+                    context["sequence"] = restarts.refresh(principal, active[0]["id"])
+        except ApiError as exc:
+            context["error"] = context["error"] or exc.message
+
+        if context["sequence"] is None:
+            # Nothing in flight: the page is the start form plus history.
+            context["recent"] = [s for s in restarts.recent(10)
+                                 if s["cluster"] == cluster]
+        return render("restart.html", context, status_code=status_code)
+
+    @app.get("/clusters/{cluster}/restart", response_class=HTMLResponse,
+             include_in_schema=False)
+    def restart_page(request: Request, cluster: str):
+        principal, claims = principal_or_redirect(request)
+        if claims is None:
+            return principal
+        if cluster not in cluster_names:
+            return _error_page(request, principal, NotFound(
+                "Unknown cluster: {}".format(cluster)))
+        return _restart_page(request, principal, cluster)
+
+    @app.get("/restarts/{sequence_id}", response_class=HTMLResponse,
+             include_in_schema=False)
+    def restart_sequence_page(request: Request, sequence_id: int, fragment: int = 0):
+        """One sequence, live or finished. `fragment=1` returns just the panels.
+
+        The fragment is what the live view polls: replacing two panels keeps
+        the operator's scroll position in a log that is still being written to,
+        which a full reload would throw away every few seconds.
+        """
+        principal, claims = principal_or_redirect(request)
+        if claims is None:
+            return principal
+        if restarts is None:
+            return _error_page(request, principal, NotFound("Restarts are not configured."))
+        try:
+            sequence = restarts.refresh(principal, sequence_id)
+        except ApiError as exc:
+            return _error_page(request, principal, exc)
+
+        if fragment:
+            return render("restart_live.html", {
+                "request": request, "sequence": sequence,
+                "can_manage": principal.can(MANAGE_HEALTH),
+            })
+        return _restart_page(request, principal, sequence["cluster"],
+                             sequence_id=sequence_id)
+
+    @app.post("/clusters/{cluster}/restart", include_in_schema=False)
+    def restart_start(request: Request, cluster: str, reason: str = Form("")):
+        principal, claims = principal_or_redirect(request)
+        if claims is None:
+            return principal
+        if restarts is None:
+            return _error_page(request, principal, NotFound("Restarts are not configured."))
+        try:
+            sequence = restarts.start(principal, cluster, reason=reason)
+        except ApiError as exc:
+            return _restart_page(request, principal, cluster, error=exc.message,
+                                 status_code=exc.status)
+        except Exception as exc:  # noqa: BLE001
+            # The service closes the sequence out when it could not stop
+            # traffic, so nothing is left half-started; say what happened.
+            log.exception("could not begin a restart of %s", cluster)
+            return _restart_page(
+                request, principal, cluster, status_code=502,
+                error="Could not stop traffic to {}, so no restart was started: "
+                      "{}".format(cluster, exc))
+        return RedirectResponse("/restarts/{}".format(sequence["id"]), status_code=303)
+
+    def _step(request: Request, sequence_id: int, call, success: str,
+              **kwargs):
+        """Run one step and come back to the sequence page.
+
+        Always a redirect, so a refresh never re-posts the step - repeating
+        "restart now" because someone hit F5 is exactly the accident this
+        sequence is built to prevent.
+        """
+        principal, claims = principal_or_redirect(request)
+        if claims is None:
+            return principal
+        if restarts is None:
+            return _error_page(request, principal, NotFound("Restarts are not configured."))
+
+        response = RedirectResponse("/restarts/{}".format(sequence_id), status_code=303)
+        try:
+            call(principal, sequence_id, **kwargs)
+        except ApiError as exc:
+            _flash(response, "bad", exc.message)
+            return response
+        except Exception as exc:  # noqa: BLE001
+            # ⛔ Never an error page. When a step fails the cluster is usually
+            # still out of rotation, and what to do about it is written in the
+            # sequence's own log - which a stack trace would hide.
+            log.exception("restart step failed for sequence %s", sequence_id)
+            _flash(response, "bad", "{}. The restart is still open - see the "
+                                    "progress log.".format(exc))
+            return response
+        if success:
+            _flash(response, "good", success)
+        return response
+
+    @app.post("/restarts/{sequence_id}/force-drain", include_in_schema=False)
+    def restart_force_drain(request: Request, sequence_id: int, reason: str = Form("")):
+        return _step(request, sequence_id, restarts.force_drain if restarts else None,
+                     "Drain overridden. The running queries will be killed by the "
+                     "restart.", override_reason=reason)
+
+    @app.post("/restarts/{sequence_id}/restart", include_in_schema=False)
+    def restart_execute(request: Request, sequence_id: int):
+        return _step(request, sequence_id, restarts.restart if restarts else None, "")
+
+    @app.post("/restarts/{sequence_id}/restarted", include_in_schema=False)
+    def restart_mark_restarted(request: Request, sequence_id: int):
+        return _step(request, sequence_id,
+                     restarts.mark_restarted if restarts else None, "")
+
+    @app.post("/restarts/{sequence_id}/complete", include_in_schema=False)
+    def restart_complete(request: Request, sequence_id: int):
+        return _step(request, sequence_id, restarts.complete if restarts else None,
+                     "Traffic restored. The cluster is back in rotation.")
+
+    @app.post("/restarts/{sequence_id}/abort", include_in_schema=False)
+    def restart_abort(request: Request, sequence_id: int, reason: str = Form("")):
+        return _step(request, sequence_id, restarts.abort if restarts else None,
+                     "Aborted. Traffic has been restored.", note=reason)
 
     # ── audit ──────────────────────────────────────────────────────────
 

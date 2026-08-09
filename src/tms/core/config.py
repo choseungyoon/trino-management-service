@@ -144,6 +144,37 @@ class WorkloadConfig:
 
 
 @dataclass(frozen=True)
+class AnsibleConfig:
+    """Where the restart playbook lives, and which inventory targets what.
+
+    `inventories` maps a TMS cluster name to that cluster's inventory file. The
+    platform team keeps one per cluster, so choosing a cluster means choosing a
+    file - no host name ever reaches the command line.
+    """
+
+    playbook: str = ""
+    binary: str = "ansible-playbook"
+    timeout_seconds: float = 1800.0
+    inventories: Dict[str, str] = field(default_factory=dict)
+    extra_vars: Dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class ClusterOpsConfig:
+    """The safe restart sequence (FR-CO-02).
+
+    `restart_mode` decides who performs step 4, and it is deliberately
+    `manual` by default. Turning it to `ansible` gives TMS SSH reach into every
+    Trino node, which is a security decision an administrator makes explicitly -
+    never something that happens because a package was installed.
+    """
+
+    restart_mode: str = "manual"
+    drain_timeout_seconds: float = 900.0
+    ansible: AnsibleConfig = field(default_factory=AnsibleConfig)
+
+
+@dataclass(frozen=True)
 class HealthConfig:
     stabilization_polls: int = 3
     long_running_query_seconds: float = 300.0
@@ -187,6 +218,7 @@ class Config:
     trino_facts: TrinoFacts
     gateway: GatewayConfig
     workload: WorkloadConfig
+    cluster_ops: ClusterOpsConfig
     health: HealthConfig
     deeplinks: DeeplinkConfig
     portal: PortalConfig
@@ -335,6 +367,58 @@ def _build_clusters(raw: Dict[str, Any]) -> List[ClusterConfig]:
     return clusters
 
 
+def _build_cluster_ops(raw: Dict[str, Any], whole: Dict[str, Any]) -> ClusterOpsConfig:
+    """Validate the restart-execution settings, refusing half-configured ones.
+
+    A misconfigured automated restart must fail here, at startup, rather than
+    at the moment an operator is holding a deactivated cluster and needs it to
+    work. Every check below is a thing that would otherwise surface mid-restart.
+    """
+    mode = str(raw.get("restart_mode") or "manual").strip().lower()
+    if mode not in ("manual", "ansible"):
+        raise ConfigError(
+            "cluster_ops.restart_mode must be 'manual' or 'ansible', not {!r}".format(mode))
+
+    ansible_raw = raw.get("ansible") or {}
+    inventories = {str(k): str(v) for k, v in (ansible_raw.get("inventories") or {}).items()}
+    ansible = AnsibleConfig(
+        playbook=str(ansible_raw.get("playbook") or ""),
+        binary=str(ansible_raw.get("binary") or "ansible-playbook"),
+        timeout_seconds=float(ansible_raw.get("timeout_seconds", 1800)),
+        inventories=inventories,
+        extra_vars={str(k): str(v) for k, v in (ansible_raw.get("extra_vars") or {}).items()},
+    )
+
+    if mode == "ansible":
+        if not ansible.playbook:
+            raise ConfigError(
+                "cluster_ops.restart_mode is 'ansible' but cluster_ops.ansible.playbook "
+                "is empty")
+        if ansible.timeout_seconds <= 0:
+            raise ConfigError("cluster_ops.ansible.timeout_seconds must be positive")
+        # An unlisted cluster would be refused at restart time - after the
+        # operator has already taken it out of rotation. Catch it at startup.
+        configured = [str(c.get("name")) for c in (whole.get("clusters") or [])
+                      if c.get("name")]
+        missing = [name for name in configured if name not in inventories]
+        if missing:
+            raise ConfigError(
+                "cluster_ops.ansible.inventories has no entry for {}. TMS will not "
+                "guess which hosts to restart.".format(", ".join(sorted(missing))))
+        unknown = [name for name in inventories if configured and name not in configured]
+        if unknown:
+            raise ConfigError(
+                "cluster_ops.ansible.inventories names unknown cluster(s): {}".format(
+                    ", ".join(sorted(unknown))))
+
+    drain_timeout = float(raw.get("drain_timeout_seconds", 900))
+    if drain_timeout <= 0:
+        raise ConfigError("cluster_ops.drain_timeout_seconds must be positive")
+
+    return ClusterOpsConfig(restart_mode=mode, drain_timeout_seconds=drain_timeout,
+                            ansible=ansible)
+
+
 def build_config(raw: Dict[str, Any], where: str = "config.secret.yaml") -> Config:
     """Turn an already-merged mapping into a validated Config."""
     trino_raw = raw.get("trino") or {}
@@ -363,6 +447,8 @@ def build_config(raw: Dict[str, Any], where: str = "config.secret.yaml") -> Conf
     )
     if workload.poll_interval_seconds <= 0:
         raise ConfigError("workload.poll_interval_seconds must be positive")
+
+    cluster_ops = _build_cluster_ops(raw.get("cluster_ops") or {}, raw)
 
     collector = CollectorConfig(
         query_poll_interval_seconds=float(
@@ -416,6 +502,7 @@ def build_config(raw: Dict[str, Any], where: str = "config.secret.yaml") -> Conf
         ),
         gateway=gateway,
         workload=workload,
+        cluster_ops=cluster_ops,
         health=HealthConfig(
             stabilization_polls=int(health_raw.get("stabilization_polls", 3)),
             long_running_query_seconds=float(health_raw.get("long_running_query_seconds", 300)),

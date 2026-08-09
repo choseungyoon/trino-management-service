@@ -253,3 +253,29 @@ class GatewayClient:
         close = getattr(self._transport, "close", None)
         if close:
             close()
+
+
+def build_gateway_client(config):
+    """One client construction, shared by the collector and the API.
+
+    Returns None when the Gateway is disabled, so callers can treat "no
+    Gateway" as a first-class case instead of holding a client that would fail
+    on first use. Both processes need one - the collector to poll backends, the
+    API to deactivate a cluster during a restart - and building it twice is how
+    the two drift apart.
+    """
+    if not config.gateway.enabled or not config.gateway.base_url:
+        return None
+    from tms.clients.transport import HttpxTransport
+
+    return GatewayClient(
+        base_url=config.gateway.base_url,
+        user=config.gateway.user,
+        password=config.gateway.password.reveal(),
+        transport=HttpxTransport(verify_tls=config.trino.verify_tls),
+        verify_tls=config.trino.verify_tls,
+        connect_timeout=config.trino.connect_timeout_seconds,
+        read_timeout=config.trino.read_timeout_seconds,
+        write_timeout=config.trino.write_timeout_seconds,
+        read_retries=config.trino.read_retries,
+    )

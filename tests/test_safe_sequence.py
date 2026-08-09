@@ -6,6 +6,8 @@ every query on it, so the ordering *is* the feature.
 """
 
 import os
+import pathlib
+import re
 import sys
 import unittest
 
@@ -15,6 +17,9 @@ sys.path.insert(
 )
 
 from tms.ops.sequence import (  # noqa: E402
+    ALLOWED_LEVELS,
+    checklist,
+    LEVEL_OUTPUT,
     ABORTED,
     ABORTING,
     COMPLETED,
@@ -267,6 +272,95 @@ class ProgressLogTest(unittest.TestCase):
         s.begin_abort()
         self.assertEqual("warn", s.history[-1]["level"])
         self.assertIn("Restoring traffic", s.history[-1]["message"])
+
+
+class ChecklistTest(unittest.TestCase):
+    def test_the_preview_and_the_live_checklist_are_the_same_list(self):
+        """The start page shows the procedure before anyone commits to it, and
+        the live view shows progress through it. Two hand-written copies would
+        drift, and this is the one screen that must not lie about the order."""
+        s = seq()
+        live = [label for _state, label, _status in s.steps()]
+        preview = [row["label"] for row in checklist()]
+        self.assertEqual(preview, live)
+
+    def test_the_checklist_does_not_say_who_performs_the_restart(self):
+        """Configuration decides that (manual operator vs Ansible), so a
+        checklist that hard-codes either is wrong half the time."""
+        labels = " ".join(row["label"] for row in checklist()).lower()
+        for word in ("operator", "ansible", "playbook"):
+            self.assertNotIn(word, labels)
+
+    def test_a_finished_sequence_has_no_step_in_progress(self):
+        """`current` is what the UI animates. A completed restart that still
+        pulses reads as "something is happening" when nothing is."""
+        s = seq()
+        s.begin()
+        s.observe(0)
+        s.mark_restarting()
+        s.mark_restarted()
+        s.health_state = "GOOD"
+        s.complete()
+        statuses = [status for _state, _label, status in s.steps()]
+        self.assertEqual(["done"] * 6, statuses)
+
+    def test_exactly_one_step_is_current_while_it_runs(self):
+        s = seq()
+        s.begin()
+        statuses = [status for _state, _label, status in s.steps()]
+        self.assertEqual(1, statuses.count("current"), statuses)
+
+    def test_the_state_label_still_describes_the_state(self):
+        """`label` in the payload feeds the banner, which answers "what is
+        happening", not "what does this step do"."""
+        s = seq()
+        s.begin()
+        self.assertIn("Draining", s.as_dict()["label"])
+
+
+class LogLevelTest(unittest.TestCase):
+    """The code and the database must agree on what a level may be.
+
+    Same guard as the audit action catalogue, and for the same reason: a level
+    the schema rejects fails the whole save, losing the line being recorded -
+    in the middle of a restart, which is the worst possible moment to discover
+    it. The effective constraint is the last definition across all migrations,
+    because 007 replaces the one 004 wrote.
+    """
+
+    def _effective_constraint(self):
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        pattern = re.compile(
+            r"CONSTRAINT\s+restart_sequence_event_level_valid\s+CHECK\s*\((.*?)\)\s*;",
+            re.S | re.I)
+        found = None
+        for path in sorted(pathlib.Path(repo_root, "migrations").glob("*.sql")):
+            for match in pattern.finditer(path.read_text(encoding="utf-8")):
+                found = (match.group(1), path.name)
+        return found
+
+    def test_every_allowed_level_is_permitted_by_the_schema(self):
+        effective = self._effective_constraint()
+        self.assertIsNotNone(effective, "the level constraint is not defined anywhere")
+        definition, source = effective
+        for level in ALLOWED_LEVELS:
+            self.assertIn("'{}'".format(level), definition,
+                          "{} is in ALLOWED_LEVELS but the CHECK constraint in {} "
+                          "would reject it".format(level, source))
+
+    def test_an_unknown_level_is_refused_in_code(self):
+        """Refused here rather than by the database, which would fail the save
+        and take the line with it."""
+        s = seq()
+        with self.assertRaises(SequenceError):
+            s.log("something", level="debug")
+
+    def test_playbook_output_has_its_own_level(self):
+        """Verbatim text from another program is not TMS asserting something,
+        and the UI renders it as a terminal rather than as prose."""
+        s = seq()
+        s.log("TASK [restart coordinator] ***", level=LEVEL_OUTPUT)
+        self.assertEqual(LEVEL_OUTPUT, s.history[-1]["level"])
 
 
 if __name__ == "__main__":

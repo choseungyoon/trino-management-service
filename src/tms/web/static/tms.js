@@ -111,6 +111,82 @@
     schedule();
   }
 
+  /* ── Restart sequence: live progress ───────────────────────────── */
+  /* Swaps the checklist and log in place instead of reloading the page, so
+     the operator keeps their scroll position in a log that is still being
+     written to. Falls back to the ordinary page refresh above if a poll
+     fails — the whole screen still works with this file absent. */
+
+  var seq = document.getElementById("seq");
+
+  function atBottom(el) {
+    return el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+  }
+
+  function pollSequence() {
+    var node = document.getElementById("seq");
+    if (!node || node.dataset.live !== "true") return;
+
+    var console_ = document.getElementById("console");
+    /* Only follow the tail if they are already at it. Someone who scrolled up
+       to read an error is reading it; yanking them back down is worse than
+       showing nothing. */
+    var follow = !console_ || atBottom(console_);
+    var scrolled = console_ ? console_.scrollTop : 0;
+
+    fetch("/restarts/" + node.dataset.sequence + "?fragment=1",
+          { headers: { "X-Requested-With": "fetch" }, credentials: "same-origin" })
+      .then(function (response) {
+        if (!response.ok) throw new Error(String(response.status));
+        return response.text();
+      })
+      .then(function (html) {
+        var holder = document.createElement("div");
+        holder.innerHTML = html;
+        var fresh = holder.querySelector("#seq");
+        if (!fresh) throw new Error("unexpected fragment");
+
+        /* Never replace the panel a form is being typed into. */
+        var active = document.activeElement;
+        if (active && node.contains(active) &&
+            /^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName)) {
+          scheduleSequence();
+          return;
+        }
+
+        node.replaceWith(fresh);
+        var pane = document.getElementById("console");
+        if (pane) pane.scrollTop = follow ? pane.scrollHeight : scrolled;
+        scheduleSequence();
+      })
+      .catch(function () {
+        /* Leave the page as it is and try again; the full-page refresh is
+           still running underneath as a backstop. */
+        scheduleSequence();
+      });
+  }
+
+  var sequenceTimer = null;
+
+  function scheduleSequence() {
+    window.clearTimeout(sequenceTimer);
+    var node = document.getElementById("seq");
+    if (!node || node.dataset.live !== "true") return;
+    sequenceTimer = window.setTimeout(function () {
+      if (document.hidden) { scheduleSequence(); return; }
+      pollSequence();
+    }, 2000);
+  }
+
+  if (seq) {
+    var initial = document.getElementById("console");
+    if (initial) initial.scrollTop = initial.scrollHeight;
+    document.addEventListener("visibilitychange", function () {
+      if (!document.hidden) scheduleSequence();
+    });
+    scheduleSequence();
+  }
+
   /* ── Write-action guards ───────────────────────────────────────── */
 
   document.addEventListener("submit", function (event) {

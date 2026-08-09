@@ -4,29 +4,26 @@ The sequence in `sequence.py` decides *when* a restart may happen. This decides
 *how*, and it is deliberately a separate seam because the two have very
 different risk profiles and very different reasons to change.
 
-Two implementations are expected:
+Two implementations exist:
 
 * `ManualExecutor` — TMS stops and asks the operator to restart the cluster
   themselves. No new credentials, no new infrastructure, no blast radius. This
   is the default and it is a complete, safe implementation of the step.
-* An Ansible-backed executor — TMS triggers the existing playbook. The
-  platform team already runs config/catalog deployment and coordinator/worker
-  restarts this way, so the capability exists; what is left is deciding how TMS
-  reaches it.
+* `AnsibleRestartExecutor` (`ops/ansible.py`) — TMS runs the platform team's
+  existing playbook itself.
 
 ⛔ The choice between them is a security decision, not a convenience one
 --------------------------------------------------------------------
-If TMS shells out to `ansible-playbook` it needs SSH access to every Trino
-node, which turns TMS from "reads Trino and kills queries" into "can do
-anything, anywhere, as root". Every future TMS vulnerability inherits that.
+Shelling out to `ansible-playbook` needs SSH access to every Trino node, which
+turns TMS from "reads Trino and kills queries" into "can do anything, anywhere,
+as root". Every future TMS vulnerability inherits that. A job-runner API
+(AWX/AAP) would instead hold a token scoped to specific job templates - the
+same operator experience with a far smaller blast radius.
 
-If instead TMS calls a job-runner API (AWX/AAP or similar) it holds a token
-scoped to specific job templates. It can restart a coordinator and nothing
-else. Same operator experience, far smaller blast radius.
-
-That is why `AnsibleExecutor` is not written yet: picking the transport by
-guessing would make the security decision as a side effect of an
-implementation detail.
+The platform team was shown that trade-off and chose direct execution
+(2026-08-08, DECISIONS.md D-008). So the decision is recorded, `manual` remains
+the default, and `ops/ansible.py` is written to keep that SSH reach usable for
+exactly one configured playbook and nothing else.
 
 Python 3.9 compatible.
 """
@@ -41,6 +38,11 @@ PENDING_OPERATOR = "pending_operator"   # a human has to act
 RUNNING = "running"                     # the executor is working on it
 SUCCEEDED = "succeeded"
 FAILED = "failed"
+# Neither success nor failure: TMS was restarted while the work was in flight
+# and can no longer see it. Kept in the shared vocabulary because callers have
+# to handle it, and treating it as either outcome is how traffic gets restored
+# to a cluster nobody confirmed came back.
+UNKNOWN = "unknown"
 
 
 class RestartExecutor:
@@ -106,14 +108,34 @@ class ManualExecutor(RestartExecutor):
 def build_executor(config) -> RestartExecutor:
     """Pick an executor from configuration.
 
-    Only the manual one exists today. When an automated transport is chosen,
-    it is added here - the sequence, the audit trail and the UI do not change,
-    because none of them know how the restart happens.
+    The sequence, the audit trail and the UI are identical either way: none of
+    them know how the restart happens, which is what made adding the automated
+    transport a matter of writing one class rather than reworking the feature.
+
+    ⛔ Falls back to manual on any construction failure. A misconfigured
+    automated restart must not become "TMS cannot restart anything" during an
+    incident - the operator can still drive the sequence by hand, which is the
+    part that actually prevents the outage.
     """
-    mode = getattr(getattr(config, "cluster_ops", None), "restart_mode", "manual")
-    if mode != "manual":
-        log.warning(
-            "cluster_ops.restart_mode=%r is not implemented; falling back to "
-            "manual. Automating this step is a security decision - see "
-            "tms/ops/executor.py.", mode)
-    return ManualExecutor()
+    ops = getattr(config, "cluster_ops", None)
+    mode = getattr(ops, "restart_mode", "manual")
+    if mode != "ansible":
+        return ManualExecutor()
+
+    from tms.ops.ansible import AnsibleError, AnsibleRestartExecutor
+
+    settings = ops.ansible
+    try:
+        return AnsibleRestartExecutor(
+            playbook=settings.playbook,
+            cluster_inventories=settings.inventories,
+            binary=settings.binary,
+            timeout_seconds=settings.timeout_seconds,
+            extra_vars=settings.extra_vars,
+        )
+    except AnsibleError as exc:
+        log.error(
+            "cluster_ops.restart_mode is 'ansible' but the executor could not be "
+            "built (%s). Falling back to manual restarts - the sequence still "
+            "works, TMS just will not press the button.", exc)
+        return ManualExecutor()

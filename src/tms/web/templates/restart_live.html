@@ -1,0 +1,183 @@
+{% import "_icons.html" as ui %}
+{#
+  The live half of the restart screen: the checklist and the progress log.
+
+  Kept in its own template because it is polled and swapped in place while the
+  restart runs. Reloading the whole page instead would reset the operator's
+  scroll position in a log that is still being written to, every few seconds,
+  which is unusable precisely when they are reading it.
+#}
+<div class="seq" id="seq" data-sequence="{{ sequence.id }}"
+     data-live="{{ 'false' if sequence.is_terminal else 'true' }}">
+
+  <section class="panel seq__steps">
+    <div class="panel__head">
+      <span class="panel__title">{{ sequence.cluster }}</span>
+      <span class="spacer"></span>
+      {% if sequence.traffic_stopped %}
+      <span class="status status--concerning">{{ ui.icon('concerning', 12, 2) }}No traffic</span>
+      {% elif sequence.state == 'COMPLETED' %}
+      <span class="status status--good">{{ ui.icon('good', 12, 2) }}In rotation</span>
+      {% endif %}
+    </div>
+
+    <ol class="steps">
+      {% for step in sequence.steps %}
+      <li class="step step--{{ step.status }}">
+        <span class="step__mark" aria-hidden="true">
+          {% if step.status == 'done' %}{{ ui.icon('good', 13, 2.2) }}
+          {% elif step.status == 'current' %}<i class="step__pulse"></i>
+          {% elif step.status == 'aborted' %}{{ ui.icon('close', 11, 2.2) }}
+          {% endif %}
+        </span>
+        <span class="step__label">{{ step.label }}</span>
+        {% if step.status == 'current' %}<span class="sr-only">(current step)</span>{% endif %}
+      </li>
+      {% endfor %}
+    </ol>
+
+    {# What TMS currently knows about the cluster. Every gate below is decided
+       on these two numbers, so they are shown rather than left implied. #}
+    <div class="seq__facts">
+      <div class="fact">
+        <div class="fact__value num">
+          {% if sequence.running_queries is none %}—{% else %}{{ sequence.running_queries }}{% endif %}
+        </div>
+        <div class="fact__key">Running + queued</div>
+      </div>
+      <div class="fact">
+        <div class="fact__value">{{ sequence.health_state or 'UNKNOWN' }}</div>
+        <div class="fact__key">Health</div>
+      </div>
+    </div>
+
+    {% if can_manage and not sequence.is_terminal %}
+    <div class="seq__act">
+      {% if sequence.state == 'DRAINING' %}
+        <p class="seq__act-why">
+          TMS is waiting for the cluster to empty. Restarting now would kill every
+          query still running on it.
+        </p>
+        <details class="seq__force">
+          <summary>A query is stuck and will not finish</summary>
+          <form method="post" action="/restarts/{{ sequence.id }}/force-drain" class="stack">
+            <div class="field">
+              <label for="force-reason">Why override the drain? <span class="req">*</span></label>
+              <textarea id="force-reason" name="reason" rows="2" required
+                        placeholder="e.g. query 20260809_… has been stuck for 40 minutes"></textarea>
+              <div class="field__hint">
+                {{ ui.icon('concerning', 12, 2) }}
+                <span>The
+                  {% if sequence.running_queries %}{{ sequence.running_queries }}{% endif %}
+                  running quer{{ 'y' if sequence.running_queries == 1 else 'ies' }}
+                  will be killed by the restart. This is recorded separately from a
+                  normal drain.</span>
+              </div>
+            </div>
+            <button class="btn btn--danger btn--block" type="submit"
+                    data-busy="Overriding…">Skip the drain and continue</button>
+          </form>
+        </details>
+
+      {% elif sequence.state == 'DRAINED' %}
+        <p class="seq__act-why">
+          {{ sequence.executor.instructions }}
+        </p>
+        <form method="post" action="/restarts/{{ sequence.id }}/restart">
+          <button class="btn btn--danger btn--block" type="submit" data-busy="Starting…">
+            {{ sequence.executor.title }}
+          </button>
+        </form>
+
+      {% elif sequence.state == 'RESTARTING' %}
+        {% if sequence.automated %}
+        <p class="seq__act-why">
+          The playbook is running. Its output is on the right; TMS moves on by
+          itself when it finishes, and will not restore traffic until health is
+          GOOD.
+        </p>
+        {% else %}
+        <form method="post" action="/restarts/{{ sequence.id }}/restarted">
+          <button class="btn btn--primary btn--block" type="submit" data-busy="Recording…">
+            {{ sequence.cluster }} is back up
+          </button>
+        </form>
+        {% endif %}
+
+      {% elif sequence.state == 'VERIFYING' %}
+        <p class="seq__act-why">
+          {% if sequence.health_state == 'GOOD' %}
+          Health is GOOD. Putting {{ sequence.cluster }} back in rotation is the
+          last step.
+          {% else %}
+          Health is {{ sequence.health_state or 'UNKNOWN' }}. Traffic is not
+          restored until it is GOOD — this button will refuse until then.
+          {% endif %}
+        </p>
+        <form method="post" action="/restarts/{{ sequence.id }}/complete">
+          <button class="btn btn--primary btn--block" type="submit" data-busy="Restoring…">
+            Restore traffic
+          </button>
+        </form>
+
+      {% elif sequence.state == 'ABORTING' %}
+        <p class="seq__act-why">
+          TMS could not put {{ sequence.cluster }} back in rotation. It is still
+          receiving no queries — reactivate it in the Gateway, then abort again.
+        </p>
+      {% endif %}
+
+      {% if sequence.state != 'ABORTING' %}
+      <details class="seq__abort">
+        <summary>Stop and put the cluster back</summary>
+        <form method="post" action="/restarts/{{ sequence.id }}/abort" class="stack">
+          <div class="field">
+            <label for="abort-reason">Why stop? <span class="req">*</span></label>
+            <textarea id="abort-reason" name="reason" rows="2" required
+                      placeholder="e.g. the change was called off"></textarea>
+          </div>
+          <button class="btn btn--block" type="submit" data-busy="Restoring…">
+            Abort and restore traffic
+          </button>
+        </form>
+      </details>
+      {% endif %}
+    </div>
+    {% elif not can_manage and not sequence.is_terminal %}
+    <div class="seq__act">
+      <p class="seq__act-why">
+        {{ sequence.actor }} is restarting this cluster. You can watch, but only
+        an administrator can advance the sequence.
+      </p>
+    </div>
+    {% endif %}
+  </section>
+
+  <section class="panel seq__log">
+    <div class="panel__head">
+      <span class="panel__title">Progress</span>
+      <span class="panel__sub">{{ sequence.actor }}, {{ sequence.started_at | relative_time }} — {{ sequence.reason }}</span>
+      <span class="spacer"></span>
+      {% if not sequence.is_terminal %}
+      <span class="seq__live" role="status">
+        <i aria-hidden="true"></i>live
+      </span>
+      {% endif %}
+    </div>
+
+    <div class="console" id="console" tabindex="0" role="log" aria-label="Restart progress">
+      {% for line in sequence.history %}
+      <div class="console__line console__line--{{ line.level }}">
+        <span class="console__time num">{{ line.at | time_only }}</span>
+        <span class="console__text">{{ line.message }}</span>
+      </div>
+      {% endfor %}
+      {% if not sequence.is_terminal %}
+      <div class="console__line console__line--cursor" aria-hidden="true">
+        <span class="console__time num"></span>
+        <span class="console__text"><i></i></span>
+      </div>
+      {% endif %}
+    </div>
+  </section>
+</div>

@@ -118,6 +118,19 @@ def clock(value: Any) -> str:
     return moment.astimezone().strftime("%b %d %H:%M:%S")
 
 
+def time_only(value: Any) -> str:
+    """Wall-clock time with no date.
+
+    For the restart progress log, where every line happens within the same few
+    minutes: the repeated date says nothing and wraps the column onto a second
+    row, halving the density of a log the operator is reading live.
+    """
+    moment = parse_iso(value)
+    if moment is None:
+        return EM_DASH
+    return moment.astimezone().strftime("%H:%M:%S")
+
+
 def resource_group(value: Any) -> str:
     """Trino reports resource groups as a path array."""
     if isinstance(value, (list, tuple)) and value:
@@ -160,6 +173,7 @@ FILTERS = {
     "integer": integer,
     "relative_time": relative_time,
     "clock": clock,
+    "time_only": time_only,
     "resource_group": resource_group,
     "status_class": status_class,
     "truncate_sql": truncate,

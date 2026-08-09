@@ -65,7 +65,45 @@ def build_trino_clients(config: Config) -> dict:
 SESSION_COOKIE = "tms_session"
 
 
-def create_app(config: Optional[Config] = None, service: Optional[TmsService] = None):
+def build_restart_service(config: Config, service: TmsService):
+    """Assemble the safe restart sequence (FR-CO-02), or None if it cannot run.
+
+    None rather than a half-built service: without the Gateway there is no way
+    to stop traffic to a cluster, and a "restart" that skips that step is the
+    exact incident CLAUDE.md rule 5 exists to prevent. The UI then says the
+    feature is unavailable and why, instead of offering a button that would do
+    something unsafe.
+    """
+    from tms.clients.gateway import build_gateway_client
+    from tms.ops.executor import build_executor
+    from tms.ops.repository import PostgresSequenceRepository
+    from tms.ops.service import RestartService
+
+    gateway_client = build_gateway_client(config)
+    if gateway_client is None:
+        log.info(
+            "the Gateway integration is off, so cluster restarts are not "
+            "available - TMS cannot stop traffic to a cluster without it")
+        return None
+
+    try:
+        repository = PostgresSequenceRepository(config.database_url.reveal())
+    except Exception as exc:  # noqa: BLE001
+        log.error("cannot open the restart sequence store: %s", exc)
+        return None
+
+    return RestartService(
+        config=config,
+        repository=repository,
+        snapshots=service.repository,
+        gateway_client=gateway_client,
+        audit_guard=service.audit,
+        executor=build_executor(config),
+    )
+
+
+def create_app(config: Optional[Config] = None, service: Optional[TmsService] = None,
+               restarts: Optional[Any] = None):
     from fastapi import Body, Depends, FastAPI, Query, Request, Response
     from fastapi.responses import JSONResponse
 
@@ -98,6 +136,9 @@ def create_app(config: Optional[Config] = None, service: Optional[TmsService] = 
             audit_repository=audit_repository,
             trino_clients=build_trino_clients(config),
         )
+
+    if restarts is None:
+        restarts = build_restart_service(config, service)
 
     app = FastAPI(title="TMS", version="0.1.0", docs_url=None, redoc_url=None)
 
@@ -385,7 +426,8 @@ def create_app(config: Optional[Config] = None, service: Optional[TmsService] = 
     if codec is not None:
         from tms.web.routes import register as register_web
 
-        register_web(app, service, config, authenticator, codec, SESSION_COOKIE)
+        register_web(app, service, config, authenticator, codec, SESSION_COOKIE,
+                     restarts=restarts)
 
     return app
 

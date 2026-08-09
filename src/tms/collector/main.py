@@ -163,23 +163,12 @@ def build_pollers(config: Config, repository) -> List[ClusterPoller]:
 
 def build_gateway_poller(config, repository):
     """None when the Gateway is disabled - then no request is ever made."""
-    if not config.gateway.enabled or not config.gateway.base_url:
-        return None
-    from tms.clients.gateway import GatewayClient
-    from tms.clients.transport import HttpxTransport
+    from tms.clients.gateway import build_gateway_client
     from tms.collector.gateway_poller import GatewayPoller
 
-    client = GatewayClient(
-        base_url=config.gateway.base_url,
-        user=config.gateway.user,
-        password=config.gateway.password.reveal(),
-        transport=HttpxTransport(verify_tls=config.trino.verify_tls),
-        verify_tls=config.trino.verify_tls,
-        connect_timeout=config.trino.connect_timeout_seconds,
-        read_timeout=config.trino.read_timeout_seconds,
-        write_timeout=config.trino.write_timeout_seconds,
-        read_retries=config.trino.read_retries,
-    )
+    client = build_gateway_client(config)
+    if client is None:
+        return None
     return GatewayPoller(client, repository, clusters=config.clusters,
                          interval=config.gateway.poll_interval_seconds)
 

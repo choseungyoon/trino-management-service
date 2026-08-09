@@ -83,6 +83,50 @@ workload:
   enabled: false
   poll_interval_seconds: 15
 
+cluster_ops:
+  # FR-CO-02 — the safe restart sequence.
+  #
+  # The sequence itself is always available (given the Gateway): deactivate →
+  # confirm intake stopped → drain → restart → confirm health → reactivate,
+  # with no path that skips a step. This setting only decides *who performs
+  # step 4*.
+  #
+  #   manual   TMS stops and asks the operator to restart the cluster, then
+  #            waits until they say it is done AND health confirms it. No new
+  #            credentials, no new reach. This is a complete implementation of
+  #            the step, not a lesser one — the part that prevents the incident
+  #            is the gate, and the gate is identical either way.
+  #
+  #   ansible  TMS runs `ansible-playbook` itself, from the TMS host.
+  #
+  # ⛔ `ansible` is a security decision, not a convenience one. It means the
+  # TMS host holds SSH access to every Trino node, so every future TMS
+  # vulnerability inherits that reach. The platform team was shown the
+  # trade-off against a job-runner API (AWX/AAP, where TMS would hold a token
+  # scoped to one job template) and chose direct execution — DECISIONS.md D-008.
+  # Do not switch this on because Ansible happens to be installed.
+  restart_mode: manual
+
+  # How long the whole drain may take before the UI stops implying patience.
+  drain_timeout_seconds: 900
+
+  ansible:
+    # Absolute paths, checked at startup. Nothing a user types can select,
+    # alter or add a playbook: the cluster name only picks which of the
+    # inventories below is passed with --inventory, and never reaches the
+    # command line itself.
+    playbook: ""
+    binary: ansible-playbook
+    timeout_seconds: 1800
+    # One inventory per cluster, holding that cluster's coordinator and
+    # workers. Every configured cluster needs an entry or startup fails —
+    # discovering a missing one mid-restart would mean a cluster already taken
+    # out of rotation that TMS then refuses to restart.
+    inventories: {}
+    #   prod-a: /etc/tms/ansible/cluster1.ini
+    #   prod-b: /etc/tms/ansible/cluster2.ini
+    extra_vars: {}
+
 health:
   # Consecutive polls a test must hold a state before the transition is
   # recorded. Stops a single spike from generating an event.

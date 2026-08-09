@@ -275,6 +275,7 @@ svg { display: block; flex: none; }
 
 .cluster-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 16px; }
 
+.cluster { min-width: 0; }
 .cluster__top { display: flex; align-items: center; gap: 12px; padding: 16px 18px 12px; }
 .cluster__name { font-size: 16px; font-weight: 700; }
 .cluster__top .status { margin-left: auto; }
@@ -557,6 +558,113 @@ dialog::backdrop { background: rgba(4, 6, 10, .55); backdrop-filter: blur(1px); 
 .auth-card form { display: grid; gap: 12px; }
 .auth-card__note { font-size: 11px; margin-top: 14px; color: var(--tx-3); line-height: 1.5; }
 
+
+/* ── Safe restart sequence ──────────────────────────────────────────── */
+/* Checklist on the left, live log on the right — the shape an operator
+   already knows from watching a playbook run. The log is a terminal because
+   that is literally what it is showing. */
+
+.seq { display: grid; grid-template-columns: minmax(320px, 380px) 1fr; gap: 16px; align-items: start; }
+.seq__after { display: flex; gap: 8px; }
+/* The console fills the panel to its edges, so the panel has to clip it or the
+   log's own scroll area squares off the rounded corners. */
+.seq__log { overflow: hidden; }
+.seq__steps { align-self: start; }
+
+.steps { list-style: none; padding: 14px 16px; margin: 0; display: grid; gap: 2px; }
+.step { display: grid; grid-template-columns: 20px 1fr; gap: 10px; align-items: start; padding: 6px 0; font-size: 12.5px; }
+.step__mark { display: grid; place-items: center; height: 18px; }
+.step__mark svg { stroke: currentColor; }
+.step__mark > i { width: 6px; height: 6px; border-radius: 50%; background: var(--line-2); }
+.step__label { color: var(--tx-3); line-height: 1.45; }
+
+.step--done .step__mark { color: var(--good); }
+.step--done .step__label { color: var(--tx-2); }
+.step--current .step__label { color: var(--tx); font-weight: 700; }
+.step--aborted .step__mark { color: var(--unk); }
+
+/* The one step being waited on is the only moving thing on the page.
+   Matched at `.step__mark > i` specificity on purpose: the bare `.step__pulse`
+   class loses to the pending-dot rule above and renders grey, which is the one
+   colour it must not be. */
+.step__mark > i.step__pulse {
+  width: 8px; height: 8px; background: var(--ac);
+  animation: seq-pulse 1.6s ease-in-out infinite;
+}
+@keyframes seq-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--ac-ring); }
+  50%      { box-shadow: 0 0 0 5px transparent; }
+}
+
+.steps--preview .step__mark > i { background: var(--line-2); }
+
+.seq__facts { display: grid; grid-template-columns: 1fr 1fr; border-top: 1px solid var(--line); }
+.seq__facts .fact { border-right: 1px solid var(--line); }
+.seq__facts .fact:last-child { border-right: none; }
+
+.seq__act { border-top: 1px solid var(--line); padding: 14px 16px; display: grid; gap: 10px; }
+.seq__act-why { font-size: 12px; color: var(--tx-2); line-height: 1.55; }
+
+/* Destructive escapes stay folded away: they are for the case where the
+   normal path is stuck, and an always-visible "skip the drain" invites use. */
+.seq__force > summary, .seq__abort > summary {
+  font-size: 11.5px; color: var(--tx-3); cursor: pointer; padding: 4px 0;
+  list-style: none;
+}
+.seq__force > summary::-webkit-details-marker,
+.seq__abort > summary::-webkit-details-marker { display: none; }
+.seq__force > summary::before, .seq__abort > summary::before { content: "› "; }
+.seq__force[open] > summary::before, .seq__abort[open] > summary::before { content: "⌄ "; }
+.seq__force > summary:hover, .seq__abort > summary:hover { color: var(--tx); }
+.seq__force > form, .seq__abort > form { padding-top: 8px; }
+
+.seq__live { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--ac); font-weight: 600; }
+.seq__live > i { width: 6px; height: 6px; border-radius: 50%; background: var(--ac); animation: seq-pulse 1.6s ease-in-out infinite; }
+
+.seq__intro { padding: 4px 16px 16px; display: grid; gap: 14px; }
+.seq__intro .steps { padding: 10px 0; }
+.seq__intro form { max-width: 62ch; }
+
+.restart-start { display: grid; gap: 16px; }
+
+/* The console. Fixed height so the page does not grow without bound while a
+   playbook talks, and scrolled to the newest line by tms.js. */
+.console {
+  height: min(62vh, 620px); overflow: auto; padding: 12px 0;
+  background: var(--bg); border-radius: 0 0 10px 10px;
+  font-family: var(--mono); font-size: 11.5px; line-height: 1.7;
+  scrollbar-width: thin;
+}
+.console__line { display: grid; grid-template-columns: 58px 1fr; gap: 12px; padding: 0 14px; }
+.console__line:hover { background: var(--panel-2); }
+.console__time { color: var(--tx-3); font-size: 10.5px; padding-top: 1px; }
+.console__text { color: var(--tx-2); overflow-wrap: anywhere; white-space: pre-wrap; }
+
+/* TMS narrating what it did reads as prose; verbatim playbook output does not
+   get to look like an assertion TMS is making. */
+.console__line--info .console__text { color: var(--tx); font-family: var(--font); font-size: 12px; }
+.console__line--warn .console__text { color: var(--warn); font-family: var(--font); font-size: 12px; }
+.console__line--error .console__text { color: var(--bad); font-family: var(--font); font-size: 12px; }
+.console__line--output .console__text { color: var(--tx-2); }
+
+.console__line--cursor .console__text > i {
+  display: inline-block; width: 7px; height: 13px; background: var(--ac);
+  vertical-align: -2px; animation: seq-blink 1.1s step-end infinite;
+}
+@keyframes seq-blink { 50% { opacity: 0; } }
+
+/* ── Active-restart banner ──────────────────────────────────────────── */
+/* A deactivated cluster is invisible everywhere else: the others are green,
+   so the console looks healthy while traffic is being refused. */
+
+.restart-alert {
+  display: flex; align-items: center; gap: 10px; padding: 10px 14px;
+  border-radius: 9px; font-size: 12.5px;
+  background: var(--warn-bg); border: 1px solid transparent;
+}
+.restart-alert svg { stroke: var(--warn); flex: none; }
+.restart-alert a { margin-left: auto; white-space: nowrap; }
+
 /* ── Utilities ──────────────────────────────────────────────────────── */
 
 .stack { display: grid; gap: 10px; }
@@ -578,6 +686,10 @@ dialog::backdrop { background: rgba(4, 6, 10, .55); backdrop-filter: blur(1px); 
   .fact:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
   .test-row { grid-template-columns: 1fr; }
   .kv { grid-template-columns: repeat(2, 1fr); }
+  /* The log below the checklist rather than beside it — side by side, neither
+     column is wide enough to read. */
+  .seq { grid-template-columns: 1fr; }
+  .console { height: min(50vh, 420px); }
 }
 @media (prefers-reduced-motion: reduce) {
   * { animation-duration: .01ms !important; transition-duration: .01ms !important; }

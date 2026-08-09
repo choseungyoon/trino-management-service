@@ -18,11 +18,16 @@ Python 3.9 compatible.
 """
 
 import logging
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from tms.ops.sequence import TERMINAL, RestartSequence
 
 log = logging.getLogger(__name__)
+
+
+def _utcnow_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 class SequenceUnavailable(Exception):
@@ -38,16 +43,29 @@ class ActiveSequenceExists(Exception):
     """A restart of this cluster is already in flight."""
 
 
-class StoredSequence:
-    """A sequence plus what storage knows about it."""
+def _iso(value: Any) -> Optional[str]:
+    return value.isoformat() if value is not None else None
 
-    __slots__ = ("id", "sequence", "_persisted_events")
+
+class StoredSequence:
+    """A sequence plus what storage knows about it.
+
+    `started_at` and `finished_at` come from storage rather than the sequence,
+    which deliberately holds no clock of its own. The history list would give
+    an approximation, but "when was this cluster restarted" is a question asked
+    of a record - it should be the recorded time, not one inferred from it.
+    """
+
+    __slots__ = ("id", "sequence", "_persisted_events", "started_at", "finished_at")
 
     def __init__(self, sequence_id: Any, sequence: RestartSequence,
-                 persisted_events: int = 0) -> None:
+                 persisted_events: int = 0, started_at: Optional[str] = None,
+                 finished_at: Optional[str] = None) -> None:
         self.id = sequence_id
         self.sequence = sequence
         self._persisted_events = persisted_events
+        self.started_at = started_at
+        self.finished_at = finished_at
 
     def pending_events(self) -> List[Dict[str, Any]]:
         return self.sequence.history[self._persisted_events:]
@@ -58,6 +76,8 @@ class StoredSequence:
     def as_dict(self) -> Dict[str, Any]:
         payload = self.sequence.as_dict()
         payload["id"] = self.id
+        payload["started_at"] = self.started_at
+        payload["finished_at"] = self.finished_at
         return payload
 
 
@@ -92,6 +112,7 @@ class InMemorySequenceRepository:
             "running_queries": sequence.running_queries,
             "health_state": sequence.health_state,
             "actor_roles": list(roles or []),
+            "started_at": _utcnow_iso(), "finished_at": None,
         }
         self._events[sequence_id] = []
         stored = StoredSequence(sequence_id, sequence)
@@ -106,6 +127,8 @@ class InMemorySequenceRepository:
         row["state"] = stored.sequence.state
         row["running_queries"] = stored.sequence.running_queries
         row["health_state"] = stored.sequence.health_state
+        if stored.sequence.state in TERMINAL and row["finished_at"] is None:
+            row["finished_at"] = _utcnow_iso()
         self._events[stored.id].extend(stored.pending_events())
         stored.mark_persisted()
 
@@ -114,7 +137,9 @@ class InMemorySequenceRepository:
         if row is None:
             return None
         events = self._events.get(sequence_id, [])
-        return StoredSequence(sequence_id, _rebuild(row, events), len(events))
+        return StoredSequence(sequence_id, _rebuild(row, events), len(events),
+                              started_at=row["started_at"],
+                              finished_at=row["finished_at"])
 
     def active_for(self, cluster: str) -> Optional[StoredSequence]:
         for sequence_id, row in self._rows.items():
@@ -153,7 +178,8 @@ VALUES (%s, COALESCE(%s::timestamptz, now()), %s, %s, %s)
 """
 
 _SELECT_SEQUENCE = """
-SELECT id, cluster, state, reason, actor, running_queries, health_state
+SELECT id, cluster, state, reason, actor, running_queries, health_state,
+       started_at, finished_at
   FROM restart_sequence
 """
 
@@ -200,13 +226,15 @@ class PostgresSequenceRepository:
         ]
 
     def _hydrate(self, cursor, row: Tuple) -> StoredSequence:
-        sequence_id, cluster, state, reason, actor, running, health = row
+        (sequence_id, cluster, state, reason, actor, running, health,
+         started_at, finished_at) = row
         events = self._events_for(cursor, sequence_id)
         sequence = _rebuild(
             {"cluster": cluster, "state": state, "reason": reason, "actor": actor,
              "running_queries": running, "health_state": health},
             events)
-        return StoredSequence(sequence_id, sequence, len(events))
+        return StoredSequence(sequence_id, sequence, len(events),
+                              started_at=_iso(started_at), finished_at=_iso(finished_at))
 
     # ------------------------------------------------------------ operations
 

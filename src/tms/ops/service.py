@@ -28,11 +28,14 @@ from tms.api.permissions import MANAGE_HEALTH, Principal
 from tms.clients.errors import TrinoClientError
 from tms.collector.snapshot import KIND_HEALTH, KIND_QUERIES
 from tms.core.audit import ACTION_CLUSTER_RESTART, TARGET_CLUSTER, AuditGuard
-from tms.ops.executor import FAILED, PENDING_OPERATOR, SUCCEEDED
+from tms.ops.executor import FAILED, PENDING_OPERATOR, SUCCEEDED, UNKNOWN
 from tms.ops.repository import ActiveSequenceExists, SequenceUnavailable
 from tms.ops.sequence import (
     DRAINED,
     DRAINING,
+    LEVEL_ERROR,
+    LEVEL_OUTPUT,
+    LEVEL_WARN,
     RESTARTING,
     VERIFYING,
     RestartSequence,
@@ -98,6 +101,60 @@ class RestartService:
         elif health is not None:
             stored.sequence.health_state = health
 
+    def _poll_executor(self, stored) -> None:
+        """Pull an automated restart's progress into the sequence log.
+
+        Only meaningful while the restart is actually running. The executor
+        streams `ansible-playbook` output, and this is what moves those lines
+        into the record the operator is watching - so the right-hand panel is
+        the real thing happening, not a spinner.
+
+        ⛔ A failed playbook does not advance the sequence and does not abort
+        it. Traffic stays stopped and the decision stays with the operator:
+        retrying and giving up are different choices and TMS does not make
+        either one on their behalf.
+        """
+        if stored.sequence.state != RESTARTING or not self.executor.automated:
+            return
+
+        sequence_id = str(stored.id)
+        cluster = stored.sequence.cluster
+
+        lines_since = getattr(self.executor, "lines_since", None)
+        if lines_since is not None:
+            # Counted from the stored history rather than held in memory: the
+            # live view loads the sequence fresh on every poll, so an in-memory
+            # cursor would restart at zero each time and record the playbook
+            # output again, and again.
+            shown = sum(1 for event in stored.sequence.history
+                        if event.get("level") == LEVEL_OUTPUT)
+            for line in lines_since(sequence_id, shown):
+                stored.sequence.log(line, level=LEVEL_OUTPUT)
+
+        state = self.executor.status(cluster, sequence_id)
+        if state == SUCCEEDED:
+            stored.sequence.log("Playbook finished successfully.")
+            stored.sequence.mark_restarted()
+        elif state == FAILED:
+            detail = ""
+            result = getattr(self.executor, "result", None)
+            if result is not None:
+                detail = (result(sequence_id) or {}).get("error") or ""
+            stored.sequence.log(
+                "The restart playbook failed{}. {} is still receiving no "
+                "queries. Fix it and run the restart again, or abort to put "
+                "the cluster back.".format(
+                    ": " + detail if detail else "", cluster),
+                level=LEVEL_ERROR)
+        elif state == UNKNOWN:
+            # TMS was restarted while the playbook ran. Saying so beats
+            # guessing: a wrong guess here restores traffic to a cluster that
+            # may not be back.
+            stored.sequence.log(
+                "TMS lost sight of the restart of {} (it was restarted while "
+                "the playbook was running). Check the cluster yourself before "
+                "continuing.".format(cluster), level=LEVEL_WARN)
+
     def _set_gateway_active(self, cluster: str, active: bool) -> None:
         if self.gateway is None:
             raise UpstreamUnavailable(
@@ -133,11 +190,16 @@ class RestartService:
             log.exception("cannot read active restart sequences")
             return []
 
-    def get(self, principal: Principal, sequence_id: Any) -> Dict[str, Any]:
-        stored = self.repository.load(sequence_id)
-        if stored is None:
-            raise NotFound("No such restart sequence: {}".format(sequence_id))
-        self._observe(stored)
+    @staticmethod
+    def _fingerprint(stored):
+        """What the UI would notice changing. Compared to decide whether the
+        observation is worth a write - the live view polls every couple of
+        seconds and most polls see nothing new."""
+        sequence = stored.sequence
+        return (sequence.state, sequence.running_queries, sequence.health_state,
+                len(sequence.history))
+
+    def _payload(self, stored) -> Dict[str, Any]:
         payload = stored.as_dict()
         payload["steps"] = [
             {"state": state, "label": label, "status": status}
@@ -146,6 +208,13 @@ class RestartService:
         payload["executor"] = self.executor.describe(stored.sequence.cluster)
         payload["automated"] = self.executor.automated
         return payload
+
+    def get(self, principal: Principal, sequence_id: Any) -> Dict[str, Any]:
+        stored = self.repository.load(sequence_id)
+        if stored is None:
+            raise NotFound("No such restart sequence: {}".format(sequence_id))
+        self._observe(stored)
+        return self._payload(stored)
 
     def recent(self, limit: int = 20) -> List[Dict[str, Any]]:
         try:
@@ -190,15 +259,24 @@ class RestartService:
         return self.get(principal, stored.id)
 
     def refresh(self, principal: Principal, sequence_id: Any) -> Dict[str, Any]:
-        """Re-observe without changing anything. Drives the live view."""
+        """Re-observe and drive the live view.
+
+        The operator takes no action here, but TMS may still move: a finished
+        playbook advances the sequence, and its output is pulled into the log.
+        That is the whole point of an automated restart - the screen keeps up
+        with the work without anyone clicking anything.
+        """
         stored = self.repository.load(sequence_id)
         if stored is None:
             raise NotFound("No such restart sequence: {}".format(sequence_id))
-        before = len(stored.sequence.history)
+        before = self._fingerprint(stored)
         self._observe(stored)
-        if len(stored.sequence.history) != before:
+        self._poll_executor(stored)
+        if self._fingerprint(stored) != before:
+            # Only when something actually changed: this runs every couple of
+            # seconds for every operator watching, and most polls see nothing.
             self.repository.save(stored)
-        return self.get(principal, sequence_id)
+        return self._payload(stored)
 
     def force_drain(self, principal: Principal, sequence_id: Any,
                     override_reason: str) -> Dict[str, Any]:
@@ -287,7 +365,7 @@ class RestartService:
             stored.sequence.log(
                 "Could not restore traffic: {}. {} is still receiving no queries "
                 "- reactivate it in the Gateway.".format(exc, stored.sequence.cluster),
-                level="error")
+                level=LEVEL_ERROR)
             self.repository.save(stored)
             raise
 

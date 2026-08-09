@@ -43,6 +43,9 @@
       <a href="/queries" {% if page == 'queries' %}aria-current="page"{% endif %}>{{ ui.icon('queries') }}Live Queries</a>
       <a href="/clusters/{{ cluster_names[0] }}/health" {% if page == 'health' %}aria-current="page"{% endif %}>{{ ui.icon('health') }}Health</a>
       <a href="/clusters/{{ cluster_names[0] }}/workload" {% if page == 'workload' %}aria-current="page"{% endif %}>{{ ui.icon('queries') }}Workload</a>
+      {% if restarts_enabled %}
+      <a href="/clusters/{{ cluster_names[0] }}/restart" {% if page == 'restart' %}aria-current="page"{% endif %}>{{ ui.icon('clock') }}Safe Restart</a>
+      {% endif %}
       {% if gateway_enabled %}
       <a href="/gateway" {% if page == 'gateway' %}aria-current="page"{% endif %}>{{ ui.icon('trino') }}Gateway</a>
       {% endif %}
@@ -95,6 +98,22 @@
     </header>
 
     <main class="content" id="main">
+      {#
+        A cluster held out of rotation is invisible on every other screen: the
+        remaining clusters are green, so the console looks healthy while
+        traffic is being refused. This follows the operator until the sequence
+        finishes, on every page.
+      #}
+      {% for restart in active_restarts %}
+      {% if page != 'restart' %}
+      <div class="restart-alert" role="status">
+        {{ ui.icon('concerning', 15, 2) }}
+        <div><b>{{ restart.cluster }} is being restarted</b> by {{ restart.actor }}
+          — {{ restart.label }}{% if restart.traffic_stopped %}. It is receiving no queries{% endif %}.</div>
+        <a class="btn btn--sm" href="/restarts/{{ restart.id }}">Open</a>
+      </div>
+      {% endif %}
+      {% endfor %}
       {% if flash %}
       <div class="banner banner--{{ flash.level }}" role="status">
         {{ ui.icon(flash.level if flash.level in ('bad','concerning') else 'good', 15, 2) }}

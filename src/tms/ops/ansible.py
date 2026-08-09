@@ -27,6 +27,9 @@ there is no host name on the command line at all, which removes a whole class
 of targeting mistake.
 * **Timeouts.** A playbook that hangs must fail the step, not strand a
   deactivated cluster forever.
+* **Output streams.** Lines are surfaced as Ansible produces them, so the
+  operator watches the restart happen instead of staring at a blank panel for
+  several minutes and having to guess whether it is working or stuck.
 * **Never claim an unverified success.** If TMS restarts while a playbook is
   running, status reports "unknown" and points at the log. Reporting success
   it did not observe would restore traffic to a cluster that may not be back.
@@ -42,20 +45,33 @@ import os
 import re
 import subprocess
 import threading
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
-from tms.ops.executor import FAILED, RUNNING, SUCCEEDED, RestartExecutor
+from tms.ops.executor import (
+    FAILED,
+    RUNNING,
+    SUCCEEDED,
+    UNKNOWN,
+    RestartExecutor,
+)
 
 log = logging.getLogger(__name__)
-
-UNKNOWN = "unknown"
 
 # A conservative name shape. The value is also matched against configured
 # clusters, so this is belt-and-braces against anything odd reaching argv.
 SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
+# The leading `[\w-]*` matters: Ansible's own secret variables are almost never
+# bare words. `vault_password`, `ansible_ssh_pass` and `become_password` all
+# failed a `\bpassword\b` anchor, because there is no word boundary inside
+# `vault_password` - so the most likely secrets in this output were the ones
+# that got through.
+# `pass` is the one keyword pinned to the end of the word (`ansible_ssh_pass`).
+# Letting it take a suffix too would redact `passed: 3`, and hiding a line the
+# operator needs is its own kind of failure.
 _REDACT = re.compile(
-    r"(?i)\b(password|passwd|secret|token|api[_-]?key)\b(\s*[:=]\s*)(\S+)")
+    r"(?i)\b([\w-]*(?:password|passwd|secret|token|api[_-]?key)[\w-]*|[\w-]*pass)\b"
+    r"(\s*[:=]\s*)(\S+)")
 
 
 class AnsibleError(Exception):
@@ -131,20 +147,55 @@ class AnsibleRestartExecutor(RestartExecutor):
             command += ["--extra-vars", "{}={}".format(key, value)]
         return command
 
-    def _run_subprocess(self, command: List[str], timeout: float) -> Dict[str, Any]:
+    def _run_subprocess(self, command: List[str], timeout: float,
+                        on_line: Callable[[str], None]) -> Dict[str, Any]:
+        """Run the playbook, handing each line to `on_line` as it is produced.
+
+        Deliberately Popen and not `subprocess.run`: capturing output only
+        returns it once the process has exited, and a restart playbook runs for
+        minutes. An operator watching a screen that shows nothing until the
+        work is over cannot tell "connecting to the first host" from "hung",
+        which is exactly the moment they need to know.
+        """
         try:
-            completed = subprocess.run(  # noqa: S603 - list form, no shell
-                command, capture_output=True, text=True, timeout=timeout,
-                shell=False,
+            process = subprocess.Popen(  # noqa: S603 - list form, no shell
+                command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL, text=True, bufsize=1, shell=False,
             )
-        except subprocess.TimeoutExpired:
-            return {"rc": None, "timed_out": True, "output": ""}
         except OSError as exc:
-            return {"rc": None, "error": str(exc), "output": ""}
-        return {
-            "rc": completed.returncode,
-            "output": redact((completed.stdout or "") + (completed.stderr or "")),
-        }
+            return {"rc": None, "error": str(exc)}
+
+        # A watchdog rather than `run(timeout=...)`, which cannot interrupt a
+        # read loop. A playbook that hangs must fail the step, not hold a
+        # deactivated cluster out of rotation indefinitely.
+        expired = threading.Event()
+
+        def give_up() -> None:
+            expired.set()
+            try:
+                process.kill()
+            except OSError:  # pragma: no cover - already gone
+                pass
+
+        watchdog = threading.Timer(timeout, give_up)
+        watchdog.daemon = True
+        watchdog.start()
+        try:
+            for raw in process.stdout:
+                line = redact(raw.rstrip("\r\n"))
+                if line.strip():
+                    on_line(line)
+            returncode = process.wait()
+        finally:
+            watchdog.cancel()
+            try:
+                process.stdout.close()
+            except Exception:  # noqa: BLE001 - pragma: no cover
+                pass
+
+        if expired.is_set():
+            return {"rc": None, "timed_out": True}
+        return {"rc": returncode}
 
     # -------------------------------------------------------------- lifecycle
 
@@ -155,14 +206,23 @@ class AnsibleRestartExecutor(RestartExecutor):
             existing = self._runs.get(sequence_id)
             if existing and existing["state"] in (RUNNING, SUCCEEDED):
                 return existing["state"]
-            run = {"state": RUNNING, "cluster": cluster, "output": "",
+            run = {"state": RUNNING, "cluster": cluster, "lines": [],
                    "command": command, "error": None}
             self._runs[sequence_id] = run
 
-        def work():
-            result = self._runner(command, self.timeout_seconds)
+        def collect(line: str) -> None:
             with self._lock:
-                run["output"] = result.get("output", "")
+                run["lines"].append(line)
+
+        def work():
+            result = self._runner(command, self.timeout_seconds, collect)
+            with self._lock:
+                # A runner that returns whole output instead of streaming still
+                # works; its text simply arrives in one go at the end.
+                trailing = result.get("output")
+                if trailing:
+                    run["lines"].extend(
+                        line for line in redact(trailing).splitlines() if line.strip())
                 if result.get("timed_out"):
                     run["state"] = FAILED
                     run["error"] = ("the playbook did not finish within {:.0f}s"
@@ -201,7 +261,20 @@ class AnsibleRestartExecutor(RestartExecutor):
             if run is None:
                 return {"state": UNKNOWN}
             return {"state": run["state"], "error": run["error"],
-                    "output": run["output"], "command": list(run["command"])}
+                    "output": "\n".join(run["lines"]),
+                    "command": list(run["command"])}
+
+    def lines_since(self, sequence_id: str, index: int = 0) -> List[str]:
+        """Output produced after `index` lines, for incremental display.
+
+        The caller tracks how much it has already shown, so a live view can
+        poll without re-reading - or worse, re-recording - the whole log.
+        """
+        with self._lock:
+            run = self._runs.get(sequence_id)
+            if run is None:
+                return []
+            return list(run["lines"][max(0, int(index)):])
 
     def describe(self, cluster: str) -> Dict[str, Any]:
         return {

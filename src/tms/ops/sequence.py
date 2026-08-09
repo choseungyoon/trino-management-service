@@ -11,23 +11,20 @@ return until the cluster is healthy again.
 
 Why the restart itself is not performed here
 --------------------------------------------
-TMS has no mechanism to restart a coordinator. FR-CO-01 names Ansible, and no
-Ansible integration exists (`ops/` contains only the TMS systemd units). Rather
-than invent one - which would mean handing TMS credentials that can stop
-production coordinators - the sequence treats the restart as a gate the
-operator passes through by hand, and refuses to advance until it is told the
-restart happened *and* health confirms it.
+Step 4 is a seam, not an implementation (`ops/executor.py`). This module knows
+only that the cluster is being restarted and what has to be true before and
+after; whether a human does it or `ansible-playbook` does is decided by
+configuration, and neither the state machine, the audit trail nor the screen
+changes between them.
 
-That is deliberately not a lesser version of the feature. The operator gets a
-gated, audited procedure that will not let them restart a cluster still serving
-queries, which is the part that actually prevents the incident. Automating the
-restart later is a new step implementation, not a redesign: `RESTARTING` is
-already a state with an entry and an exit condition.
+That is why the manual mode is not a lesser version of the feature. The gate is
+what prevents the incident - a cluster that is empty before the restart and
+healthy before traffic returns - and the gate is identical either way.
 
 State machine
 -------------
     PENDING ─deactivate→ DRAINING ─(running==0)→ DRAINED
-    DRAINED ─operator restarts→ RESTARTING ─(health GOOD)→ VERIFYING
+    DRAINED ─restart→ RESTARTING ─(restart done + health GOOD)→ VERIFYING
     VERIFYING ─reactivate→ COMPLETED
 
     any active state ─abort→ ABORTING ─reactivate→ ABORTED
@@ -60,16 +57,62 @@ TRAFFIC_STOPPED = (DRAINING, DRAINED, RESTARTING, VERIFYING, ABORTING)
 
 STEP_ORDER = (PENDING, DRAINING, DRAINED, RESTARTING, VERIFYING, COMPLETED)
 
-STEP_LABELS = {
+# Log levels. `output` is verbatim text from whatever performed the restart -
+# rendered as a terminal rather than as prose, and never mistaken for something
+# TMS is asserting.
+#
+# ⛔ Mirrored by the CHECK constraint on restart_sequence_event.level. Adding a
+# level here without a migration makes every save fail once it is first used,
+# so `tests/test_safe_sequence.py` compares the two.
+LEVEL_INFO = "info"
+LEVEL_WARN = "warn"
+LEVEL_ERROR = "error"
+LEVEL_OUTPUT = "output"
+ALLOWED_LEVELS = (LEVEL_INFO, LEVEL_WARN, LEVEL_ERROR, LEVEL_OUTPUT)
+
+# Two vocabularies, because they answer different questions.
+#
+# STATE_LABELS answers "what is happening right now" - used in the banner that
+# follows the operator around, and in history rows.
+STATE_LABELS = {
     PENDING: "Not started",
     DRAINING: "Draining — waiting for running queries to finish",
     DRAINED: "Drained — safe to restart",
-    RESTARTING: "Restart in progress (performed by the operator)",
+    RESTARTING: "Restart in progress",
     VERIFYING: "Verifying health before restoring traffic",
     COMPLETED: "Completed — traffic restored",
     ABORTING: "Aborting — restoring traffic",
     ABORTED: "Aborted — traffic restored",
 }
+
+# CHECKLIST_LABELS answers "what does this step do" - the six lines beside the
+# ticks. Each names the action taken to *leave* that state, which is what a
+# tick against it should mean.
+#
+# Deliberately silent about who performs the restart: with an automated
+# executor TMS does it, with a manual one the operator does, and a checklist
+# that hard-codes either is wrong half the time. The action panel says who.
+CHECKLIST_LABELS = {
+    PENDING: "Stop new queries reaching it, in the Gateway",
+    DRAINING: "Wait for every running query to finish",
+    DRAINED: "Confirm the cluster is empty",
+    RESTARTING: "Restart it",
+    VERIFYING: "Verify health is GOOD",
+    COMPLETED: "Put it back in rotation",
+}
+
+# Kept as an alias: `label` in the API payload has always meant the state.
+STEP_LABELS = STATE_LABELS
+
+
+def checklist():
+    """The six steps, for showing the procedure before it starts.
+
+    Same source as the live checklist. Two hand-written copies would drift, and
+    the one place that must not lie about the order is the screen you read
+    before deciding to take a cluster out of rotation.
+    """
+    return [{"state": state, "label": CHECKLIST_LABELS[state]} for state in STEP_ORDER]
 
 
 def _now() -> datetime:
@@ -124,6 +167,10 @@ class RestartSequence:
         wants to see it happening, in the order it happens, in the words they
         would use themselves - not a status field that silently changes value.
         """
+        if level not in ALLOWED_LEVELS:
+            # Caught here rather than by the database, which would fail the
+            # whole save and lose the line that was being recorded.
+            raise SequenceError("unknown log level: {!r}".format(level))
         self.history.append({
             "at": self._clock().isoformat(),
             "state": self.state,
@@ -169,15 +216,21 @@ class RestartSequence:
 
     def observe(self, running_queries: int, health_state: Optional[str] = None) -> None:
         """Feed in what the collector currently sees."""
+        previous = self.running_queries
         self.running_queries = running_queries
         if health_state is not None:
             self.health_state = health_state
         if self.state == DRAINING and running_queries == 0:
             self._record(DRAINED, "All running queries have finished. "
                                   "{} is empty.".format(self.cluster))
-        elif self.state == DRAINING and running_queries > 0:
+        elif self.state == DRAINING and running_queries > 0 and running_queries != previous:
             # Progress, not a state change - the operator wants to watch the
             # queue drain rather than stare at an unchanging screen.
+            #
+            # Only on change: the live view re-observes every couple of seconds,
+            # and repeating "waiting for 3 queries" thirty times a minute buries
+            # the lines that mean something in a log that is also the record of
+            # what was done to production.
             self.log("Waiting for {} running quer{} to finish.".format(
                 running_queries, "y" if running_queries == 1 else "ies"))
 
@@ -261,12 +314,20 @@ class RestartSequence:
     # ---------------------------------------------------------------- view
 
     def steps(self) -> List[Tuple[str, str, str]]:
-        """(state, label, status) for rendering the sequence as a checklist."""
+        """(state, label, status) for rendering the sequence as a checklist.
+
+        `current` is what the UI animates, so exactly one step may hold it and
+        a finished sequence may hold none. COMPLETED is the last step having
+        *happened*, not a step still in progress - leaving it "current" left a
+        pulsing dot on a restart that was over.
+        """
         current = STEP_ORDER.index(self.state) if self.state in STEP_ORDER else None
         rows = []
         for index, step in enumerate(STEP_ORDER):
             if self.state in (ABORTING, ABORTED):
                 status = "aborted"
+            elif self.state == COMPLETED:
+                status = "done"
             elif current is None:
                 status = "pending"
             elif index < current:
@@ -275,7 +336,7 @@ class RestartSequence:
                 status = "current"
             else:
                 status = "pending"
-            rows.append((step, STEP_LABELS[step], status))
+            rows.append((step, CHECKLIST_LABELS[step], status))
         return rows
 
     def as_dict(self) -> Dict[str, Any]:
@@ -284,7 +345,7 @@ class RestartSequence:
             "reason": self.reason,
             "actor": self.actor,
             "state": self.state,
-            "label": STEP_LABELS.get(self.state, self.state),
+            "label": STATE_LABELS.get(self.state, self.state),
             "running_queries": self.running_queries,
             "health_state": self.health_state,
             "traffic_stopped": self.traffic_stopped,

@@ -8,6 +8,8 @@ request carries may influence what gets run or where.
 
 import os
 import sys
+import threading
+import time
 import unittest
 
 sys.path.insert(
@@ -28,16 +30,26 @@ INVENTORIES = {"prod-a": "/etc/tms/ansible/cluster1.ini",
 
 
 class FakeRunner:
-    def __init__(self, rc=0, timed_out=False, output="", error=None):
+    """Stands in for `ansible-playbook`.
+
+    `lines` are handed to `on_line` one at a time, the way the real runner
+    streams them; `output` is the older whole-blob form, kept because a runner
+    that cannot stream must still work.
+    """
+
+    def __init__(self, rc=0, timed_out=False, output="", error=None, lines=None):
         self.result = {"rc": rc, "output": output}
         if timed_out:
             self.result = {"rc": None, "timed_out": True, "output": ""}
         if error:
             self.result = {"rc": None, "error": error, "output": ""}
+        self.lines = list(lines or [])
         self.commands = []
 
-    def __call__(self, command, timeout):
+    def __call__(self, command, timeout, on_line):
         self.commands.append(list(command))
+        for line in self.lines:
+            on_line(line)
         return dict(self.result)
 
 
@@ -152,6 +164,100 @@ class LifecycleTest(unittest.TestCase):
         self.assertEqual(UNKNOWN, executor().status("prod-a", "never-started"))
 
 
+class StreamingTest(unittest.TestCase):
+    """Output has to appear while the playbook runs, not after it finishes.
+
+    A restart playbook runs for minutes. A panel that stays blank until the
+    work is over cannot tell the operator apart "connecting to the first host"
+    from "hung", which is precisely when they need to know.
+    """
+
+    def test_lines_are_available_before_the_run_finishes(self):
+        seen = []
+        gate = threading.Event()
+
+        def slow_runner(command, timeout, on_line):
+            on_line("PLAY [restart trino] ***")
+            on_line("TASK [drain worker 1] ***")
+            seen.append(True)
+            gate.wait(5)          # still running
+            on_line("PLAY RECAP ***")
+            return {"rc": 0}
+
+        ex = executor(slow_runner)
+        ex.start("prod-a", "seq-1")
+        for _ in range(500):      # wait for the runner to emit its first lines
+            if seen:
+                break
+            time.sleep(0.005)
+
+        mid_run = ex.lines_since("seq-1")
+        self.assertEqual(RUNNING, ex.status("prod-a", "seq-1"))
+        self.assertIn("TASK [drain worker 1] ***", mid_run)
+        self.assertNotIn("PLAY RECAP ***", mid_run,
+                         "the run has not got there yet")
+
+        gate.set()
+        self.assertEqual(SUCCEEDED, wait(ex, "seq-1"))
+        self.assertIn("PLAY RECAP ***", ex.lines_since("seq-1"))
+
+    def test_lines_since_returns_only_what_is_new(self):
+        ex = executor(FakeRunner(rc=0, lines=["one", "two", "three"]))
+        ex.start("prod-a", "seq-1")
+        wait(ex, "seq-1")
+        self.assertEqual(["three"], ex.lines_since("seq-1", 2))
+        self.assertEqual([], ex.lines_since("seq-1", 3))
+
+    def test_a_runner_that_cannot_stream_still_works(self):
+        ex = executor(FakeRunner(rc=0, output="PLAY RECAP\nok=5"))
+        ex.start("prod-a", "seq-1")
+        wait(ex, "seq-1")
+        self.assertEqual(["PLAY RECAP", "ok=5"], ex.lines_since("seq-1"))
+
+    def test_secrets_in_streamed_output_are_masked(self):
+        """Redaction has to happen per line now, not over one final blob."""
+        script = ("import sys\n"
+                  "print('vault_password: hunter2')\n"
+                  "print('PLAY RECAP')\n")
+        ex = AnsibleRestartExecutor(
+            playbook=__file__,                      # exists; never executed
+            cluster_inventories={"prod-a": __file__},
+            binary=sys.executable)
+        # Drive the real subprocess runner directly.
+        lines = []
+        result = ex._run_subprocess([sys.executable, "-c", script], 10, lines.append)
+        self.assertEqual(0, result["rc"])
+        self.assertNotIn("hunter2", "\n".join(lines))
+        self.assertIn("PLAY RECAP", lines)
+
+    def test_a_real_process_streams_line_by_line(self):
+        """Proves the Popen path, not just the fake, produces output early."""
+        script = ("import sys, time\n"
+                  "print('first', flush=True)\n"
+                  "time.sleep(0.4)\n"
+                  "print('second', flush=True)\n")
+        ex = AnsibleRestartExecutor(
+            playbook=__file__, cluster_inventories={"prod-a": __file__},
+            binary=sys.executable)
+        stamps = []
+        ex._run_subprocess([sys.executable, "-c", script], 10,
+                           lambda line: stamps.append((time.monotonic(), line)))
+        self.assertEqual(["first", "second"], [line for _, line in stamps])
+        self.assertGreater(stamps[1][0] - stamps[0][0], 0.2,
+                           "the second line arrived with the first - not streaming")
+
+    def test_a_hanging_process_is_killed_rather_than_waited_on(self):
+        ex = AnsibleRestartExecutor(
+            playbook=__file__, cluster_inventories={"prod-a": __file__},
+            binary=sys.executable)
+        started = time.monotonic()
+        result = ex._run_subprocess(
+            [sys.executable, "-c", "import time; time.sleep(30)"], 0.5, lambda _: None)
+        self.assertTrue(result.get("timed_out"))
+        self.assertLess(time.monotonic() - started, 10,
+                        "the watchdog did not interrupt the read loop")
+
+
 class RedactionTest(unittest.TestCase):
     def test_obvious_secrets_are_masked(self):
         masked = redact("ok\npassword: hunter2\napi_key=abcd1234\n")
@@ -159,8 +265,24 @@ class RedactionTest(unittest.TestCase):
         self.assertNotIn("abcd1234", masked)
         self.assertIn("password", masked)
 
+    def test_ansibles_own_secret_variables_are_masked(self):
+        """These are the names that actually appear, and a `\\bpassword\\b`
+        anchor missed every one of them - there is no word boundary inside
+        `vault_password`."""
+        for name in ("vault_password", "ansible_password", "ansible_ssh_pass",
+                     "become_password", "AWS_SECRET_ACCESS_KEY"):
+            masked = redact("{}: hunter2".format(name))
+            self.assertNotIn("hunter2", masked, name)
+            self.assertIn(name, masked, "the variable name stays readable")
+
     def test_ordinary_output_survives(self):
         text = "PLAY RECAP\ntrino-a-coord : ok=5 changed=1 failed=0"
+        self.assertEqual(text, redact(text))
+
+    def test_a_recap_that_merely_contains_pass_is_not_redacted(self):
+        """Over-matching hides lines the operator needs. `passed` is not a
+        secret, and a redacted PLAY RECAP is a useless one."""
+        text = "trino-a-coord : passed=12 failed=0"
         self.assertEqual(text, redact(text))
 
 

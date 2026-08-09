@@ -23,7 +23,7 @@
 </div>
 {% endif %}
 
-<section class="panel rollup-panel rollup--{{ health.rollup_state | status_class }}">
+<section class="panel rollup--{{ health.rollup_state | status_class }}">
   <div class="rollup">
     <div class="rollup__verdict">
       {{ ui.icon(health.rollup_state | status_class if health.rollup_state | status_class in ('good','concerning','bad') else 'unknown', 22, 2.2) }}

@@ -2,6 +2,7 @@
 
 import os
 import sys
+import tempfile
 import unittest
 
 sys.path.insert(
@@ -9,6 +10,7 @@ sys.path.insert(
     os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"),
 )
 
+from tms.core.config import AnsibleConfig, ClusterOpsConfig  # noqa: E402
 from tms.ops.executor import (  # noqa: E402
     PENDING_OPERATOR,
     SUCCEEDED,
@@ -42,21 +44,44 @@ class ManualExecutorTest(unittest.TestCase):
 
 
 class BuildTest(unittest.TestCase):
-    class _Ops:
-        def __init__(self, mode):
-            self.restart_mode = mode
+    """Which executor an administrator gets, and what happens when they
+    misconfigure the automated one."""
 
     class _Config:
-        def __init__(self, mode=None):
-            self.cluster_ops = BuildTest._Ops(mode) if mode else None
+        def __init__(self, cluster_ops=None):
+            self.cluster_ops = cluster_ops
+
+    @staticmethod
+    def _ops(mode, **ansible):
+        return ClusterOpsConfig(restart_mode=mode, ansible=AnsibleConfig(**ansible))
 
     def test_default_is_manual(self):
+        """Automating this hands TMS SSH access to every Trino node. It never
+        happens by default, and never as a side effect of installing Ansible."""
         self.assertIsInstance(build_executor(self._Config()), ManualExecutor)
+        self.assertIsInstance(
+            build_executor(self._Config(self._ops("manual"))), ManualExecutor)
 
-    def test_unimplemented_mode_falls_back_to_manual_rather_than_failing(self):
-        """An unknown mode must not leave the sequence with no way to restart -
-        that would strand a deactivated cluster."""
-        self.assertIsInstance(build_executor(self._Config("ansible")), ManualExecutor)
+    def test_ansible_mode_builds_the_ansible_executor(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            playbook = os.path.join(tmp, "restart.yml")
+            inventory = os.path.join(tmp, "cluster1.ini")
+            for path in (playbook, inventory):
+                with open(path, "w", encoding="utf-8") as handle:
+                    handle.write("---\n")
+            executor = build_executor(self._Config(self._ops(
+                "ansible", playbook=playbook, inventories={"prod-a": inventory})))
+        self.assertEqual("ansible", executor.name)
+        self.assertTrue(executor.automated)
+
+    def test_a_misconfigured_ansible_falls_back_to_manual(self):
+        """A missing playbook must not become "TMS cannot restart anything" in
+        the middle of an incident. The operator can still drive the sequence by
+        hand, which is the part that prevents the outage."""
+        executor = build_executor(self._Config(self._ops(
+            "ansible", playbook="/nonexistent/restart.yml",
+            inventories={"prod-a": "/nonexistent/cluster1.ini"})))
+        self.assertIsInstance(executor, ManualExecutor)
 
     def test_interface_methods_are_abstract(self):
         base = RestartExecutor()
