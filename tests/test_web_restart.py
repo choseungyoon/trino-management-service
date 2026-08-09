@@ -374,3 +374,132 @@ class RestartScreenTest(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(WEB_DEPS, "fastapi/httpx/jinja2/python-multipart not installed")
+class EveryScreenTest(unittest.IsolatedAsyncioTestCase):
+    """Render every UI route with the integrations switched ON.
+
+    Written after `/gateway` returned 500 for every request while 563 tests
+    passed. The web tests only ever built an app with Gateway, workload, fleet
+    and restarts *disabled*, so each of those screens returned early from its
+    service and never reached the code that was broken.
+
+    The route list is taken from the app itself rather than typed out here. A
+    hand-written list is how `/gateway`, `/workload` and `/fleet` came to have
+    no render test at all: someone adds a screen and does not think to add it
+    twice.
+    """
+
+    #: Values for path parameters. A route whose parameter is not here fails
+    #: loudly - that is the prompt to add it, not a reason to skip the route.
+    PARAMS = {
+        "cluster": "prod-a",
+        "query_id": "20260808_000000_00001_abcde",
+        "test_id": "H-01",
+        "sequence_id": "1",
+        "host": "w1",
+    }
+
+    #: Routes that legitimately answer with something other than 200.
+    EXPECTED = {
+        "/clusters": 303,
+        # Already signed in, so the login page redirects on. Correct.
+        "/login": 303,
+    }
+
+    #: Not screens. `/logout` in particular would end the session part-way
+    #: through the sweep and turn every later route into a redirect to /login -
+    #: which looks like the sweep passing over pages it never rendered.
+    NOT_SCREENS = ("/logout",)
+
+    def _app(self):
+        from tms.collector.snapshot import GATEWAY_SCOPE, KIND_GATEWAY, KIND_RESOURCE_GROUPS
+
+        config, service, _trino = build_service(
+            workload={"enabled": True, "poll_interval_seconds": 15})
+        now = utcnow()
+        service.repository.save(Snapshot(GATEWAY_SCOPE, KIND_GATEWAY, now, payload={
+            "backends": [{"name": "trino-prod-a-1", "cluster": "prod-a",
+                          "active": True, "routing_group": "adhoc",
+                          "proxy_to": "https://a.invalid:8443"}],
+            "groups": [{"name": "adhoc", "active": 1, "backends": ["trino-prod-a-1"]}],
+            "unmonitored_backends": [], "unrouted_clusters": [],
+            "routing_rules": [{"priority": 1, "name": "r", "condition": "true",
+                               "actions": ["adhoc"]}],
+            "live": True,
+        }))
+        service.repository.save(Snapshot("prod-a", KIND_RESOURCE_GROUPS, now, payload={
+            "tree": [{"id": "global", "name": "global", "depth": 0, "running": 1,
+                      "queued": 0, "children": []}],
+            "groups": [{"id": "global", "name": "global", "depth": 0, "running": 1,
+                        "queued": 0, "cpu_ms": 10.0, "memory_bytes": 1024}],
+            "summary": {"groups": 1, "running": 1, "queued": 0, "blocked_groups": 0,
+                        "blocked": []},
+            "complete": False,
+        }))
+        service.repository.save(Snapshot(GATEWAY_SCOPE, KIND_GATEWAY, now,
+                                         payload=service.repository.load(
+                                             GATEWAY_SCOPE, KIND_GATEWAY).payload))
+        restarts = RestartService(
+            config=config, repository=InMemorySequenceRepository(),
+            snapshots=service.repository, gateway_client=StubGateway(),
+            audit_guard=service.audit, executor=StubExecutor(automated=False))
+        # One sequence so /restarts/{id} has something to render.
+        restarts.repository.create(_sequence("prod-a", "rendering test", "syhcho"))
+
+        from tms.collector.snapshot import KIND_FLEET
+        from tms.fleet.service import FleetService
+
+        service.repository.save(Snapshot("prod-a", KIND_FLEET, now, payload={
+            "nodes": [{"host": "w1", "address": "w1", "role": "worker",
+                       "cluster": "prod-a", "reachable": True, "state": "ACTIVE",
+                       "version": "477", "environment": "prod", "uptime": "1d",
+                       "coordinator": False, "error": None}],
+            "summary": {"total": 1, "reachable": 1, "unreachable": 0,
+                        "workers": 1, "shutting_down": 0},
+            "notes": [], "node_counts": {"ActiveNodeCount": 2}, "inventory_size": 1,
+        }))
+        fleet = FleetService(
+            config=config, snapshots=service.repository, audit_guard=service.audit,
+            transport_factory=lambda: None)
+        return create_app(config=config, service=service, restarts=restarts,
+                          fleet=fleet), config
+
+    async def test_every_ui_screen_renders_with_the_integrations_on(self):
+        app, _config = self._app()
+        paths = []
+        for route in app.routes:
+            path = getattr(route, "path", "")
+            methods = getattr(route, "methods", set()) or set()
+            if "GET" not in methods or path.startswith(("/api/", "/ui/static")):
+                continue
+            if path in ("/health", "/ready", "/metrics") or path in self.NOT_SCREENS:
+                continue
+            missing = [p for p in _path_params(path) if p not in self.PARAMS]
+            self.assertEqual(
+                [], missing,
+                "route {} has path parameter(s) {} with no test value - add "
+                "them to EveryScreenTest.PARAMS so the screen is covered"
+                .format(path, missing))
+            paths.append(path)
+
+        self.assertGreater(len(paths), 8, "route discovery found almost nothing")
+
+        client = client_for(app)
+        async with client:
+            await sign_in(client)
+            for path in paths:
+                url = path
+                for name, value in self.PARAMS.items():
+                    url = url.replace("{" + name + "}", value)
+                response = await client.get(url)
+                self.assertEqual(
+                    self.EXPECTED.get(path, 200), response.status_code,
+                    "{} returned {}".format(url, response.status_code))
+
+
+def _path_params(path):
+    import re
+
+    return re.findall(r"\{([^}:]+)", path)

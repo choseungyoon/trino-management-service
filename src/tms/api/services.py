@@ -513,54 +513,7 @@ class TmsService:
         if snapshot.collection_error:
             payload["unavailable_reason"] = snapshot.collection_error
             payload["advice"] = snapshot.advice
-        self._add_queue_age(cluster, payload)
         return envelope(snapshot, payload, self._stale_threshold)
-
-    def _add_queue_age(self, cluster: str, payload: Dict[str, Any]) -> None:
-        """How long the longest-waiting query in each group has been queued.
-
-        FR-WL-03 asked for p50/p95 queue time. Trino's resource group MBeans do
-        not expose queue-time distributions at all, so DESIGN_R2 reduced the AC
-        to the current queue and the age of its oldest member - which is the
-        number an operator actually acts on. "12 queued" is a fact; "12 queued,
-        oldest waiting 14 minutes" is a decision.
-
-        Joined from the live query snapshot rather than collected separately:
-        `queued_ms` and `resource_group_id` are already on every row, so this
-        costs nothing on the coordinator. Read-side only.
-
-        ⛔ The two snapshots are written by different polls. If the query one is
-        missing or untrustworthy, every group gets None and the column renders
-        blank - a queue age carried over from an unusable read is worse than no
-        queue age, because it looks current.
-        """
-        groups = payload.get("groups") or []
-        if not groups:
-            return
-        queries_snapshot = self.repository.load(cluster, KIND_QUERIES)
-        if queries_snapshot is None or not queries_snapshot.trustworthy:
-            return
-
-        oldest: Dict[str, float] = {}
-        for query in (queries_snapshot.payload or {}).get("queries") or []:
-            if query.get("state") != "QUEUED":
-                continue
-            path = query.get("resource_group_id") or []
-            if not isinstance(path, (list, tuple)) or not path:
-                continue
-            waited = query.get("queued_ms")
-            if waited is None:
-                continue
-            # Credit every ancestor too: a parent group's queue really is the
-            # union of its children's, and the tree is read top-down.
-            for depth in range(1, len(path) + 1):
-                key = ".".join(str(part) for part in path[:depth])
-                if waited > oldest.get(key, -1):
-                    oldest[key] = waited
-
-        for group in groups:
-            group["oldest_queued_ms"] = oldest.get(group.get("id"))
-        payload["queue_age_at"] = queries_snapshot.collected_at.isoformat()
 
     def get_workload(self, principal: Principal, cluster: str) -> Dict[str, Any]:
         """Resource group tree for one cluster (FR-WORKLOAD).
