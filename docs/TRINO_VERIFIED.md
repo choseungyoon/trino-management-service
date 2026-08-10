@@ -882,7 +882,7 @@ rulesExternalConfiguration:
 
 ---
 
-### T2-7. Gateway 19 클러스터 통계 모니터 — **실측 2026-08-10. 권고 1건 정정**
+### T2-8. Gateway 19 클러스터 통계 모니터 — **실측 2026-08-10. 권고 1건 정정**
 
 Gateway 19 jar 역어셈블 + Trino 477 실측. **`gateway-config-request.md` 가 원래 요청하던 `UI_API` 는 틀렸다.**
 

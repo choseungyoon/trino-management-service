@@ -81,7 +81,7 @@ Gateway DB 가 VM1 에 co-located 된 SPOF 인 점(§5)과 겹치므로 **`null`
 
 현재 기본 라우터는 소스상 문자 그대로 `RANDOM.nextInt() % backends.size()` 입니다. **부하를 전혀 보지 않습니다** — 한 클러스터가 느려져도 절반이 그쪽으로 갑니다.
 
-> **⚠️ 2026-08-10 정정.** 이 절은 원래 `monitorType: UI_API` 를 요청했습니다. **틀렸습니다.** Gateway 19 jar 와 Trino 477 실측으로 아래와 같이 바로잡습니다. 근거는 `TRINO_VERIFIED.md` §T2-7.
+> **⚠️ 2026-08-10 정정.** 이 절은 원래 `monitorType: UI_API` 를 요청했습니다. **틀렸습니다.** Gateway 19 jar 와 Trino 477 실측으로 아래와 같이 바로잡습니다. 근거는 `TRINO_VERIFIED.md` §T2-8.
 
 ```yaml
 clusterStatsConfiguration:
