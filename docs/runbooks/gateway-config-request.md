@@ -81,21 +81,60 @@ Gateway DB 가 VM1 에 co-located 된 SPOF 인 점(§5)과 겹치므로 **`null`
 
 현재 기본 라우터는 소스상 문자 그대로 `RANDOM.nextInt() % backends.size()` 입니다. **부하를 전혀 보지 않습니다** — 한 클러스터가 느려져도 절반이 그쪽으로 갑니다.
 
+> **⚠️ 2026-08-10 정정.** 이 절은 원래 `monitorType: UI_API` 를 요청했습니다. **틀렸습니다.** Gateway 19 jar 와 Trino 477 실측으로 아래와 같이 바로잡습니다. 근거는 `TRINO_VERIFIED.md` §T2-6.
+
 ```yaml
 clusterStatsConfiguration:
-  monitorType: UI_API          # ⚠️ 기본 INFO_API 로는 통계가 안 모입니다
+  monitorType: METRICS         # UI_API 아님 (아래 §4-1 참조)
 
-backendState:                  # ⚠️ UI_API 를 쓰면 이 블록이 필수입니다.
-  username: <코디네이터 조회 계정>   #    없으면 기동 자체가 실패합니다:
-  password: <비밀번호>              #    "BackendStateConfiguration is required
-  ssl: true                        #     for monitor type: UI_API"
+backendState:                  # monitorType 이 NOOP/INFO_API 가 아니면 필수입니다
+  username: tms-svc            # ⭐ TMS 서비스 계정 재사용 가능 — 실측 확인
+  password: <비밀번호>            #    /metrics 는 MANAGEMENT_READ 면 됩니다
+  ssl: true
 
 modules:
   - io.trino.gateway.ha.module.QueryCountBasedRouterProvider
 
 monitor:
   taskDelay: 1m
+  # ⛔ Trino 477 은 노드 수 MBean 이름을 바꿨습니다. Gateway 19 의 기본값
+  # (trino_metadata_name_DiscoveryNodeManager_ActiveNodeCount)은 477 에
+  # 존재하지 않습니다. 여기에 적어야 Gateway 가 올바른 이름으로 요청합니다.
+  metricMinimumValues:
+    trino_node_name_CoordinatorNodeManager_ActiveNodeCount: 1
 ```
+
+### 4-1. 왜 UI_API 가 아니라 METRICS 인가 — 전부 실측
+
+| monitorType | Gateway 19 가 부르는 것 | Trino 477 · `tms-svc` 실측 |
+|---|---|---|
+| `INFO_API` | `GET /v1/info` | 200. **단 up/down 만. 쿼리 수가 없어 least-loaded 라우터가 무력화됩니다** |
+| `UI_API` | `GET /ui/api/stats`, `/ui/api/query` | **401.** Web UI 전용 인증(폼 로그인)이라 basic auth 가 통하지 않습니다. 로컬 Gateway 로그: `login request failed` |
+| `JMX` | `GET /v1/jmx/mbean/trino.metadata:name=DiscoveryNodeManager` | **500 `InstanceNotFoundException`.** 477 에는 이 MBean 이 없습니다 (`trino.node:name=CoordinatorNodeManager` 로 개명) |
+| `JDBC` | SQL 실행 | `ExecuteQuery` 권한 필요 — TMS 계정에 주지 않기로 한 권한입니다 |
+| **`METRICS`** | `GET /metrics?name[]=...` | **200 ✅** |
+
+METRICS 로 Gateway 가 실제로 보내는 요청과, `tms-svc` 로 받은 응답입니다.
+
+```
+GET /metrics?name[]=trino_execution_name_QueryManager_RunningQueries
+            &name[]=trino_execution_name_QueryManager_QueuedQueries
+            &name[]=trino_node_name_CoordinatorNodeManager_ActiveNodeCount
+→ 200
+  trino_execution_name_QueryManager_RunningQueries 0.0
+  trino_execution_name_QueryManager_QueuedQueries 0.0
+  trino_node_name_CoordinatorNodeManager_ActiveNodeCount 1.0
+```
+
+앞의 두 지표명은 **Gateway 19 의 기본값 그대로 477 에서 동작합니다.** 세 번째만 이름이 달라졌고, `metricMinimumValues` 에 적으면 Gateway 가 그 이름으로 요청합니다(위 URL 이 그 증거입니다).
+
+### 4-2. `backendState` 계정 — `tms-svc` 를 그대로 써도 됩니다
+
+`/metrics` 는 `MANAGEMENT_READ` 이고 TMS 는 이미 그 권한을 갖고 있습니다. 실측에서 위 URL 이 `tms-svc` 로 200 을 반환했습니다.
+
+> **다만 한 가지 알고 결정하실 것**: `tms-svc` 는 **쿼리 kill 권한(`KillQueryOwnedBy`)도 가진 계정**입니다. 재사용하면 Gateway 설정 파일이 그 비밀번호를 들게 되고, **Gateway 가 침해되면 쿼리 kill 까지 가능해집니다.**
+>
+> Gateway 가 필요로 하는 것은 읽기뿐이므로, **`ReadSystemInformation` 만 가진 별도 모니터 전용 계정**을 권합니다. 어차피 계정을 만드는 김이라 추가 비용이 거의 없습니다. 급하면 `tms-svc` 로 시작해도 동작은 합니다.
 
 ### ⛔ 이것만 하면 조용히 실패합니다 — 가장 중요한 부분
 

@@ -882,6 +882,38 @@ rulesExternalConfiguration:
 
 ---
 
+### T2-6. Gateway 19 클러스터 통계 모니터 — **실측 2026-08-10. 권고 1건 정정**
+
+Gateway 19 jar 역어셈블 + Trino 477 실측. **`gateway-config-request.md` 가 원래 요청하던 `UI_API` 는 틀렸다.**
+
+`ClusterStatsMonitorType` enum 실물(확인, jar): `NOOP` · `INFO_API` · `UI_API` · `JDBC` · `JMX` · `METRICS`.
+→ **`UI_API` 는 19 에 존재한다.** 업스트림 `main` 문서에 안 보이는 것과 별개다.
+
+| monitorType | 부르는 것 | Trino 477 · `tms-svc` |
+|---|---|---|
+| `INFO_API` | `GET /v1/info` | 200. **up/down 만.** 쿼리 수가 없어 `QueryCountBasedRouterProvider` 가 무력화된다 |
+| `UI_API` | `/ui/api/stats`, `/ui/api/query?state=QUEUED` | **401.** Web UI 폼 로그인이 필요해 basic auth 로는 안 된다. Gateway 로그: `login request failed` |
+| `JMX` | `/v1/jmx/mbean/trino.metadata:name=DiscoveryNodeManager` | **500 `InstanceNotFoundException`** — 477 에 없다 |
+| `JDBC` | SQL | `ExecuteQuery` 필요 |
+| **`METRICS`** | `GET /metrics?name[]=...` | **200** |
+
+**⛔ 477 이 노드 수 MBean 이름을 바꿨다.** Gateway 19 의 기본값은 `trino_metadata_name_DiscoveryNodeManager_ActiveNodeCount` 인데, 477 에서 이 MBean 은 `trino.node:name=CoordinatorNodeManager` 다. JMX 모니터는 이 이름이 하드코딩되어 있어 **477 에서 쓸 수 없다.** METRICS 모니터는 `monitor.metricMinimumValues` 의 키를 조회 대상 지표명으로 쓰므로 우회된다 — Gateway 가 실제로 보낸 요청으로 확인:
+
+```
+GET /metrics?name[]=trino_execution_name_QueryManager_RunningQueries
+            &name[]=trino_execution_name_QueryManager_QueuedQueries
+            &name[]=trino_node_name_CoordinatorNodeManager_ActiveNodeCount   ← 우리가 지정한 이름
+→ 200, 세 값 모두 반환
+```
+
+쿼리 수 지표 2개는 **Gateway 19 기본값 그대로 477 에서 동작한다.**
+
+**`backendState` 계정**: `ClusterStatsJmxMonitor(HttpClient, BackendStateConfiguration)` / METRICS 모니터 모두 `backendState` 의 username·password 로 `Authorization` + `X-Trino-User` 를 보낸다. `/metrics` 는 `MANAGEMENT_READ` 이므로 **`tms-svc` 로 200 을 받는다(실측).** 다만 `tms-svc` 는 kill 권한도 가지므로, 읽기 전용 모니터 계정 분리를 권한다.
+
+> **미검증 1건**: 로컬에서는 Trino 가 자체 서명 인증서라 Gateway 가 `Failed communicating with server` 로 막혀 **엔드투엔드 healthy 전환까지는 확인하지 못했다.** 구성요소(엔드포인트·지표명·권한)는 전부 실측이며, 남은 것은 Gateway 가 코디네이터 CA 를 신뢰하는지뿐이다 — 사내는 내부 CA 발급분이므로 §4 의 truststore 항목이 그대로 적용된다.
+
+---
+
 ### T3-5. 인증(authentication) vs 인가(authorization) — **확인. TMS 설계의 전제**
 
 > **2026-08-06 추가.** "TMS는 데이터를 읽지 않으니 basic auth만으로 충분하지 않은가"라는 질문에 답하기 위해 검증했다.
