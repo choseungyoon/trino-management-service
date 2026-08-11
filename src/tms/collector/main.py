@@ -82,7 +82,30 @@ class CollectorService:
             cluster_name=cluster_name,
             expected_workers=self._expected_workers(cluster_name),
             overrides=overrides,
+            gateway_backends=self._gateway_backends(),
         )
+
+    def _gateway_backends(self):
+        """Backends from the Gateway snapshot, for H-08.
+
+        ⛔ None and [] mean different things here and must not be confused.
+        None is "TMS could not read the list" and makes H-08 UNKNOWN; an empty
+        list is "the Gateway has no backends", which makes H-08 report the
+        cluster as unregistered - a BAD verdict. Returning [] when the read
+        merely failed would raise a false alarm about routing being broken.
+        """
+        if self.gateway_poller is None:
+            return None
+        from tms.collector.snapshot import GATEWAY_SCOPE, KIND_GATEWAY
+
+        try:
+            snapshot = self.repository.load(GATEWAY_SCOPE, KIND_GATEWAY)
+        except Exception:  # noqa: BLE001
+            log.exception("could not load the gateway snapshot for health")
+            return None
+        if snapshot is None or snapshot.collection_error:
+            return None
+        return (snapshot.payload or {}).get("backends")
 
     def _poll_fleet(self) -> None:
         """Contact every node, at most once per fleet interval.

@@ -410,9 +410,22 @@ def h08_gateway_registration(ctx: HealthContext) -> HealthResult:
     if ctx.gateway_backends is None:
         return _unknown("H-08", name, "Could not read Gateway backend list.")
 
+    # ⛔ Match on the joined `cluster`, not on the Gateway's own backend name.
+    # The two routinely differ - a Gateway backend called `trino-prod-a-1`
+    # fronts the TMS cluster `prod-a` - and the collector already resolves that
+    # by comparing coordinator URLs. Comparing names would report a correctly
+    # registered cluster as "not registered", which reads as routing being
+    # broken when nothing is wrong.
     entry = None
     for backend in ctx.gateway_backends:
-        if isinstance(backend, dict) and backend.get("name") == ctx.cluster_name:
+        if not isinstance(backend, dict):
+            continue
+        if backend.get("cluster") == ctx.cluster_name:
+            entry = backend
+            break
+        # Fall back to the name only when no join was recorded at all, so a
+        # payload from an older collector still works.
+        if "cluster" not in backend and backend.get("name") == ctx.cluster_name:
             entry = backend
             break
 

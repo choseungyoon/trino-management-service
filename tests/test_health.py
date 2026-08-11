@@ -343,6 +343,46 @@ class EngineTest(unittest.TestCase):
         health = HealthEngine(gateway_enabled=True).evaluate(self._healthy_context(), NOW)
         self.assertIn("H-08", [r.test_id for r in health.results])
 
+    def _gateway_health(self, backends):
+        context = self._healthy_context()
+        context.gateway_backends = backends
+        health = HealthEngine(gateway_enabled=True).evaluate(context, NOW)
+        return next(r for r in health.results if r.test_id == "H-08")
+
+    def test_gateway_backend_is_matched_by_the_joined_cluster_not_its_name(self):
+        """Gateway backend names and TMS cluster names routinely differ - a
+        backend called `trino-prod-a-1` fronts the cluster `prod-a`. Matching on
+        the name reported a correctly registered cluster as "not registered",
+        which reads as routing being broken when nothing is wrong."""
+        result = self._gateway_health([
+            {"name": "trino-prod-a-1", "cluster": self._healthy_context().cluster_name,
+             "active": True},
+        ])
+        self.assertEqual(GOOD, result.state, result.as_dict())
+
+    def test_a_deactivated_backend_is_concerning_not_bad(self):
+        """Deactivation is usually deliberate - it is step 1 of the restart
+        sequence. Calling it BAD would page someone during planned work."""
+        result = self._gateway_health([
+            {"name": "trino-prod-a-1", "cluster": self._healthy_context().cluster_name,
+             "active": False},
+        ])
+        self.assertEqual(CONCERNING, result.state)
+
+    def test_a_cluster_no_gateway_backend_points_at_is_bad(self):
+        result = self._gateway_health([
+            {"name": "trino-other-1", "cluster": "somewhere-else", "active": True},
+        ])
+        self.assertEqual(BAD, result.state)
+        self.assertIn("not registered", str(result.observed_value))
+
+    def test_an_unreadable_backend_list_is_unknown_not_bad(self):
+        """None means "TMS could not read the list"; [] means "the Gateway has
+        no backends". Collapsing the first into the second raises a false alarm
+        about routing being broken."""
+        self.assertEqual(UNKNOWN, self._gateway_health(None).state)
+        self.assertEqual(BAD, self._gateway_health([]).state)
+
     def test_stale_downgrades_every_test_to_unknown(self):
         health = HealthEngine().evaluate(self._healthy_context(), NOW, stale=True)
         self.assertTrue(all(r.state == UNKNOWN for r in health.results))

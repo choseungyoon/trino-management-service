@@ -96,3 +96,71 @@ class SingletonLockTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class RecordingHealthWriter:
+    """Captures what the collector actually hands the health engine."""
+
+    def __init__(self):
+        self.calls = []
+
+    def evaluate(self, **kwargs):
+        self.calls.append(kwargs)
+
+
+class GatewayHealthWiringTest(unittest.TestCase):
+    """H-08 needs the Gateway backend list, and the collector is the only thing
+    that can supply it.
+
+    Written after H-08 sat at UNKNOWN ("Could not read Gateway backend list")
+    on a correctly configured production cluster. The Gateway snapshot was
+    being collected fine - the restart sequence used it to find the backend -
+    but the health call never passed it, so the test could not have said
+    anything else. 570 unit tests passed throughout: every one of them tested
+    the health engine with a list handed to it directly.
+    """
+
+    def _service(self, snapshot=None, gateway_poller=object()):
+        from tms.collector.snapshot import GATEWAY_SCOPE, KIND_GATEWAY, Snapshot, utcnow
+
+        repository = InMemorySnapshotRepository()
+        if snapshot is not None:
+            repository.save(snapshot)
+        writer = RecordingHealthWriter()
+        service = CollectorService(
+            config=None, repository=repository, pollers=[],
+            health_writer=writer, gateway_poller=gateway_poller)
+        return service, writer, repository
+
+    @staticmethod
+    def _snapshot(backends, error=None):
+        from tms.collector.snapshot import GATEWAY_SCOPE, KIND_GATEWAY, Snapshot, utcnow
+
+        return Snapshot(GATEWAY_SCOPE, KIND_GATEWAY, utcnow(),
+                        payload={"backends": backends}, collection_error=error)
+
+    def test_the_backend_list_reaches_the_health_evaluation(self):
+        backends = [{"name": "trino-prod-a-1", "cluster": "prod-a", "active": True}]
+        service, writer, _repo = self._service(self._snapshot(backends))
+        service._evaluate_health("prod-a")
+        self.assertEqual(backends, writer.calls[0]["gateway_backends"])
+
+    def test_no_gateway_poller_means_none_not_an_empty_list(self):
+        """Gateway off: H-08 is removed from the catalogue entirely. Passing []
+        would instead report every cluster as unregistered."""
+        service, writer, _repo = self._service(gateway_poller=None)
+        service._evaluate_health("prod-a")
+        self.assertIsNone(writer.calls[0]["gateway_backends"])
+
+    def test_a_failed_gateway_read_is_none_not_an_empty_list(self):
+        """None -> UNKNOWN ("could not read"). [] -> BAD ("not registered").
+        A read failure must not raise a false alarm about routing."""
+        service, writer, _repo = self._service(
+            self._snapshot([], error="gateway refused the request"))
+        service._evaluate_health("prod-a")
+        self.assertIsNone(writer.calls[0]["gateway_backends"])
+
+    def test_a_missing_snapshot_is_none(self):
+        service, writer, _repo = self._service(snapshot=None)
+        service._evaluate_health("prod-a")
+        self.assertIsNone(writer.calls[0]["gateway_backends"])
