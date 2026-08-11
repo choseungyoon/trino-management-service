@@ -23,7 +23,7 @@ Python 3.9 compatible.
 import logging
 import os
 import re
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 log = logging.getLogger(__name__)
 
@@ -70,27 +70,33 @@ class Node:
         return "Node({!r}, {!r}, {!r})".format(self.host, self.role, self.cluster)
 
 
-def _role_for(section: str) -> Optional[str]:
-    name = section.strip().lower()
-    if name in _COORDINATOR_SECTIONS:
-        return ROLE_COORDINATOR
-    if name in _WORKER_SECTIONS:
-        return ROLE_WORKER
-    return None
+#: (group name, role), in the order nodes are listed.
+_ROLE_GROUPS = tuple(
+    [(name, ROLE_COORDINATOR) for name in _COORDINATOR_SECTIONS]
+    + [(name, ROLE_WORKER) for name in _WORKER_SECTIONS]
+)
 
 
 def parse_inventory(text: str, cluster: str) -> List[Node]:
     """Nodes from one inventory file's contents.
 
-    Only `[coordinator]` and `[worker]` sections (and their plurals) are read.
+    Nodes come from `[coordinator]` and `[worker]` (and their plurals), plus
+    anything those groups pull in through `[coordinator:children]` /
+    `[workers:children]`. Group names are matched case-insensitively.
+
     Anything else - `[all:vars]`, `[gateway]`, a group TMS has never heard of -
     is skipped rather than guessed at, because a node with the wrong role
     attached is worse than a node that is missing: `shutdown` treats the two
-    roles very differently.
+    roles very differently. `:children` does not weaken that: a group is only
+    read if one of the two role groups reaches it.
     """
-    nodes: List[Node] = []
-    seen = set()
-    role = None
+    # Every group's hosts, plus every `[x:children]` membership. Both are
+    # collected in one pass so that a group can be defined after the group that
+    # includes it - Ansible does not require an order and neither does this.
+    hosts: Dict[str, List[Dict[str, Any]]] = {}
+    children: Dict[str, List[str]] = {}
+    group = None
+    kind = None
 
     for raw in (text or "").splitlines():
         line = raw.split("#", 1)[0].split(";", 1)[0].strip()
@@ -99,29 +105,55 @@ def parse_inventory(text: str, cluster: str) -> List[Node]:
 
         section = _SECTION.match(line)
         if section:
-            # `[workers:vars]` is a variables block, not a host list.
-            role = None if section.group(2) else _role_for(section.group(1))
+            group = section.group(1).strip().lower()
+            kind = (section.group(2) or "hosts").lower()
+            continue
+        if group is None:
             continue
 
-        if role is None:
+        if kind == "children":
+            children.setdefault(group, []).append(line.strip().lower())
             continue
+        if kind != "hosts":
+            continue          # `[x:vars]` is a variables block, not hosts
 
         match = _HOST.match(line)
         if not match:
             continue
-        host = match.group(1)
         variables = {}
         for token in line[match.end():].split():
             if "=" in token:
                 key, _, value = token.partition("=")
                 variables[key.strip()] = value.strip()
+        hosts.setdefault(group, []).append(
+            {"host": match.group(1), "variables": variables})
 
-        key = (host, role)
-        if key in seen:
-            continue
-        seen.add(key)
-        nodes.append(Node(host=host, role=role, cluster=cluster, variables=variables))
+    def collect(name: str, seen_groups: set) -> List[Dict[str, Any]]:
+        """Hosts of a group, following `:children` the way Ansible does.
 
+        Supported because it is the standard way to alias an existing group,
+        and aliasing beats editing: a team whose inventory already says
+        `[trino_coordinator]` can add four lines rather than rename a group
+        their playbooks depend on.
+        """
+        if name in seen_groups:
+            return []          # inventories do contain accidental cycles
+        seen_groups.add(name)
+        found = list(hosts.get(name, []))
+        for child in children.get(name, []):
+            found += collect(child, seen_groups)
+        return found
+
+    nodes: List[Node] = []
+    seen = set()
+    for group_name, role in _ROLE_GROUPS:
+        for entry in collect(group_name, set()):
+            key = (entry["host"], role)
+            if key in seen:
+                continue
+            seen.add(key)
+            nodes.append(Node(host=entry["host"], role=role, cluster=cluster,
+                              variables=entry["variables"]))
     return nodes
 
 

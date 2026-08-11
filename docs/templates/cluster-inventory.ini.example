@@ -1,0 +1,57 @@
+# TMS Fleet 인벤토리 템플릿 (FR-FL-01)
+#
+# 기존에 쓰던 Ansible 인벤토리를 그대로 써도 됩니다. TMS 는 이 파일을
+# **읽기만** 하고 실행하지 않습니다. 확인해야 할 것은 딱 하나 — 아래 두
+# 섹션 이름입니다.
+#
+#   [coordinator]  또는 [coordinators]
+#   [workers]      또는 [worker]
+#
+# 대소문자는 무시합니다. 그 외 섹션([gateway], [all:vars], [x:children] 등)은
+# 전부 건너뜁니다 — 모르는 그룹의 노드에 역할을 붙이는 것보다 빠뜨리는 편이
+# 낫기 때문입니다. shutdown 은 coordinator 와 worker 를 전혀 다르게 다룹니다.
+#
+# ⭐ 바꾸기 전에 먼저 확인하세요. 5초면 끝납니다:
+#
+#   /opt/tms/venv/bin/python -c "
+#   from tms.fleet.inventory import load_inventory
+#   for n in load_inventory('/etc/tms/ansible/cluster1.ini','prod-a'):
+#       print(f'{n.role:<12} {n.host:<24} -> {n.address}')"
+#
+# 기존 파일이 그대로 나오면 아무것도 안 고쳐도 됩니다.
+#
+# 0 개로 나오면 — 그룹 이름이 다른 것입니다. 기존 그룹을 **건드리지 말고**
+# 파일 끝에 별칭만 추가하세요. Ansible 이 이미 이해하는 문법이고 TMS 도
+# 따라갑니다. 플레이북은 그대로 동작합니다.
+#
+#   [coordinator:children]
+#   <기존 코디네이터 그룹 이름>
+#
+#   [workers:children]
+#   <기존 워커 그룹 이름>
+#
+# 이 방식은 ansible_host 같은 변수도 원래 그룹 것을 그대로 씁니다 — 주소를
+# 두 군데 적어 두면 언젠가 어긋나기 때문입니다.
+
+[coordinator]
+# 호스트 이름 하나만 적어도 되고,
+trino-coord-1
+# 접속 주소가 다르면 ansible_host 로 지정합니다. TMS 는 ansible_host 를
+# 우선 씁니다 — 인벤토리 별칭은 Ansible 만 아는 이름인 경우가 많고, 그걸로
+# 접속하면 "노드가 죽은 것처럼" 보이기 때문입니다.
+# trino-coord-1 ansible_host=10.0.0.10
+
+[workers]
+trino-worker-1
+trino-worker-2
+trino-worker-3
+# trino-worker-4 ansible_host=10.0.0.14
+
+# ── 아래는 있어도 됩니다. TMS 가 무시합니다 ──────────────────────────
+#
+# [prod-a:children]
+# coordinator
+# workers
+#
+# [all:vars]
+# ansible_user=trino

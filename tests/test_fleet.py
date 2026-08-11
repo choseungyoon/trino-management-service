@@ -126,6 +126,51 @@ workers
         nodes = parse_inventory(self.SAMPLE, "prod-a")
         self.assertEqual(1, sum(1 for n in nodes if n.host == "trino-worker-1"))
 
+    def test_children_groups_alias_an_existing_group(self):
+        """The escape hatch for a team whose inventory already says
+        `[trino_coordinator]`. Renaming a group their playbooks depend on is a
+        worse ask than adding four lines Ansible already understands."""
+        nodes = {n.host: n for n in parse_inventory("""
+[trino_coordinator]
+c1 ansible_host=10.0.0.10
+
+[trino-workers]
+w1
+w2 ansible_host=10.0.0.12
+
+[coordinator:children]
+trino_coordinator
+
+[workers:children]
+trino-workers
+""", "prod-a")}
+        self.assertEqual({"c1", "w1", "w2"}, set(nodes))
+        self.assertEqual("coordinator", nodes["c1"].role)
+        self.assertEqual("worker", nodes["w2"].role)
+        # The aliased host keeps its variables - otherwise the address would
+        # silently fall back to the inventory name.
+        self.assertEqual("10.0.0.10", nodes["c1"].address)
+        self.assertEqual("10.0.0.12", nodes["w2"].address)
+
+    def test_a_group_may_be_defined_after_the_group_that_includes_it(self):
+        """Ansible does not require an order, so neither does this."""
+        nodes = parse_inventory(
+            "[workers:children]\nlate\n\n[late]\nw9\n", "prod-a")
+        self.assertEqual(["w9"], [n.host for n in nodes])
+
+    def test_a_children_cycle_does_not_hang(self):
+        """Real inventories contain accidental cycles."""
+        nodes = parse_inventory(
+            "[workers:children]\na\n\n[a:children]\nb\n\n"
+            "[b:children]\na\n\n[b]\nw1\n", "prod-a")
+        self.assertEqual(["w1"], [n.host for n in nodes])
+
+    def test_an_unrelated_group_is_still_ignored(self):
+        """`:children` support must not turn every group into a node source."""
+        nodes = parse_inventory("[gateway]\ngw-1\n\n[other:children]\ngateway\n",
+                                "prod-a")
+        self.assertEqual([], nodes)
+
     def test_a_missing_file_yields_no_nodes_rather_than_raising(self):
         """Taking the console down because one file moved removes the screen
         someone is using to find out what moved."""
