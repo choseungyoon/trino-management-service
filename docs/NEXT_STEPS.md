@@ -1,8 +1,23 @@
 # NEXT_STEPS — 사내에서 확인·작업·결정할 것 전량
 
-> **갱신 2026-08-09** · 소유자: Platform Owner
-> 주말 작업분(Workload · Gateway · 안전 재시작 · Fleet)을 기준으로, **사람이 해야만 진행되는 것**만 모았다.
+> **갱신 2026-08-12** · 소유자: Platform Owner
+> **사람이 해야만 진행되는 것**만 모았다. 이 프로젝트의 "할 일" 목록은 이 문서 하나다.
 > 배포 절차 자체는 `runbooks/upgrade-r2-r3.md`. 코드 작업 이력은 `BOLTS.md`.
+
+---
+
+## 0-0. 8/11 배포에서 이미 지나간 것
+
+체크박스는 **본인이 확인한 것만** 직접 체크한다. 아래는 그날 오간 것을 기록해 둔 것이다.
+
+| 항목 | 결과 |
+|---|---|
+| V-1 Overview / Gateway 화면 | 처음엔 `/gateway` 가 500, 헬스가 전부 UNKNOWN → **버그 2건 수정 후 재배포로 정상** (`a3239cc`, `f1a840d`) |
+| V-4 첫 안전 재시작 (`manual`) | **완주 확인.** 유입 차단 → 드레인 → Gateway 재활성화까지 정상. 다만 재시작 자체는 TMS 호스트가 아닌 기존 컨트롤 노드에서 수행 |
+| D-2 `ansible` 모드 | 시도 → `Errno 2` → **바이너리 검증 + `HOME` 처리까지 수정 완료** (`5684117`, `10473c1`). 켤지 말지는 **여전히 미결** |
+| V-2 Fleet | 인벤토리 설정 착수. **노드가 실제로 보이는지는 아직 미확인** |
+
+> **`ansible` 모드를 켜기 전에**: TMS 서버에 Ansible 설치 · `binary` 는 절대경로 · SSH 키는 `/etc/tms/ssh/`(`ProtectHome=true` 라 `/home/tms/.ssh` 는 못 읽는다) · 유닛 재배포로 `StateDirectory=tms` 반영 · `tms-config-check` 로 확인. 절차는 `runbooks/upgrade-r2-r3.md` §4-3-1.
 
 ---
 
@@ -209,10 +224,10 @@ Gateway 2대가 PostgreSQL 하나를 공유하는데 그 DB 가 VM1 에 얹혀 �
 ## 5. 권장 순서
 
 ```
-내일          V-1 배포 확인 → V-2/V-3 (Fleet·Workload 가 실제로 보이는가)
+지나감        V-1 배포 확인 · V-4 첫 안전 재시작(manual)  → §0-0
+다음          V-2/V-3 (Fleet·Workload 가 실제로 노드·그룹을 보는가)
 이번 주       W-1 실측 [피크 시간] · W-2 Gateway 계정 요청
               D-1 · D-3 결정 (둘 다 회의 없이 답할 수 있다)
-Gateway 후    V-4 첫 안전 재시작 [한가한 시간, 예비 클러스터]
 그 다음       W-3 → V-5 graceful shutdown 실증 [워커 1대]
 병행          🔴 W-5 Gateway DB 분리 — 사용자가 늘기 전에
 개발 재개     D-4 에서 지정한 슬라이스

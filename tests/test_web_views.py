@@ -28,8 +28,11 @@ from tms.web.views import (  # noqa: E402
     link_rows,
     query_chips,
     state_counts,
-    test_observed_text,
 )
+# Imported under another name on purpose: pytest collects any module-level
+# `test_*` callable, and would try to run this one as a test case - failing on a
+# missing `test` fixture. It is a view helper, not a test.
+from tms.web.views import test_observed_text as observed_text
 
 
 def health_envelope(tests=None, rollup="GOOD", stale=False, collected_at="2026-08-08T12:00:00Z"):
@@ -132,7 +135,7 @@ class StateCountsTest(unittest.TestCase):
 
 class ObservedTextTest(unittest.TestCase):
     def test_worker_observation_is_rendered_as_a_sentence(self):
-        text = str(test_observed_text({
+        text = str(observed_text({
             "id": "H-03",
             "observed_value": {"active_workers": 11, "expected_workers": 12,
                                "planned_out": 1, "unplanned_missing": 0}}))
@@ -142,7 +145,7 @@ class ObservedTextTest(unittest.TestCase):
     def test_markup_is_not_escaped(self):
         """Returned as Markup so the emphasis renders as HTML, not as text.
         This shipped broken once - '<b>0 of 0</b>' appeared literally."""
-        text = test_observed_text({
+        text = observed_text({
             "id": "H-03",
             "observed_value": {"active_workers": 0, "expected_workers": 0,
                                "planned_out": 0, "unplanned_missing": 0}})
@@ -152,11 +155,11 @@ class ObservedTextTest(unittest.TestCase):
         """A missing branch would render an empty line under the test name."""
         for test_id in ("H-01", "H-02", "H-03", "H-04", "H-05",
                         "H-06", "H-07", "H-08", "H-09"):
-            rendered = str(test_observed_text({"id": test_id, "observed_value": None}))
+            rendered = str(observed_text({"id": test_id, "observed_value": None}))
             self.assertTrue(rendered.strip(), "{} rendered nothing".format(test_id))
 
     def test_unknown_test_id_does_not_crash(self):
-        self.assertIsNotNone(test_observed_text({"id": "H-99", "observed_value": 1}))
+        self.assertIsNotNone(observed_text({"id": "H-99", "observed_value": 1}))
 
 
 class HealthViewTest(unittest.TestCase):

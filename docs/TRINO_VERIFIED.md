@@ -186,7 +186,7 @@ $ curl -s https://<node>:8443/v1/info      # 인증 헤더 전혀 없음
 | 변경이 재시작 후에도 유지되는가? | **유지되지 않는다.** MBean은 JVM 인메모리 상태만 바꾼다. 재시작 시 `log.properties` 값으로 복귀한다 |
 | 전 노드 일괄 적용이 되는가? | **되지 않는다.** 노드별로 개별 호출해야 한다 (코디네이터 1 + 워커 12 = 13회/클러스터) |
 
-**FR-LOGLEVEL에 대한 함의 (판정은 `BOLT_0_RESULT.md` §2 참조)**
+**FR-LOGLEVEL에 대한 함의 (판정은 `archive/BOLT_0_RESULT.md` §2 참조)**
 
 - 호출에는 **JMX/RMI 연결이 필요**하다 → 전 노드에 `jmx.rmiregistry.port` / `jmx.rmiserver.port` + `jvm.config`의 `-Dcom.sun.management.jmxremote.rmi.port` 설정이 있어야 한다 (§T1-7).
 - **TMS 백엔드는 Python(FastAPI)이다. Python은 JMX/RMI를 네이티브로 말하지 못한다.** 전 노드에 Jolokia 같은 JVM 에이전트를 붙이거나 JVM 헬퍼 프로세스를 두어야 한다 → **신규 인프라 의존성**.

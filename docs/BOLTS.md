@@ -11,7 +11,7 @@
 |---|---|
 | 기간 | 2026-08-04 |
 | 담당 | `trino-expert` 주도 |
-| 산출물 | `TRINO_VERIFIED.md`, `BOLT_0_RESULT.md`, `WORKLOAD_PROFILE.md`(초안) |
+| 산출물 | `TRINO_VERIFIED.md`, `archive/BOLT_0_RESULT.md`, `WORKLOAD_PROFILE.md`(초안) |
 | 결과 | T1~T3 검증 18/18 완료. Blocker B1/B2/B5 해소, B6 신규 식별 |
 
 ---
@@ -320,3 +320,34 @@ R2 만 놓고 보면 TMS 는 "클러스터가 아프다는 걸 보여주지만 �
 - **실브라우저 전 과정 통과** — Gateway 19 · Trino 477 · PostgreSQL 상대로 시작 → 드레인 → 플레이북 스트리밍 → 자동 진행 → 트래픽 복구까지 19개 항목. 라인 수 증가 `[6, 10, 13, 16, 20, 23, 26, 30, 32]` 로 **실제 스트리밍**임을 확인했고, 페이지 리로드는 0회다
 - **비밀이 살아있는 출력에서 마스킹되는 것**을 브라우저에서 확인 (`ansible_ssh_pass: ***`)
 - 중단(abort)이 실제 Gateway 백엔드를 `active=true` 로 되돌리는 것을 확인
+
+---
+
+## Bolt 5 — Fleet + 실환경 검증 (FR-FL-01/03) 🟢 **구현 완료**
+
+| 항목 | 내용 |
+|---|---|
+| **목표** | "노드가 몇 대이고 각각 살아 있나"를 화면에서 답한다. 안전 재시작을 실환경에서 완주시킨다 |
+| **산출물** | `src/tms/fleet/`, `src/tms/clients/node.py`, `migrations/008~009`, Fleet 화면, `docs/templates/cluster-inventory.ini.example` |
+| **상태** | 2026-08-11 구현 완료. `manual` 모드 사내 완주 확인, `ansible` 모드 검증 완료 |
+
+### 데이터 소스를 바꿔야 했던 이유
+
+설계는 `system.runtime.nodes` 를 1차 소스로 잡고 있었다. 실측에서 **`PERMISSION_DENIED`** 였고, 필요한 `ExecuteQuery` 는 TMS 가 의도적으로 갖지 않는 권한이다. `/v1/node` 는 **477 에 아예 없다(404)**. 남은 경로는 인벤토리(정적) + 노드별 `/v1/info`(런타임) 두 개를 합치는 것뿐이었고, 그래서 **"어느 워커가 안 붙었나"는 이름이 아니라 개수로만** 답한다 (D-1 미결).
+
+### 사내 배포에서 드러난 것 4건
+
+| # | 무엇 | 왜 로컬에서 안 잡혔나 |
+|---|---|---|
+| 1 | `/gateway` 가 500 | 웹 테스트가 **연동을 전부 끈 채** 앱을 만들고 있었다 → 연동을 켠 채 전 화면을 도는 `EveryScreenTest` 추가 |
+| 2 | H-08 이 항상 UNKNOWN | 수집기가 `gateway_backends` 를 넘기지 않았고, 테스트는 백엔드 `name` 으로 매칭하고 있었다 (실제로는 조인된 `cluster`) |
+| 3 | `manual` 모드가 멈춘 것처럼 보임 | 동작은 옳았고 **화면이 "지금 당신 차례"라고 말하지 않았다.** 버그가 아니라 문구 문제 |
+| 4 | `ansible-playbook` Errno 2 → 그 다음 exit 5 | 바이너리 검증이 없었고, `ProtectHome=true` 아래 **ansible-core 는 쓰기 가능한 HOME 없이 import 단계에서 죽는다** |
+
+> **4번이 이번에 가장 값진 발견이다.** `Errno 2` 만 고쳤으면 그 다음에 exit 5 를 만났을 것이고, 그때는 원인이 훨씬 덜 명백했을 것이다. 진짜 ansible-core 로 재현해 보기 전까지는 알 수 없었다 — 파이썬 shim 으로는 영원히 통과한다.
+
+### 검증
+
+- 단위·라우트 테스트 **586건 통과**
+- 실브라우저: Fleet 화면에서 **응답 없는 노드가 숨겨지지 않고 표시**되는 것, 코디네이터에는 shutdown 이 제공되지 않는 것, 직접 요청해도 서비스가 거부하는 것 확인
+- 진짜 `ansible-playbook`(core 2.21) 을 실제 실행기로, `HOME` 을 systemd 와 동일하게 깨뜨린 채 실행 → 13.1초 스트리밍 후 `succeeded`

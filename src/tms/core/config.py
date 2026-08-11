@@ -136,7 +136,7 @@ class WorkloadConfig:
     measured on a laptop against an idle single node - a number the measurement
     itself records as a lower bound. Turning this on before that is re-measured
     in production would add load on exactly the process whose load budget is
-    unverified. Enable it after TODO.md A-1.
+    unverified. Enable it after docs/NEXT_STEPS.md W-1.
     """
 
     enabled: bool = False

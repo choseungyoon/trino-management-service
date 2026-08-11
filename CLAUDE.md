@@ -77,31 +77,82 @@ TMS가 완전히 다운되어도 모든 쿼리는 정상 실행되어야 한다.
 
 ---
 
-## 문서 구조 (읽는 순서)
+## 문서 구조
 
-| 파일 | 내용 | 언제 읽나 |
-|---|---|---|
-| `CLAUDE.md` | 이 파일. 절대 규칙 | **항상** |
-| `docs/BACKLOG.md` | 전체 개발 항목 및 판정 (SETUP/BUILD/DELEGATE/REJECT) | 작업 범위 확인 시 |
-| `docs/REQUIREMENTS.md` | 상세 요구사항 + AC. 부록 A에 v0.2 추가분 | 구현 착수 시 |
-| `docs/TEAMS.md` | 에이전트 역할·권한·승인 게이트 | 역할 확인 시 |
-| `docs/MARKET_RESEARCH.md` | SEP/Cloudera/Datadog 벤치마킹 근거 | 설계 판단 근거 필요 시 |
-| `docs/AIOPS.md` | AI Agent 운영 자동화 (R6+) | R6 이후 |
-| `docs/BOLT_0.md` | 첫 작업 명세. 검증 전용 | 참고 (수행 완료) |
-| `docs/TRINO_VERIFIED.md` | **검증 완료 사실만 기록** (trino-expert 소유). 여기 없는 property/API는 코드에 넣지 않는다 | **기술 가정 확인 시 항상** |
-| `docs/BOLT_0_RESULT.md` | Bolt 0 판정 결과 — Blocker 판정, SETUP 우선순위, 근본원인 체크리스트, 인간 결정 대기 목록 | 착수 범위·우선순위 확인 시 |
-| `docs/WORKLOAD_PROFILE.md` | 워크로드 특성화 (**데이터 미수집**). B4·SLO 목표값을 막고 있음 | 사이징·SLO 논의 시 |
-| `docs/runbooks/deploy.md` | **사내 실환경 배포 가이드** — git pull → DB → 설정 → systemd → Trino 연결까지 전 과정 | 실환경 배포·업데이트 시 |
-| `docs/NEXT_STEPS.md` | **사내에서 확인·작업·결정할 것 전량** — 결정(D)/확인(V)/작업(W) + 권장 순서 | 다음 할 일 확인 시 |
-| `docs/runbooks/upgrade-r2-r3.md` | **주말 작업분 배포 절차** (R1 운영 중 → Workload·Gateway·재시작·Fleet) | 업데이트 배포 시 |
-| `docs/DESIGN_R2.md` | **Bolt 3 산출물** — R2 설계 및 착수 가능 여부 판정 | R2 착수 시 |
-| `docs/runbooks/gateway-config-request.md` | **Gateway 설정 요청서** — 로컬 19 실측 기반. 무인증 API 경고 포함 | 운영팀 협의 시 |
+> **전량이다.** 여기 없는 문서는 없다. 하나를 추가한다면 이 표에도 추가한다 — 목록에 없는 문서는 아무도 읽지 않고, 아무도 읽지 않는 문서는 조용히 틀려진다.
+>
+> **읽는 순서**: `CLAUDE.md` → (기술 사실이 필요하면) `TRINO_VERIFIED.md` → (다음 할 일이면) `NEXT_STEPS.md` → 나머지는 필요할 때.
+
+### 항상
+
+| 파일 | 내용 |
+|---|---|
+| `CLAUDE.md` | 이 파일. 절대 규칙 · 환경 사실 |
+| `docs/TRINO_VERIFIED.md` | **검증 완료 사실만 기록** (trino-expert 소유). **여기 없는 property/API/SPI 는 코드에 넣지 않는다** |
+| `docs/NEXT_STEPS.md` | **사람이 해야만 진행되는 것 전량** — 결정(D)/확인(V)/작업(W) + 권장 순서 |
+
+### 무엇을 만들 것인가
+
+| 파일 | 언제 읽나 |
+|---|---|
+| `docs/REQUIREMENTS.md` | 구현 착수 시. **릴리스 계획은 부록 B 가 최신** (부록 A = v0.2 추가분) |
+| `docs/BACKLOG.md` | 작업 범위 확인 시. 항목별 SETUP/BUILD/DELEGATE/REJECT 판정 |
+| `docs/DESIGN_R2.md` | R2 착수 시. 설계 + 착수 가능 여부 판정 |
+
+### 어떻게 만들었나 (구현 참조)
+
+| 파일 | 언제 읽나 |
+|---|---|
+| `docs/ARCHITECTURE.md` | 컴포넌트 경계·배포 단위·성능 예산 확인 시 |
+| `docs/API_R1.md` | 엔드포인트 추가/변경 시 |
+| `docs/HEALTH_TESTS.md` | 헬스 테스트 추가·임계값 조정 시 |
+| `docs/AUDIT_MODEL.md` | 감사 대상 액션 추가 시 |
+| `docs/PERF_MEASUREMENT.md` | NFR-PERF-03 부하 판단 시 |
+
+### 왜 그렇게 정했나
+
+| 파일 | 언제 읽나 |
+|---|---|
+| `docs/DECISIONS.md` | 결정을 되돌리거나 재확인할 때 (D-001~) |
+| `docs/BOLTS.md` | 진행 상태·이력 확인 시 |
+| `docs/TEAMS.md` | 역할·승인 게이트 확인 시 |
+| `docs/MARKET_RESEARCH.md` | 설계 판단 근거 필요 시 (SEP/Cloudera/Datadog) |
+
+### 손에 들고 하는 것 (런북)
+
+| 파일 | 언제 읽나 |
+|---|---|
+| `docs/runbooks/deploy.md` | 사내 실환경 최초 배포 (git pull → DB → 설정 → systemd → Trino 연결) |
+| `docs/runbooks/upgrade-r2-r3.md` | 운영 중 업데이트 배포 |
+| `docs/runbooks/db-setup.md` | PostgreSQL 초기 구축 |
+| `docs/runbooks/local-account-setup.md` | 로컬 계정 (AD 연동 전까지) |
+| `docs/runbooks/gateway-config-request.md` | 운영팀 협의 시. **로컬 19 실측 기반** — `monitorType` 은 `METRICS` (UI_API 는 401) |
+| `docs/templates/` | 채워 넣는 파일 (클러스터 인벤토리 등) |
+
+### 데이터 대기 / 나중
+
+| 파일 | 언제 읽나 |
+|---|---|
+| `docs/WORKLOAD_PROFILE.md` | 사이징·SLO 논의 시. **데이터 미수집** — SLO 목표값을 막고 있음 |
+| `docs/AIOPS.md` | R6 이후 |
+
+### `docs/archive/` — 현재 상태가 아니다
+
+**착수 범위·우선순위를 여기서 읽지 않는다.** 수행이 끝난 기록이며, 이후 실측에 뒤집힌 내용이 있다. 각 파일 첫머리에 무엇이 뒤집혔는지 적어 두었다. 남겨 둔 이유는 `BACKLOG.md`·`REQUIREMENTS.md` 판정의 출처이기 때문이다.
+
+| 파일 | 무엇 |
+|---|---|
+| `docs/archive/BOLT_0.md` | Bolt 0 지시서 (수행 완료) |
+| `docs/archive/BOLT_0_RESULT.md` | Bolt 0 판정 결과. **§3 의 `monitorType: UI_API` 권고는 틀렸다** |
+| `docs/archive/mockups-r1.html` | R1 UI 목업. 실물은 `src/tms/web/` |
 
 ---
 
-## 현재 상태 (2026-08-09 갱신)
+## 현재 상태 (2026-08-12 갱신)
 
-**단계**: R1 실환경 배포 완료 → R2 설계(Bolt 3) 완료 → **Bolt 4: 안전 재시작(FR-CO-02, R3 선행) 구현 완료**
+**단계**: R1 실환경 배포 완료 → R2 설계(Bolt 3) 완료 → Bolt 4 안전 재시작(FR-CO-02) 구현·실환경 검증 완료 → **Fleet(FR-FL-01/03) 구현 완료**
+
+**다음에 무엇을 할지는 `docs/NEXT_STEPS.md` 에 있다.** 그 문서가 유일한 "할 일" 목록이다 — 여기에 별도 목록을 만들지 않는다.
 
 ### 재시작 실행 방식 — 켜기 전에 읽을 것
 
@@ -128,24 +179,25 @@ TMS가 완전히 다운되어도 모든 쿼리는 정상 실행되어야 한다.
 
 **금지**: 기존 프로젝트가 이미 하는 일(EventListener 수집, 완료 쿼리 저장/검색)을 TMS에 다시 만들지 않는다.
 
-**코드 작성 가능 여부**: **Bolt 1 계획 승인 후.** 설계 확정 전 구현 금지.
+---
 
-**Bolt 0에서 뒤집힌 사전 가정 (기억할 것)**
+## ⚠️ 실측에 뒤집힌 가정 (기억할 것)
+
+**전부 "문서·통념이 맞다고 여겼다가 재 봤더니 아니었던" 것들이다.** 근거는 모두 `TRINO_VERIFIED.md`.
+
+### Bolt 0 검증에서 (2026-08-04)
+
 - **런타임 로그 레벨 변경은 OSS Trino 477에 존재한다** — REST가 아니라 JMX MBean `io.airlift.log:name=Logging`. FR-LOGLEVEL은 폐기가 아니라 축소 존치.
 - **TMS는 RMI 없이 HTTP로 JMX를 읽을 수 있다** — `GET /v1/jmx/mbean/{objectName}` (`MANAGEMENT_READ`). 관측성 전반의 수집 경로.
 - **Gateway charset 버그(B1)는 업스트림에서 이미 수정됐다** — Gateway 19. 조치는 개발이 아니라 업그레이드.
 - **`ALTER CATALOG`는 Trino 477에 없다.** 카탈로그 "변경" 기능을 만들지 않는다.
 - **Gateway 19가 리소스 그룹 관리 기능을 제거했다.** FR-WORKLOAD의 데이터 소스는 Trino다.
 
----
+### 로컬 실환경 실측에서 (2026-08-10~11)
 
-## 착수 명령
-
-R1 착수가 승인되면:
-
-```
-Using AI-DLC, Bolt 1(R1 상세 설계)를 수행한다.
-docs/TRINO_VERIFIED.md 에 없는 config property / API 경로 / SPI 시그니처는 사용하지 않는다.
-```
-
-**승인 전에는 코드를 작성하지 않는다.**
+- **`GET /v1/node` 는 477 에 없다 (404).** "보조 소스"가 아니라 소스가 아니다.
+- **`system.runtime.nodes` 는 `PERMISSION_DENIED`** — `ExecuteQuery` 가 필요하고 TMS 는 의도적으로 갖고 있지 않다. 노드 조인 여부는 개수 비교로만 판정한다 (D-1 미결).
+- **`trino.metadata:name=DiscoveryNodeManager` 는 477 에 없다** (`trino.node:name=CoordinatorNodeManager` 로 개명). → **Gateway 19 의 `monitorType: JMX` 는 477 에서 못 쓴다.**
+- **Gateway 19 `monitorType: UI_API` 는 401** — `/ui/api/stats` 는 폼 로그인 전용. **쓸 수 있는 값은 `METRICS`.** (`archive/BOLT_0_RESULT.md` §3 의 UI_API 권고는 이걸로 폐기됐다)
+- **Gateway 19 는 백엔드 활성/비활성 시 `invalidateBackendCache()` 를 호출한다** — 안전 시퀀스 1단계에서 `databaseCache.expireAfterWrite: 10m` 을 기다릴 필요가 없다.
+- **ansible-core 는 쓰기 가능한 `HOME` 없이 import 단계에서 죽는다 (exit 5).** `ProtectHome=true` 아래에서 `restart_mode: ansible` 을 쓰려면 `HOME`/`ANSIBLE_HOME` 을 `StateDirectory` 로 돌려야 한다 (구현됨).

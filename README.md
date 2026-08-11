@@ -5,18 +5,83 @@ Starburst Enterprise 사용 불가 환경에서 동등한 운영 역량(모니�
 
 ---
 
-## 지금 할 일
+## 지금 어디까지 왔나 (2026-08-12)
 
-**Bolt 0 (검증) 완료.** 결과는 `docs/TRINO_VERIFIED.md`, `docs/BOLT_0_RESULT.md`.
-현재 **Bolt 1 = R1 상세 설계** 단계다.
+**R1 사내 실환경 배포 완료.** 이후 R2 일부(워크로드 뷰, Gateway 콘솔)와 R3 선행분(안전 재시작, Fleet)까지 구현했다.
 
-```
-Using AI-DLC, Bolt 1(R1 상세 설계)를 수행한다.
-docs/TRINO_VERIFIED.md 에 없는 config property / API 경로 / SPI 시그니처는 사용하지 않는다.
-```
+| 화면 | 상태 |
+|---|---|
+| 포털 · 실행 중 쿼리(kill 포함) · 헬스 · 감사 · 로그 딥링크 | R1, 운영 중 |
+| 워크로드(리소스 그룹) 뷰 | 기본 비활성 (`workload.enabled`) — NFR-PERF-03 실측 후 켠다 |
+| Gateway 백엔드 콘솔 | 운영 중 |
+| 안전 재시작 (FR-CO-02) | 구현 완료. `manual` 실환경 검증 완료, `ansible` 모드 준비됨 |
+| Fleet 인벤토리 + graceful shutdown | 구현 완료 |
 
-**R1 범위 (2026-08-06 갱신)** — FR-PORTAL, FR-QUERY-LIVE, FR-CLUSTER-HEALTH, FR-AUDIT-ACTION, FR-LOG-DEEPLINK
-**FR-QUERY-HISTORY는 R1에서 제외** — 별도 프로젝트로 이미 구현됨. 추후 통합.
+**다음에 무엇을 하느냐**는 `docs/NEXT_STEPS.md` 하나만 보면 된다 — 결정(D)·확인(V)·작업(W) 으로 나뉘어 있다.
+**무엇을 했느냐**는 `docs/BOLTS.md`.
+
+---
+
+## 문서 지도
+
+> 문서가 여럿인 이유는 **소유자와 수명이 다르기 때문**이다. 아래 분류가 곧 "이 문서를 고쳐도 되는가"의 답이다.
+
+### 매번 읽는 것
+
+| 문서 | 무엇 |
+|---|---|
+| `CLAUDE.md` | ★ 진입점. 절대 규칙 · 환경 사실 |
+| `docs/TRINO_VERIFIED.md` | ★ **기술 사실의 유일한 출처.** 여기 없는 property/API 는 코드에 넣지 않는다 |
+| `docs/NEXT_STEPS.md` | 사람이 해야만 진행되는 것 전량 (D/V/W) |
+
+### 무엇을 만들 것인가
+
+| 문서 | 무엇 |
+|---|---|
+| `docs/REQUIREMENTS.md` | 요구사항 + AC. 부록 B = 최신 릴리스 계획 |
+| `docs/BACKLOG.md` | 항목별 판정 (SETUP / BUILD / DELEGATE / REJECT) |
+| `docs/DESIGN_R2.md` | R2 설계 및 착수 가능 여부 |
+
+### 어떻게 만들었나
+
+| 문서 | 무엇 |
+|---|---|
+| `docs/ARCHITECTURE.md` | 컴포넌트 경계, 배포 단위, 성능 예산 |
+| `docs/API_R1.md` | R1 엔드포인트 명세 |
+| `docs/HEALTH_TESTS.md` | 헬스 테스트 카탈로그 (판정식·임계·조치 조언) |
+| `docs/AUDIT_MODEL.md` | append-only 감사 데이터 모델 |
+| `docs/PERF_MEASUREMENT.md` | NFR-PERF-03 부하 실측 결과 |
+
+### 왜 그렇게 정했나
+
+| 문서 | 무엇 |
+|---|---|
+| `docs/DECISIONS.md` | 결정 기록 (D-001~). 되돌리려면 여기부터 |
+| `docs/BOLTS.md` | Bolt 이력 및 계획 |
+| `docs/MARKET_RESEARCH.md` | SEP / Cloudera / Datadog 벤치마킹 |
+| `docs/TEAMS.md` | 에이전트 역할·권한·승인 게이트 |
+
+### 손에 들고 하는 것
+
+| 문서 | 무엇 |
+|---|---|
+| `docs/runbooks/deploy.md` | ⭐ 사내 실환경 배포 전 과정 |
+| `docs/runbooks/upgrade-r2-r3.md` | 운영 중 업데이트 배포 절차 |
+| `docs/runbooks/db-setup.md` | PostgreSQL 초기 구축 |
+| `docs/runbooks/local-account-setup.md` | 로컬 계정 (AD 연동 전까지) |
+| `docs/runbooks/gateway-config-request.md` | Gateway 설정 요청서 (실측 근거 포함) |
+| `docs/templates/` | 채워 넣는 파일 (인벤토리 등) |
+
+### 아직 데이터가 없는 것 / 나중 것
+
+| 문서 | 무엇 |
+|---|---|
+| `docs/WORKLOAD_PROFILE.md` | 워크로드 특성화 — **데이터 미수집.** SLO 목표값을 막고 있다 |
+| `docs/AIOPS.md` | AI Agent 운영 자동화 (R6+) |
+
+### `docs/archive/` — 읽지 않아도 되는 것
+
+수행이 끝났고 **현재 상태를 반영하지 않는다.** 남겨 둔 이유는 판정의 출처이기 때문이며, 각 파일 첫머리에 무엇이 뒤집혔는지 적어 두었다.
 
 ---
 
@@ -26,43 +91,27 @@ docs/TRINO_VERIFIED.md 에 없는 config property / API 경로 / SPI 시그니�
 .
 ├── CLAUDE.md                  # ★ Claude Code 진입점 (절대 규칙)
 ├── README.md                  # 이 파일
-├── docs/
-│   ├── BOLT_0.md              # ★ 첫 작업: 검증 전용
-│   ├── BACKLOG.md             # 전체 항목 판정 (SETUP/BUILD/DELEGATE/REJECT)
-│   ├── REQUIREMENTS.md        # 상세 요구사항 + AC (부록 A = v0.2 추가분)
-│   ├── TEAMS.md               # 에이전트 역할·권한·승인 게이트
-│   ├── MARKET_RESEARCH.md     # SEP / Cloudera Manager / Datadog 벤치마킹
-│   ├── AIOPS.md               # AI Agent 운영 자동화 (R6+)
-│   ├── TRINO_VERIFIED.md      # (Bolt 0 산출물) 검증 완료 사실
-│   ├── WORKLOAD_PROFILE.md    # (Bolt 0 산출물) 워크로드 특성화
-│   ├── BOLTS.md               # (진행 중) Bolt 이력
-│   ├── DECISIONS.md           # (진행 중) 의사결정 기록
-│   ├── REVIEW_LOG.md          # (진행 중) 리뷰 이력
-│   └── runbooks/              # 운영 런북
-│       ├── deploy.md          # ⭐ 사내 실환경 배포 (git pull → DB → 기동 → Trino 연결)
-│       ├── db-setup.md        # PostgreSQL 초기 구축
-│       └── local-account-setup.md  # 로컬 계정 (AD 연동 전까지 임시)
-├── src/
-│   ├── tms/
-│   │   ├── api/               # FastAPI 라우트
-│   │   ├── clients/           # Trino / Gateway / OPA 클라이언트
-│   │   ├── core/              # 인증·인가·감사 미들웨어
-│   │   ├── ingest/            # 이벤트 수집
-│   │   └── web/               # UI
-│   ├── event-listener/        # Trino EventListener 플러그인 (Java)
-│   └── routing-service/       # External Routing Service (R4)
-├── ops/
-│   ├── ansible/               # 설정 배포 / 증설
-│   ├── systemd/               # 유닛 파일
-│   ├── packer/                # 골든 이미지
-│   ├── prometheus/
-│   ├── alertmanager/
-│   └── grafana/
+├── PRODUCT.md                 # 제품 정의 (UI 언어·사용자·포지셔닝)
+├── docs/                      # 위 "문서 지도" 참조
+├── src/tms/
+│   ├── api/                   # FastAPI 라우트 + 서비스 계층
+│   ├── clients/               # Trino / Gateway / 노드 클라이언트
+│   ├── core/                  # 설정·인증·인가·감사 미들웨어
+│   ├── collector/             # 폴링 루프 → PostgreSQL 스냅샷 (단일 인스턴스)
+│   ├── health/                # 헬스 테스트 판정 엔진
+│   ├── fleet/                 # 인벤토리 파싱, 노드 상태
+│   ├── ops/                   # 안전 재시작 시퀀스 + 실행기(manual/ansible)
+│   └── web/                   # 서버 렌더 UI (Jinja2)
+├── migrations/                # SQL 마이그레이션 (순차 적용)
+├── ops/systemd/               # tms-api.service, tms-collector.service
+├── scripts/                   # 연결 검증, 부하 실측, 비밀번호 해시
 ├── config/
 │   ├── config.yaml            # 일반 설정
 │   └── config.secret.yaml     # ★ gitignore 대상
-└── tests/
+└── tests/                     # 단위 + integration + browser
 ```
+
+**아직 없는 것** (설계상 의도된 부재): `src/event-listener/` — 별도 히스토리 프로젝트 소관(D-001). `src/routing-service/` — R4.
 
 ---
 
@@ -101,26 +150,6 @@ docs/TRINO_VERIFIED.md 에 없는 config property / API 경로 / SPI 시그니�
 | R3 | 안전하게 조작할 수 있다 | Fleet, 설정변경/재시작, drift 추적 |
 | R4 | 세밀하게 제어할 수 있다 | 카탈로그, OPA 가시성, 로그레벨, 라우팅 서비스 |
 | R5 | 클러스터를 찍어낼 수 있다 | 프로비저닝, Blue/Green 업그레이드 |
-| R6+ | 스스로 운영한다 | AIOps (`AIOPS.md`) |
+| R6+ | 스스로 운영한다 | AIOps (`docs/AIOPS.md`) |
 
----
-
-## Blocker 현황 (2026-08-06)
-
-| # | 내용 | 상태 |
-|---|---|---|
-| ~~B1~~ | Gateway charset 이슈 | **해소** — 업스트림 수정됨(Gateway 19). 조치 = 업그레이드 |
-| ~~B2~~ | `catalog.management` 동작 | **해소** — `dynamic` 동작 확인. `ALTER CATALOG`는 477에 부재 |
-| ~~B4~~ | 히스토리 저장소 선정 | **R1 범위 밖으로 이월** — 별도 프로젝트가 이미 담당 |
-| ~~B5~~ | 런타임 로그레벨 API | **해소** — OSS 477에 존재(JMX MBean). REST 아님 → FR-LOGLEVEL 축소 존치 |
-| **B6** | **운영 Gateway 버전·설정 확인** | **미해소** — 플랫폼팀 확인 필요 |
-
-상세는 `docs/BOLT_0_RESULT.md` §2.
-
----
-
-## 즉시 착수 가능한 SETUP 항목
-
-개발을 기다릴 필요가 없다. `BOLT_0.md` Task 6 참조.
-
-우선순위: **S1** (`QueryCountBasedRouterProvider` 활성화 — 클러스터 성능 편차 즉시 완화), **S5** (PostgreSQL 분리 — 현존 SPOF 제거)
+> R2/R3 는 순서대로 끝나지 않았다. 실제로 무엇이 서 있는지는 맨 위 표를, 무엇이 남았는지는 `docs/NEXT_STEPS.md` D-4 를 본다.

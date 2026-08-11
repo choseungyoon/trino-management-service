@@ -28,7 +28,7 @@
 | 1-1c | 사용량 기반 라우팅 | **BUILD** | 라우팅 규칙은 stateless. 외부 상태 필요 → External Routing Service 개발 |
 | 1-1d | 쿼리 복잡도 기반 라우팅 | **BUILD (제한적)** | 실행 전에는 플랜·통계가 없어 진짜 복잡도 산정 불가. SQL 텍스트 휴리스틱(조인 수, 서브쿼리 깊이, 대상 테이블 크기)만 가능. **"추정"임을 명시하고 오분류 허용 설계** |
 | 1-2 | Cluster Pool 내 가중치 분배 (6:4) | **REJECT → SETUP으로 대체** | **목적 확인 완료**: "동일 스펙인데 느린 클러스터에 트래픽을 덜 주기"(Impala 경험). 카나리 아님. → `QueryCountBasedRouterProvider`가 running/queued 수 기반 least-loaded 라우팅으로 **동일 목적을 자동·동적으로 달성**. 정적 가중치는 열등(고정 상수화, 미신 상수, 성능 역전 시 오작동). **개발 불필요** |
-| 1-2b | (참고) 기본 라우터 확인 | **SETUP (S1)** | **Bolt 0 확인**: 기본 `StochasticRoutingManager`의 선택 로직은 소스상 문자 그대로 `RANDOM.nextInt() % backends.size()` 다. `modules`에 `io.trino.gateway.ha.module.QueryCountBasedRouterProvider` 추가 + **`clusterStatsConfiguration.monitorType`을 `UI_API` 또는 `JDBC`로 변경(기본 `INFO_API`로는 통계가 안 모여 라우터가 무력)** + `backendState` 설정. 통계 주기는 `monitor.taskDelay`(기본 1분) |
+| 1-2b | (참고) 기본 라우터 확인 | **SETUP (S1)** | **Bolt 0 확인**: 기본 `StochasticRoutingManager`의 선택 로직은 소스상 문자 그대로 `RANDOM.nextInt() % backends.size()` 다. `modules`에 `io.trino.gateway.ha.module.QueryCountBasedRouterProvider` 추가 + **`clusterStatsConfiguration.monitorType`을 `METRICS`로 변경(기본 `INFO_API`로는 통계가 안 모여 라우터가 무력)** + `backendState` 설정. 통계 주기는 `monitor.taskDelay`(기본 1분).<br>⚠️ **`UI_API` 를 쓰지 않는다** — 2026-08-10 로컬 Gateway 19 실측에서 **401**(폼 로그인 전용이라 basic auth 불가). 실측표는 `runbooks/gateway-config-request.md` §4-1 |
 | 1-2c | (조건부 잔여) 성능 기반 동적 가중치 | **DEFER** | least-loaded로 미해결 시에만. **구현 위치는 External Routing Service가 아니라 커스텀 Router Provider** — `StochasticRoutingManager` 상속, `provideAdhocBackend`/`provideBackendForRoutingGroup` 오버라이드, `updateBackEndStats`로 ClusterStats 수신. 외부 서비스 방식은 단독 클러스터 그룹이 필요해 그룹 내 자동 failover와 least-loaded를 상실 |
 | 1-3 | 비정상 클러스터 라우팅 제외 | **SETUP** | Gateway가 비정상 클러스터를 자동 제외. 개발 불필요 |
 
@@ -182,13 +182,13 @@
 
 ## 3. 선결 조건 (Blocker) — **Bolt 0 판정 반영 (2026-08-04)**
 
-> 판정 근거는 `BOLT_0_RESULT.md` §2, 기술적 사실은 `TRINO_VERIFIED.md` 참조.
+> 판정 근거는 `archive/BOLT_0_RESULT.md` §2, 기술적 사실은 `TRINO_VERIFIED.md` 참조.
 
 | # | 조건 | 상태 | 판정 |
 |---|---|---|---|
 | ~~B1~~ | ~~Gateway charset 이슈 해소~~ | **해소 (조건부)** | 업스트림 수정 완료 — [#1032](https://github.com/trinodb/trino-gateway/issues/1032) → [PR #1054](https://github.com/trinodb/trino-gateway/pull/1054) → **Gateway 19 (2026-05-11)** 포함. **조치 = Gateway ≥19 업그레이드.** 업그레이드 시 파괴적 변경 2건 동반: ① 리소스 그룹 관리 기능 전면 제거([#656](https://github.com/trinodb/trino-gateway/issues/656)) ② `addXForwardedHeaders` → `forwardedHeadersEnabled` 개명([#1005](https://github.com/trinodb/trino-gateway/pull/1005)) |
 | ~~B2~~ | ~~`catalog.management` 동작 검증~~ | **해소** | `dynamic` 동작 확인. **단 `ALTER CATALOG` 부재** → 5-1b를 REJECT로 재판정. `catalog.store` 선택은 `[NEEDS-HUMAN-DECISION]` 유지(R4) |
-| ~~B3~~ | ~~가중치 라우팅 목적 확인~~ | **해소** | 목적=느린 클러스터 트래픽 감소 → least-loaded 라우터로 대체. **근본 원인 규명이 우선 과제** — 절차는 `BOLT_0_RESULT.md` §5에 체크리스트로 확정 |
+| ~~B3~~ | ~~가중치 라우팅 목적 확인~~ | **해소** | 목적=느린 클러스터 트래픽 감소 → least-loaded 라우터로 대체. **근본 원인 규명이 우선 과제** — 절차는 `archive/BOLT_0_RESULT.md` §5에 체크리스트로 확정 |
 | ~~B4~~ | ~~히스토리 저장소 선정~~ | **R1 범위에서 이월** | **2026-08-06**: FR-QUERY-HISTORY가 별도 프로젝트로 이미 구현되어 R1에서 제외됨 → **B4는 더 이상 R1을 막지 않는다.** 두 프로젝트 통합 작업 시점으로 이월. `WORKLOAD_PROFILE.md`는 FR-SLO(R2) 목표값 근거로 여전히 필요 |
 | ~~B5~~ | ~~런타임 로그레벨 API 지원 여부~~ | **해소 — 사전 가정이 틀림** | **OSS Trino 477에 존재한다.** REST가 아니라 JMX MBean `io.airlift.log:name=Logging`(`setLevel`/`setRootLevel`). `Server.java`가 `LogJmxModule`을 무조건 등록. **→ FR-LOGLEVEL 폐기하지 않고 축소 존치.** 구현 방식은 D-2로 인간 결정 대기 |
 | **B6** | **운영 Gateway 버전 및 설정 확인** | **해소 (2026-08-07)** | 버전 **19** · 백엔드는 **Gateway UI 등록** · **라우팅 그룹 미사용** · `databaseCache` 활성 **`expireAfterWrite: 10m`** · `proxyTo` = `externalUrl` = 코디네이터 실주소 · API 읽기 전용 계정 발급 가능. **후속 2건**: ① `expireAfterWrite: 10m` 은 DB 장애 10분 초과 시 라우팅 실패 — Gateway DB가 SPOF인 점을 감안해 상향/`null` 검토 ② `GET /gateway/backend/all` 실동작 미확인 — 계정 발급 후 검증 |
