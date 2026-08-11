@@ -334,8 +334,12 @@ class RestartService:
         with self._audited(principal, stored.sequence.cluster, stored.sequence.reason):
             state = self.executor.start(stored.sequence.cluster, str(stored.id))
         if state == PENDING_OPERATOR:
+            # Says what to do, not just what TMS is doing. "Waiting for the
+            # operator" was read as TMS working on something.
             stored.sequence.log(
-                "Waiting for the operator to restart {}.".format(stored.sequence.cluster))
+                "TMS is NOT restarting {0} — restart it yourself now, then "
+                "confirm below. Nothing is happening automatically.".format(
+                    stored.sequence.cluster), level=LEVEL_WARN)
         else:
             stored.sequence.log("Running the restart playbook.")
         self.repository.save(stored)

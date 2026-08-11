@@ -41,7 +41,12 @@ from tms.collector.snapshot import (  # noqa: E402
     Snapshot,
     utcnow,
 )
-from tms.ops.executor import PENDING_OPERATOR, RUNNING, SUCCEEDED  # noqa: E402
+from tms.ops.executor import (  # noqa: E402
+    PENDING_OPERATOR,
+    RUNNING,
+    SUCCEEDED,
+    ManualExecutor,
+)
 from tms.ops.repository import InMemorySequenceRepository  # noqa: E402
 from tms.ops.sequence import RestartSequence as _sequence  # noqa: E402
 from tms.ops.service import RestartService  # noqa: E402
@@ -86,7 +91,8 @@ class StubExecutor:
     def describe(self, cluster):
         return {"automated": self.automated,
                 "title": "Restart {} now".format(cluster),
-                "instructions": "Do the thing."}
+                "instructions": "Do the thing.",
+                "waiting": "Waiting on the stub."}
 
 
 def build_app(roles=("admin",), gateway=None, executor=None, running=1,
@@ -288,6 +294,44 @@ class RestartScreenTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(stored.started_at)
         self.assertIsNotNone(stored.finished_at, "a finished sequence records when")
         self.assertIn("<th>Started</th>", body)
+
+    async def test_manual_mode_tells_the_operator_it_is_their_turn(self):
+        """The first real run stalled here: the screen showed only a "it is back
+        up" button, so the operator pressed "restart", saw nothing happen, and
+        reasonably concluded TMS had failed. At RESTARTING with a manual
+        executor the screen must say TMS is not restarting anything."""
+        async with self.session(running=0, executor=ManualExecutor()) \
+                as (client, restarts, _g):
+            await self._start(client)
+            sequence_id = restarts.active()[0]["id"]
+
+            drained = (await client.get("/restarts/{}".format(sequence_id))).text
+            self.assertIn("I will restart prod-a myself", drained,
+                          "the button must not read as an instruction to TMS")
+            self.assertNotIn("Restart prod-a now", drained)
+
+            await client.post("/restarts/{}/restart".format(sequence_id))
+            restarting = (await client.get("/restarts/{}".format(sequence_id))).text
+
+        self.assertIn("Your turn", restarting)
+        self.assertIn("TMS is not restarting anything", restarting)
+        self.assertIn("Restart prod-a now, using your normal procedure", restarting)
+        # And the log line says the same thing rather than "waiting for the
+        # operator", which was read as TMS working.
+        self.assertIn("TMS is NOT restarting prod-a", restarting)
+
+    async def test_an_automated_restart_does_not_ask_the_operator_to_act(self):
+        """The mirror image: with Ansible driving it, telling the operator to
+        go and restart the cluster by hand would cause a double restart."""
+        async with self.session(running=0, executor=StubExecutor(automated=True)) \
+                as (client, restarts, _g):
+            await self._start(client)
+            sequence_id = restarts.active()[0]["id"]
+            await client.post("/restarts/{}/restart".format(sequence_id))
+            body = (await client.get("/restarts/{}".format(sequence_id))).text
+
+        self.assertNotIn("Your turn", body)
+        self.assertIn("The playbook is running", body)
 
     async def test_the_fragment_carries_the_log_without_the_page_chrome(self):
         async with self.session() as (client, restarts, _g):

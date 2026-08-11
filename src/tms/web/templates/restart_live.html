@@ -84,9 +84,17 @@
           GOOD.
         </p>
         {% else %}
+        {# The operator has to act here. Saying nothing and offering only a
+           "it is back up" button is how the first real run was read as TMS
+           having silently failed. #}
+        <div class="banner banner--concerning" role="status">
+          {{ ui.icon('concerning', 15, 2) }}
+          <div><b>Your turn — TMS is not restarting anything.</b>
+            {{ sequence.executor.waiting }}</div>
+        </div>
         <form method="post" action="/restarts/{{ sequence.id }}/restarted">
           <button class="btn btn--primary btn--block" type="submit" data-busy="Recording…">
-            {{ sequence.cluster }} is back up
+            Done — {{ sequence.cluster }} is back up
           </button>
         </form>
         {% endif %}

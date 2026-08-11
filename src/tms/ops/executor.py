@@ -81,9 +81,9 @@ class ManualExecutor(RestartExecutor):
 
     def __init__(self, instructions: Optional[str] = None) -> None:
         self.instructions = instructions or (
-            "Restart the coordinator using your normal procedure, then mark it "
-            "restarted below. TMS has already stopped new queries and confirmed "
-            "the cluster is empty; it will verify health before restoring traffic."
+            "TMS has stopped new queries and confirmed the cluster is empty. It "
+            "will not restart anything — you do that with your normal procedure, "
+            "then tell TMS below. It verifies health before restoring traffic."
         )
         self._reported: Dict[str, bool] = {}
 
@@ -100,8 +100,21 @@ class ManualExecutor(RestartExecutor):
     def describe(self, cluster: str) -> Dict[str, Any]:
         return {
             "automated": False,
-            "title": "Restart {} now".format(cluster),
+            # ⛔ First person on purpose. "Restart X now" reads as an
+            # instruction to TMS, and an operator who presses it then watches
+            # nothing happen concludes the feature is broken - which is exactly
+            # what happened the first time this was used.
+            "title": "I will restart {} myself".format(cluster),
             "instructions": self.instructions,
+            # Shown once the sequence is in RESTARTING. The old screen showed
+            # only a "it is back up" button here, so at the one moment the
+            # operator had to act, nothing on screen said so.
+            "waiting": (
+                "Restart {} now, using your normal procedure. TMS is holding "
+                "the gate and waiting for you - it is not doing anything in the "
+                "background. Traffic stays stopped until you confirm below and "
+                "health comes back GOOD.".format(cluster)
+            ),
         }
 
 
