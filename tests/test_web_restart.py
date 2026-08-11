@@ -333,6 +333,51 @@ class RestartScreenTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("Your turn", body)
         self.assertIn("The playbook is running", body)
 
+    async def test_a_failed_playbook_stops_claiming_it_is_running(self):
+        """Reported from the first ansible run: the log showed
+        `[Errno 2] No such file or directory: 'ansible-playbook'` while the
+        panel beside it still said "The playbook is running", so the operator
+        had no reason to think anything needed doing."""
+        from tms.ops.executor import FAILED
+
+        executor = StubExecutor(automated=True, state=FAILED)
+        async with self.session(running=0, executor=executor) as (client, restarts, _g):
+            await self._start(client)
+            sequence_id = restarts.active()[0]["id"]
+            await client.post("/restarts/{}/restart".format(sequence_id))
+            body = (await client.get("/restarts/{}".format(sequence_id))).text
+
+        self.assertNotIn("The playbook is running", body)
+        self.assertIn("The restart failed", body)
+        self.assertIn("nothing was restarted", body)
+        # And the advice names a control that exists. Re-running the restart is
+        # refused from RESTARTING, so it must not be suggested.
+        self.assertIn("Put it back in rotation", body)
+
+    async def test_the_failure_advice_does_not_send_them_to_a_missing_button(self):
+        """`restart` is refused from RESTARTING. The log line used to say "run
+        the restart again", which is a control that is not on the screen."""
+        from tms.ops.executor import FAILED
+
+        async with self.session(running=0,
+                                executor=StubExecutor(automated=True, state=FAILED)) \
+                as (client, restarts, _g):
+            await self._start(client)
+            sequence_id = restarts.active()[0]["id"]
+            await client.post("/restarts/{}/restart".format(sequence_id))
+            # The failure is noticed on the next observation, which is what the
+            # live view does every couple of seconds.
+            await client.get("/restarts/{}".format(sequence_id))
+            # Confirm the retry really is refused, so the wording matters.
+            again = await client.post("/restarts/{}/restart".format(sequence_id))
+            history = restarts.repository.load(sequence_id).sequence.history
+
+        self.assertEqual(303, again.status_code)
+        failure = [h["message"] for h in history if h["level"] == "error"]
+        self.assertTrue(failure)
+        self.assertNotIn("run the restart again", " ".join(failure))
+        self.assertIn("Abort to put it back", " ".join(failure))
+
     async def test_the_fragment_carries_the_log_without_the_page_chrome(self):
         async with self.session() as (client, restarts, _g):
             await self._start(client)

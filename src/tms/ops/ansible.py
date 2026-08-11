@@ -43,6 +43,7 @@ Python 3.9 compatible.
 import logging
 import os
 import re
+import shutil
 import subprocess
 import threading
 from typing import Any, Callable, Dict, List, Optional
@@ -118,6 +119,21 @@ class AnsibleRestartExecutor(RestartExecutor):
             if runner is None and not os.path.isfile(path):
                 raise AnsibleError(
                     "inventory not found for {!r}: {}".format(cluster, path))
+        # ⛔ Checked here, not at run time. Discovering that ansible-playbook
+        # is not on this host's PATH *during* a restart means finding out with
+        # the cluster already drained and out of rotation. At construction it
+        # is just a config error, and build_executor falls back to manual.
+        #
+        # systemd gives a minimal PATH, so an Ansible installed into a venv or
+        # a user-local bin is invisible to the service even when it works fine
+        # in the operator's shell. Give the absolute path in that case.
+        if runner is None and shutil.which(binary) is None and not os.path.isfile(binary):
+            raise AnsibleError(
+                "cluster_ops.ansible.binary {!r} was not found on this host. "
+                "TMS runs the playbook itself, so Ansible must be installed on "
+                "the TMS server - not only on your usual control node. If it is "
+                "installed but not on the service's PATH, give the absolute "
+                "path.".format(binary))
         self.binary = binary
         self.timeout_seconds = timeout_seconds
         self.extra_vars = dict(extra_vars or {})

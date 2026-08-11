@@ -166,11 +166,14 @@ class RestartService:
             result = getattr(self.executor, "result", None)
             if result is not None:
                 detail = (result(sequence_id) or {}).get("error") or ""
+            # The advice has to name a button that exists. Re-running the
+            # restart is refused from RESTARTING, so telling someone to "run it
+            # again" sends them looking for a control that is not there.
             stored.sequence.log(
-                "The restart playbook failed{}. {} is still receiving no "
-                "queries. Fix it and run the restart again, or abort to put "
-                "the cluster back.".format(
-                    ": " + detail if detail else "", cluster),
+                "The restart playbook failed{}. {} is drained and still "
+                "receiving no queries — nothing was restarted. Abort to put it "
+                "back in rotation, then start again once the cause is "
+                "fixed.".format(": " + detail if detail else "", cluster),
                 level=LEVEL_ERROR)
         elif state == UNKNOWN:
             # TMS was restarted while the playbook ran. Saying so beats
@@ -233,6 +236,12 @@ class RestartService:
         ]
         payload["executor"] = self.executor.describe(stored.sequence.cluster)
         payload["automated"] = self.executor.automated
+        # So the screen can stop claiming the playbook is running after it has
+        # failed. Only meaningful while the restart step is in flight.
+        payload["executor_state"] = (
+            self.executor.status(stored.sequence.cluster, str(stored.id))
+            if stored.sequence.state == RESTARTING and self.executor.automated
+            else None)
         payload["duration_ms"] = _elapsed_ms(stored.started_at, stored.finished_at)
         return payload
 

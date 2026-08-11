@@ -70,9 +70,26 @@ class BuildTest(unittest.TestCase):
                 with open(path, "w", encoding="utf-8") as handle:
                     handle.write("---\n")
             executor = build_executor(self._Config(self._ops(
-                "ansible", playbook=playbook, inventories={"prod-a": inventory})))
+                "ansible", playbook=playbook, binary=sys.executable,
+                inventories={"prod-a": inventory})))
         self.assertEqual("ansible", executor.name)
         self.assertTrue(executor.automated)
+
+    def test_a_missing_ansible_binary_falls_back_at_startup(self):
+        """Ansible frequently lives on a separate control node, not on the TMS
+        host. Finding that out mid-restart means finding out with the cluster
+        already drained and out of rotation - so it is a startup decision."""
+        with tempfile.TemporaryDirectory() as tmp:
+            playbook = os.path.join(tmp, "restart.yml")
+            inventory = os.path.join(tmp, "cluster1.ini")
+            for path in (playbook, inventory):
+                with open(path, "w", encoding="utf-8") as handle:
+                    handle.write("---\n")
+            executor = build_executor(self._Config(self._ops(
+                "ansible", playbook=playbook,
+                binary="/nonexistent/ansible-playbook",
+                inventories={"prod-a": inventory})))
+        self.assertIsInstance(executor, ManualExecutor)
 
     def test_a_misconfigured_ansible_falls_back_to_manual(self):
         """A missing playbook must not become "TMS cannot restart anything" in

@@ -78,11 +78,32 @@
 
       {% elif sequence.state == 'RESTARTING' %}
         {% if sequence.automated %}
-        <p class="seq__act-why">
-          The playbook is running. Its output is on the right; TMS moves on by
-          itself when it finishes, and will not restore traffic until health is
-          GOOD.
-        </p>
+          {% if sequence.executor_state == 'failed' %}
+          {# Saying "the playbook is running" under a failure in the log is
+             worse than saying nothing - the operator waits for something that
+             already stopped. #}
+          <div class="banner banner--bad" role="alert">
+            {{ ui.icon('bad', 15, 2) }}
+            <div><b>The restart failed — nothing was restarted.</b>
+              {{ sequence.cluster }} is drained and still receiving no queries.
+              Put it back in rotation below, then start again once the cause is
+              fixed. The reason is in the log on the right.</div>
+          </div>
+          {% elif sequence.executor_state == 'unknown' %}
+          <div class="banner banner--concerning" role="status">
+            {{ ui.icon('concerning', 15, 2) }}
+            <div><b>TMS lost sight of this restart.</b>
+              It was restarted while the playbook was running, so it cannot say
+              whether the cluster came back. Check {{ sequence.cluster }}
+              yourself before restoring traffic.</div>
+          </div>
+          {% else %}
+          <p class="seq__act-why">
+            The playbook is running. Its output is on the right; TMS moves on by
+            itself when it finishes, and will not restore traffic until health is
+            GOOD.
+          </p>
+          {% endif %}
         {% else %}
         {# The operator has to act here. Saying nothing and offering only a
            "it is back up" button is how the first real run was read as TMS
