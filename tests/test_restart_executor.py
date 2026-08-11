@@ -71,7 +71,7 @@ class BuildTest(unittest.TestCase):
                     handle.write("---\n")
             executor = build_executor(self._Config(self._ops(
                 "ansible", playbook=playbook, binary=sys.executable,
-                inventories={"prod-a": inventory})))
+                state_dir=tmp, inventories={"prod-a": inventory})))
         self.assertEqual("ansible", executor.name)
         self.assertTrue(executor.automated)
 
@@ -86,8 +86,24 @@ class BuildTest(unittest.TestCase):
                 with open(path, "w", encoding="utf-8") as handle:
                     handle.write("---\n")
             executor = build_executor(self._Config(self._ops(
-                "ansible", playbook=playbook,
+                "ansible", playbook=playbook, state_dir=tmp,
                 binary="/nonexistent/ansible-playbook",
+                inventories={"prod-a": inventory})))
+        self.assertIsInstance(executor, ManualExecutor)
+
+    def test_an_unwritable_state_dir_falls_back_at_startup(self):
+        """Ansible aborts at import time without a writable HOME (exit 5,
+        measured on ansible-core 2.21). The tms-api unit sets ProtectHome=true,
+        so this is the default outcome unless StateDirectory=tms is set."""
+        with tempfile.TemporaryDirectory() as tmp:
+            playbook = os.path.join(tmp, "restart.yml")
+            inventory = os.path.join(tmp, "cluster1.ini")
+            for path in (playbook, inventory):
+                with open(path, "w", encoding="utf-8") as handle:
+                    handle.write("---\n")
+            executor = build_executor(self._Config(self._ops(
+                "ansible", playbook=playbook, binary=sys.executable,
+                state_dir="/nonexistent/tms-state",
                 inventories={"prod-a": inventory})))
         self.assertIsInstance(executor, ManualExecutor)
 

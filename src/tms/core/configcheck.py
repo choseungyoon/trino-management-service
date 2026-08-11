@@ -290,7 +290,20 @@ def check_cluster_ops(report: Report, config) -> None:
 
     if shutil.which(settings.binary) is None and not os.path.isfile(settings.binary):
         report.add(FAIL, "cluster_ops.ansible.binary",
-                   "{} 를 찾을 수 없다".format(settings.binary))
+                   "{} 를 찾을 수 없다 — Ansible 이 TMS 서버에 설치되어 있어야 "
+                   "한다(별도 컨트롤 노드가 아니라). systemd 는 PATH 가 최소이므로 "
+                   "절대경로가 안전하다".format(settings.binary))
+
+    # Ansible aborts at import time without a writable HOME (exit 5). The unit
+    # sets ProtectHome=true, so this is the default outcome unless
+    # StateDirectory=tms is present.
+    if not (os.path.isdir(settings.state_dir) and os.access(settings.state_dir, os.W_OK)):
+        report.add(FAIL, "cluster_ops.ansible.state_dir",
+                   "{} 에 쓸 수 없다 — Ansible 은 쓰기 가능한 HOME 없이 "
+                   "기동하지 않는다. 유닛에 StateDirectory=tms 를 추가하라"
+                   .format(settings.state_dir))
+    else:
+        report.add(OK, "ansible state_dir", settings.state_dir)
 
     for cluster in config.cluster_names:
         path = settings.inventories.get(cluster)

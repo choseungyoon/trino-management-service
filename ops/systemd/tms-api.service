@@ -31,6 +31,11 @@ StartLimitBurst=5
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
+# Kept on. Ansible mode does not need the real home - TMS gives the playbook a
+# HOME under StateDirectory instead. The SSH key it uses must therefore live
+# somewhere readable under this sandbox: /etc/tms/ssh/ works (ProtectSystem
+# makes /etc read-only, which is all a key needs), a key under /home/tms does
+# not.
 ProtectHome=true
 # systemd creates and owns /var/log/tms itself. An explicit
 # ReadWritePaths= on a directory that does not exist yet makes the whole
@@ -39,6 +44,15 @@ ProtectHome=true
 # experience. Nothing writes here today (logs go to the journal); the
 # directory exists so file logging can be added without touching this unit.
 LogsDirectory=tms
+# Writable state at /var/lib/tms, created and owned by systemd.
+#
+# ⛔ Required for cluster_ops.restart_mode: ansible. Ansible refuses to start
+# without a writable HOME - measured on ansible-core 2.21, it aborts at import
+# time with exit code 5 and "Unable to create local directories
+# '~/.ansible/tmp'". ProtectHome=true below makes the service account's real
+# home inaccessible, so TMS points the playbook's HOME here instead. Harmless
+# when restart_mode is manual: nothing writes to it.
+StateDirectory=tms
 ProtectKernelTunables=true
 ProtectControlGroups=true
 RestrictSUIDSGID=true

@@ -79,6 +79,25 @@ class AnsibleError(Exception):
     """Configuration or invocation problem, raised before anything runs."""
 
 
+def _writable(path: str) -> bool:
+    return bool(path) and os.path.isdir(path) and os.access(path, os.W_OK)
+
+
+def ansible_environment(state_dir: str) -> Dict[str, str]:
+    """The environment the playbook runs in.
+
+    Inherited, then overridden - a wholly clean environment would drop the
+    things SSH and Ansible need to find (PATH, SSH_AUTH_SOCK, ANSIBLE_CONFIG).
+    What is pinned is only what the sandbox breaks: everything Ansible wants to
+    write under HOME goes to the service's own state directory instead.
+    """
+    environment = dict(os.environ)
+    environment["HOME"] = state_dir
+    environment["ANSIBLE_HOME"] = os.path.join(state_dir, ".ansible")
+    environment["ANSIBLE_LOCAL_TEMP"] = os.path.join(state_dir, ".ansible", "tmp")
+    return environment
+
+
 def redact(text: str) -> str:
     """Mask obvious `key: value` secrets in captured output.
 
@@ -102,6 +121,7 @@ class AnsibleRestartExecutor(RestartExecutor):
         timeout_seconds: float = 900.0,
         extra_vars: Optional[Dict[str, str]] = None,
         log_dir: str = "/var/log/tms",
+        state_dir: str = "/var/lib/tms",
         runner: Optional[Any] = None,
     ) -> None:
         if not playbook or not os.path.isabs(playbook):
@@ -134,6 +154,21 @@ class AnsibleRestartExecutor(RestartExecutor):
                 "the TMS server - not only on your usual control node. If it is "
                 "installed but not on the service's PATH, give the absolute "
                 "path.".format(binary))
+        # ⛔ Ansible aborts at import time - exit 5, "Unable to create local
+        # directories '~/.ansible/tmp'" - if HOME is not writable. The tms-api
+        # unit runs with ProtectHome=true, so the service account's real home is
+        # inaccessible and every run would fail. Checked here so it is a startup
+        # error (falls back to manual) rather than a failure discovered with a
+        # cluster already drained and out of rotation.
+        self.state_dir = state_dir
+        if runner is None and not _writable(state_dir):
+            raise AnsibleError(
+                "cluster_ops.ansible.state_dir {!r} is not writable by this "
+                "service. Ansible refuses to run without a writable HOME, and "
+                "the unit sets ProtectHome=true. Add `StateDirectory=tms` to "
+                "the systemd unit (it creates and owns /var/lib/tms), or point "
+                "state_dir at a directory the service can write.".format(state_dir))
+
         self.binary = binary
         self.timeout_seconds = timeout_seconds
         self.extra_vars = dict(extra_vars or {})
@@ -177,6 +212,7 @@ class AnsibleRestartExecutor(RestartExecutor):
             process = subprocess.Popen(  # noqa: S603 - list form, no shell
                 command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 stdin=subprocess.DEVNULL, text=True, bufsize=1, shell=False,
+                env=ansible_environment(self.state_dir), cwd=self.state_dir,
             )
         except OSError as exc:
             return {"rc": None, "error": str(exc)}

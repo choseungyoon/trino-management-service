@@ -180,6 +180,13 @@ class AnsibleConfig:
     playbook: str = ""
     binary: str = "ansible-playbook"
     timeout_seconds: float = 1800.0
+    # ⛔ Ansible refuses to start without a writable HOME. Measured on
+    # ansible-core 2.21: it aborts at import time with exit code 5,
+    # "Unable to create local directories '~/.ansible/tmp'", before it even
+    # parses arguments. The tms-api unit sets ProtectHome=true, so the service
+    # account's real home is inaccessible - this directory is what TMS points
+    # HOME at instead. systemd creates it via StateDirectory=tms.
+    state_dir: str = "/var/lib/tms"
     inventories: Dict[str, str] = field(default_factory=dict)
     extra_vars: Dict[str, str] = field(default_factory=dict)
 
@@ -441,6 +448,7 @@ def _build_cluster_ops(raw: Dict[str, Any], whole: Dict[str, Any]) -> ClusterOps
         playbook=str(ansible_raw.get("playbook") or ""),
         binary=str(ansible_raw.get("binary") or "ansible-playbook"),
         timeout_seconds=float(ansible_raw.get("timeout_seconds", 1800)),
+        state_dir=str(ansible_raw.get("state_dir") or "/var/lib/tms"),
         inventories=inventories,
         extra_vars={str(k): str(v) for k, v in (ansible_raw.get("extra_vars") or {}).items()},
     )

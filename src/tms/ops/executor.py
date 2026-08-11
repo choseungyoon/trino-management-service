@@ -145,6 +145,7 @@ def build_executor(config) -> RestartExecutor:
             binary=settings.binary,
             timeout_seconds=settings.timeout_seconds,
             extra_vars=settings.extra_vars,
+            state_dir=settings.state_dir,
         )
     except AnsibleError as exc:
         log.error(

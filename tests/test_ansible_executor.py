@@ -8,6 +8,7 @@ request carries may influence what gets run or where.
 
 import os
 import sys
+import tempfile
 import threading
 import time
 import unittest
@@ -21,6 +22,7 @@ from tms.ops.ansible import (  # noqa: E402
     UNKNOWN,
     AnsibleError,
     AnsibleRestartExecutor,
+    ansible_environment,
     redact,
 )
 from tms.ops.executor import FAILED, RUNNING, SUCCEEDED  # noqa: E402
@@ -57,6 +59,20 @@ def executor(runner=None, **kwargs):
     return AnsibleRestartExecutor(
         playbook="/opt/tms/ansible/restart.yml", cluster_inventories=INVENTORIES,
         runner=runner or FakeRunner(), **kwargs)
+
+
+def _real_executor():
+    """An executor wired to the real subprocess runner.
+
+    `state_dir` is a temp directory rather than the default `/var/lib/tms`,
+    which does not exist on a developer machine - and the executor now refuses
+    to build without a writable one, because Ansible refuses to run without it.
+    """
+    return AnsibleRestartExecutor(
+        playbook=__file__,                       # exists; never executed
+        cluster_inventories={"prod-a": __file__},
+        binary=sys.executable,
+        state_dir=tempfile.mkdtemp(prefix="tms-ansible-test-"))
 
 
 def wait(ex, sequence_id):
@@ -219,10 +235,7 @@ class StreamingTest(unittest.TestCase):
         script = ("import sys\n"
                   "print('vault_password: hunter2')\n"
                   "print('PLAY RECAP')\n")
-        ex = AnsibleRestartExecutor(
-            playbook=__file__,                      # exists; never executed
-            cluster_inventories={"prod-a": __file__},
-            binary=sys.executable)
+        ex = _real_executor()
         # Drive the real subprocess runner directly.
         lines = []
         result = ex._run_subprocess([sys.executable, "-c", script], 10, lines.append)
@@ -236,9 +249,7 @@ class StreamingTest(unittest.TestCase):
                   "print('first', flush=True)\n"
                   "time.sleep(0.4)\n"
                   "print('second', flush=True)\n")
-        ex = AnsibleRestartExecutor(
-            playbook=__file__, cluster_inventories={"prod-a": __file__},
-            binary=sys.executable)
+        ex = _real_executor()
         stamps = []
         ex._run_subprocess([sys.executable, "-c", script], 10,
                            lambda line: stamps.append((time.monotonic(), line)))
@@ -247,15 +258,56 @@ class StreamingTest(unittest.TestCase):
                            "the second line arrived with the first - not streaming")
 
     def test_a_hanging_process_is_killed_rather_than_waited_on(self):
-        ex = AnsibleRestartExecutor(
-            playbook=__file__, cluster_inventories={"prod-a": __file__},
-            binary=sys.executable)
+        ex = _real_executor()
         started = time.monotonic()
         result = ex._run_subprocess(
             [sys.executable, "-c", "import time; time.sleep(30)"], 0.5, lambda _: None)
         self.assertTrue(result.get("timed_out"))
         self.assertLess(time.monotonic() - started, 10,
                         "the watchdog did not interrupt the read loop")
+
+
+class EnvironmentTest(unittest.TestCase):
+    """Ansible needs a writable HOME and the service does not have one.
+
+    Measured on ansible-core 2.21: with an unwritable HOME it aborts during
+    `import ansible.constants`, exit code 5, "Unable to create local
+    directories '~/.ansible/tmp'" - before argument parsing, so no playbook
+    ever runs. The tms-api unit sets ProtectHome=true, which produces exactly
+    that, so TMS pins HOME to its own state directory.
+    """
+
+    def test_home_is_pinned_to_the_state_directory(self):
+        env = ansible_environment("/var/lib/tms")
+        self.assertEqual("/var/lib/tms", env["HOME"])
+        self.assertEqual("/var/lib/tms/.ansible", env["ANSIBLE_HOME"])
+        self.assertEqual("/var/lib/tms/.ansible/tmp", env["ANSIBLE_LOCAL_TEMP"])
+
+    def test_the_rest_of_the_environment_is_inherited(self):
+        """A wholly clean environment would drop what SSH and Ansible need to
+        find themselves - PATH above all."""
+        env = ansible_environment("/var/lib/tms")
+        self.assertIn("PATH", env)
+        self.assertEqual(os.environ["PATH"], env["PATH"])
+
+    def test_an_unwritable_state_dir_is_refused_at_construction(self):
+        """A startup error, not a failure discovered with a cluster already
+        drained and out of rotation."""
+        with self.assertRaises(AnsibleError) as caught:
+            AnsibleRestartExecutor(
+                playbook=__file__, cluster_inventories={"prod-a": __file__},
+                binary=sys.executable, state_dir="/nonexistent/tms-state")
+        self.assertIn("StateDirectory=tms", str(caught.exception))
+
+    def test_a_missing_binary_is_refused_at_construction(self):
+        """Ansible commonly lives on a separate control node. Finding that out
+        mid-restart is the worst possible moment."""
+        with self.assertRaises(AnsibleError) as caught:
+            AnsibleRestartExecutor(
+                playbook=__file__, cluster_inventories={"prod-a": __file__},
+                binary="/nonexistent/ansible-playbook",
+                state_dir=tempfile.mkdtemp(prefix="tms-state-"))
+        self.assertIn("installed on the TMS server", str(caught.exception))
 
 
 class RedactionTest(unittest.TestCase):
