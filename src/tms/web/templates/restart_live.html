@@ -67,11 +67,24 @@
         </details>
 
       {% elif sequence.state == 'DRAINED' %}
+        {# The one check about coming back rather than going down: a Trino 477
+           coordinator using the db resource group manager exits at startup if
+           it cannot read that store (D-010). Stopping the cluster now would
+           leave nothing able to restart it, with traffic already blocked. #}
+        {% if sequence.config_store_ready is false %}
+        <p class="seq__act-why seq__act-why--blocked">
+          <b>{{ sequence.cluster }} would not start again.</b>
+          {{ sequence.config_store_detail }}
+          Fix this first — the button below will refuse until it is resolved.
+        </p>
+        {% else %}
         <p class="seq__act-why">
           {{ sequence.executor.instructions }}
         </p>
+        {% endif %}
         <form method="post" action="/restarts/{{ sequence.id }}/restart">
-          <button class="btn btn--danger btn--block" type="submit" data-busy="Starting…">
+          <button class="btn btn--danger btn--block" type="submit" data-busy="Starting…"
+                  {% if sequence.config_store_ready is false %}disabled{% endif %}>
             {{ sequence.executor.title }}
           </button>
         </form>

@@ -77,6 +77,10 @@ class ClusterConfig:
     coordinator_url: str
     expected_workers: int
     trino_ui_url: str = ""
+    # This cluster's `node.environment`. Trino's db resource group manager
+    # matches rows on it, so it is what TMS needs to ask "does the store hold
+    # configuration for this cluster" before restarting it (D-010).
+    node_environment: str = ""
 
 
 @dataclass(frozen=True)
@@ -207,6 +211,23 @@ class ClusterOpsConfig:
 
 
 @dataclass(frozen=True)
+class ResourceGroupStoreConfig:
+    """Trino's `db` resource group manager tables (D-010).
+
+    Off by default. Leaving it off means TMS assumes the `file` manager and
+    makes no claim either way - it does not mean "the store is fine".
+
+    `schema` must match `?currentSchema=` in the coordinator's
+    `resource-groups.config-db-url`. The tables live in the TMS database but in
+    their own schema, so a TMS migration has no path to the tables Trino reads
+    to decide whether to admit a query.
+    """
+
+    enabled: bool = False
+    schema: str = "trino_resource_groups"
+
+
+@dataclass(frozen=True)
 class HealthConfig:
     stabilization_polls: int = 3
     long_running_query_seconds: float = 300.0
@@ -252,6 +273,7 @@ class Config:
     workload: WorkloadConfig
     cluster_ops: ClusterOpsConfig
     fleet: FleetConfig
+    resource_groups: ResourceGroupStoreConfig
     health: HealthConfig
     deeplinks: DeeplinkConfig
     portal: PortalConfig
@@ -395,6 +417,7 @@ def _build_clusters(raw: Dict[str, Any]) -> List[ClusterConfig]:
                 coordinator_url=str(url).rstrip("/"),
                 expected_workers=workers,
                 trino_ui_url=str(entry.get("trino_ui_url") or ""),
+                node_environment=str(entry.get("node_environment") or "").strip(),
             )
         )
     return clusters
@@ -515,6 +538,22 @@ def build_config(raw: Dict[str, Any], where: str = "config.secret.yaml") -> Conf
     cluster_ops = _build_cluster_ops(raw.get("cluster_ops") or {}, raw)
     fleet = _build_fleet(raw.get("fleet") or {})
 
+    resource_groups_raw = raw.get("resource_groups") or {}
+    resource_groups = ResourceGroupStoreConfig(
+        enabled=bool(resource_groups_raw.get("enabled", False)),
+        schema=str(resource_groups_raw.get("schema") or "trino_resource_groups"),
+    )
+    if resource_groups.enabled:
+        from tms.ops.config_store import valid_schema_name
+
+        if not valid_schema_name(resource_groups.schema):
+            raise ConfigError(
+                "resource_groups.schema must be a plain SQL identifier, got {!r}"
+                .format(resource_groups.schema))
+    # A cluster without node_environment is not fatal - the check abstains for
+    # it. configcheck reports that as a warning, which is where "this is set up
+    # but not doing anything" belongs.
+
     collector = CollectorConfig(
         query_poll_interval_seconds=float(
             collector_raw.get("query_poll_interval_seconds", 5)
@@ -569,6 +608,7 @@ def build_config(raw: Dict[str, Any], where: str = "config.secret.yaml") -> Conf
         workload=workload,
         cluster_ops=cluster_ops,
         fleet=fleet,
+        resource_groups=resource_groups,
         health=HealthConfig(
             stabilization_polls=int(health_raw.get("stabilization_polls", 3)),
             long_running_query_seconds=float(health_raw.get("long_running_query_seconds", 300)),

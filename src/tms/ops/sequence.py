@@ -142,7 +142,7 @@ class RestartSequence:
 
     __slots__ = ("cluster", "reason", "actor", "state", "history",
                  "drain_timeout_seconds", "running_queries", "health_state",
-                 "_clock")
+                 "config_store_ready", "config_store_detail", "_clock")
 
     def __init__(self, cluster: str, reason: str, actor: str,
                  drain_timeout_seconds: float = 900.0,
@@ -157,6 +157,10 @@ class RestartSequence:
         self.drain_timeout_seconds = drain_timeout_seconds
         self.running_queries: Optional[int] = None
         self.health_state: Optional[str] = None
+        # Tri-state, like health: None means TMS has not been told, which is
+        # not the same as "fine". See observe_config_store.
+        self.config_store_ready: Optional[bool] = None
+        self.config_store_detail: str = ""
         self._clock = clock or _now
 
     # ------------------------------------------------------------- helpers
@@ -235,6 +239,19 @@ class RestartSequence:
             self.log("Waiting for {} running quer{} to finish.".format(
                 running_queries, "y" if running_queries == 1 else "ies"))
 
+    def observe_config_store(self, ready: Optional[bool], detail: str = "") -> None:
+        """Feed in whether Trino's resource group store can serve this cluster.
+
+        Kept separate from `observe` because it answers a different question at
+        a different moment: `observe` asks "is the cluster empty yet", this asks
+        "will it come back up if we stop it now".
+        """
+        previous = self.config_store_ready
+        self.config_store_ready = ready
+        self.config_store_detail = detail or ""
+        if detail and ready is not None and ready != previous:
+            self.log(detail, level="warn" if ready is False else "info")
+
     def confirm_drained(self) -> None:
         """Step 2/3: intake stopped and the cluster is empty."""
         self._require(DRAINING, DRAINED)
@@ -271,8 +288,22 @@ class RestartSequence:
         self.history[-1]["level"] = "warn"
 
     def mark_restarting(self) -> None:
-        """Step 4 begins. The operator restarts the cluster themselves."""
+        """Step 4 begins. The operator restarts the cluster themselves.
+
+        Blocked when Trino's resource group store cannot serve this cluster. A
+        477 coordinator configured with the `db` manager exits at startup if it
+        cannot read that store, so proceeding here would stop a cluster whose
+        traffic is already blocked and leave nothing able to bring it back
+        (D-010, TRINO_VERIFIED.md T1-4-1). This is the one check in the
+        sequence that is about the *return* rather than the departure.
+        """
         self._require(DRAINED)
+        if self.config_store_ready is False:
+            raise StepBlocked(
+                "{} would not start again: {}".format(
+                    self.cluster,
+                    self.config_store_detail
+                    or "Trino's resource group store is not usable."))
         self._record(RESTARTING, "Bringing {} down and back up.".format(self.cluster))
 
     def mark_restarted(self) -> None:
@@ -349,6 +380,8 @@ class RestartSequence:
             "label": STATE_LABELS.get(self.state, self.state),
             "running_queries": self.running_queries,
             "health_state": self.health_state,
+            "config_store_ready": self.config_store_ready,
+            "config_store_detail": self.config_store_detail,
             "traffic_stopped": self.traffic_stopped,
             "needs_operator_action": self.needs_operator_action,
             "is_terminal": self.is_terminal,

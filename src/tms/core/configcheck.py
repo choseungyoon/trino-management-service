@@ -113,6 +113,17 @@ def check_clusters(report: Report, config) -> None:
                        "{} — H-03(워커 등록 수)이 의미 있는 판정을 못 한다"
                        .format(cluster.expected_workers))
 
+        if getattr(config, "resource_groups", None) and config.resource_groups.enabled:
+            if not cluster.node_environment:
+                report.add(
+                    WARN, "{}: node_environment".format(cluster.name),
+                    "비어 있다 — 재시작 전 리소스 그룹 저장소 확인(D-010)이 이 "
+                    "클러스터에서는 건너뛰어진다. 코디네이터의 node.properties 에 "
+                    "있는 node.environment 값을 그대로 넣어라.")
+            else:
+                report.add(OK, "{}: node_environment".format(cluster.name),
+                           cluster.node_environment)
+
 
 def check_portal(report: Report, config) -> None:
     users = config.portal.local_users

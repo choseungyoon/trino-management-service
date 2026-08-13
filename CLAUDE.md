@@ -130,6 +130,7 @@ TMS가 완전히 다운되어도 모든 쿼리는 정상 실행되어야 한다.
 | `docs/runbooks/db-setup.md` | PostgreSQL 초기 구축 |
 | `docs/runbooks/local-account-setup.md` | 로컬 계정 (AD 연동 전까지) |
 | `docs/runbooks/gateway-config-request.md` | 운영팀 협의 시. **로컬 19 실측 기반** — `monitorType` 은 `METRICS` (UI_API 는 401) |
+| `docs/runbooks/resource-groups-db.md` | 리소스 그룹 file → db 전환 (D-010) + 메모리 재설정. **한 번에 한 클러스터씩** |
 | `docs/templates/` | 채워 넣는 파일 (클러스터 인벤토리 등) |
 
 ### 데이터 대기 / 나중

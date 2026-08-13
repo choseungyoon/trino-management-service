@@ -73,13 +73,17 @@ def _now(reference):
 
 class RestartService:
     def __init__(self, config, repository, snapshots, gateway_client,
-                 audit_guard: AuditGuard, executor) -> None:
+                 audit_guard: AuditGuard, executor, config_store=None) -> None:
         self.config = config
         self.repository = repository
         self.snapshots = snapshots
         self.gateway = gateway_client
         self.audit = audit_guard
         self.executor = executor
+        # None when Trino still uses the file resource group manager, or when
+        # the store could not be opened at startup. The sequence then has no
+        # opinion rather than a wrong one.
+        self.config_store = config_store
 
     # ------------------------------------------------------------- helpers
 
@@ -126,6 +130,32 @@ class RestartService:
             stored.sequence.observe(running_queries=running, health_state=health)
         elif health is not None:
             stored.sequence.health_state = health
+
+        self._observe_config_store(stored)
+
+    def _observe_config_store(self, stored) -> None:
+        """Would this cluster be able to start again? (D-010)
+
+        Only while draining or drained. Before that the answer is not yet
+        actionable, and after the restart the coordinator has already proved it
+        by coming up - re-asking would add a database round trip per refresh to
+        answer a question that has been settled.
+
+        Deliberately checked *during* the drain rather than only at the button:
+        a drain takes minutes, and knowing early that the store is down is the
+        difference between fixing it in parallel and discovering it with the
+        cluster already out of rotation.
+        """
+        if self.config_store is None:
+            return
+        if stored.sequence.state not in (DRAINING, DRAINED):
+            return
+        try:
+            cluster = self.config.cluster(stored.sequence.cluster)
+        except KeyError:
+            return
+        probe = self.config_store.probe(cluster.node_environment)
+        stored.sequence.observe_config_store(probe.ready, probe.detail)
 
     def _poll_executor(self, stored) -> None:
         """Pull an automated restart's progress into the sequence log.

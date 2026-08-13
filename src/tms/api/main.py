@@ -99,7 +99,31 @@ def build_restart_service(config: Config, service: TmsService):
         gateway_client=gateway_client,
         audit_guard=service.audit,
         executor=build_executor(config),
+        config_store=build_resource_group_store(config),
     )
+
+
+def build_resource_group_store(config: Config):
+    """Trino's resource group tables, read-only, or None (D-010).
+
+    Returning None is the honest outcome when the store is not configured: the
+    restart sequence then declines to have an opinion, rather than reporting a
+    healthy store it never looked at.
+    """
+    if not config.resource_groups.enabled:
+        return None
+    from tms.ops.config_store import ResourceGroupStore
+
+    try:
+        # Construction validates the schema name and nothing else - it does not
+        # connect. A database that is down must surface as a blocked restart at
+        # the moment someone tries, not as a feature that silently vanished at
+        # startup.
+        return ResourceGroupStore(
+            config.database_url.reveal(), config.resource_groups.schema)
+    except Exception as exc:  # noqa: BLE001
+        log.error("cannot use the resource group store: %s", exc)
+        return None
 
 
 def build_fleet_service(config: Config, service: TmsService):
