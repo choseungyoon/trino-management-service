@@ -156,6 +156,11 @@ cluster_ops:
     playbook: ""
     binary: ansible-playbook
     timeout_seconds: 1800
+    # Writable HOME for the playbook run, and the home of the known_hosts file
+    # TMS points SSH at. Must equal `StateDirectory=` in the systemd unit —
+    # note that setting takes a NAME relative to /var/lib, not a path, so the
+    # two are kept in step by hand. They disagree silently.
+    state_dir: /var/lib/trino-management-service
     # One inventory per cluster, holding that cluster's coordinator and
     # workers. Every configured cluster needs an entry or startup fails —
     # discovering a missing one mid-restart would mean a cluster already taken
@@ -163,7 +168,15 @@ cluster_ops:
     inventories: {}
     #   prod-a: /etc/tms/ansible/cluster1.ini
     #   prod-b: /etc/tms/ansible/cluster2.ini
+
+    # ⛔ The SSH private key must be named explicitly, here or in the inventory.
+    # Ansible's usual fallback of "whatever is in ~/.ssh" does not apply: the
+    # unit runs with ProtectHome=true, and OpenSSH resolves `~` from the passwd
+    # entry rather than from $HOME, so the service account's real home is both
+    # unreachable and not where TMS put anything. With no key named, every host
+    # fails with `Permission denied (publickey)`.
     extra_vars: {}
+    #   ansible_ssh_private_key_file: /etc/tms/ssh/trino-nodes.pem
 
 health:
   # Consecutive polls a test must hold a state before the transition is
