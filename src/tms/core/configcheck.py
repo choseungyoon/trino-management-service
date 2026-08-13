@@ -334,6 +334,7 @@ def check_cluster_ops(report: Report, config) -> None:
         else:
             report.add(OK, "ansible known_hosts", known_hosts)
 
+    uses_password = False
     for cluster in config.cluster_names:
         path = settings.inventories.get(cluster)
         if not path:
@@ -343,6 +344,53 @@ def check_cluster_ops(report: Report, config) -> None:
             report.add(FAIL, "인벤토리", "{}: {} 가 없다".format(cluster, path))
         else:
             report.add(OK, "인벤토리", "{}: {}".format(cluster, path))
+            uses_password = uses_password or _inventory_uses_password(path)
+
+    if uses_password:
+        _check_password_auth(report, settings)
+
+
+def _inventory_uses_password(path: str) -> bool:
+    """Does this inventory authenticate with a password rather than a key?
+
+    Read rather than assumed: password auth needs `sshpass` on the TMS host and
+    a populated known_hosts, and neither requirement is visible from TMS's own
+    configuration.
+    """
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as handle:
+            text = handle.read()
+    except OSError:
+        return False
+    return "ansible_password" in text or "ansible_ssh_pass" in text
+
+
+def _check_password_auth(report: Report, settings) -> None:
+    """Password auth has two requirements a key does not."""
+    if shutil.which("sshpass") is None:
+        report.add(FAIL, "sshpass",
+                   "인벤토리가 비밀번호 인증을 쓰는데 sshpass 가 없다 — "
+                   "Ansible 이 모든 호스트에서 즉시 실패한다")
+    else:
+        report.add(OK, "sshpass", "설치됨 (비밀번호 인증)")
+
+    # sshpass cannot answer the "continue connecting?" prompt, so an unknown
+    # host key is fatal rather than merely unverified. This is stricter than the
+    # key case, where an operator could at least see the prompt.
+    from tms.ops.ansible import known_hosts_path
+
+    known_hosts = known_hosts_path(settings.state_dir)
+    if not os.path.isfile(known_hosts) or os.path.getsize(known_hosts) == 0:
+        report.add(FAIL, "known_hosts (비밀번호 인증)",
+                   "비어 있다 — sshpass 는 호스트 키 확인 프롬프트에 답할 수 "
+                   "없어서 '호스트 키 검증 실패' 로 전량 실패한다. "
+                   "ssh-keyscan 으로 미리 채워라: {}".format(known_hosts))
+
+    # The password itself must not be sitting in the inventory in plain text.
+    report.add(WARN, "SSH 비밀번호",
+               "비밀번호 인증은 TMS 호스트에 전 Trino 노드의 SSH 자격증명을 "
+               "두는 것이다. 인벤토리에 평문으로 적지 말고 tms.env 의 환경변수를 "
+               "참조하게 하라 (runbooks/upgrade-r2-r3.md §4-3). 키 전환이 목표다")
 
 
 def check_fleet(report: Report, config) -> None:

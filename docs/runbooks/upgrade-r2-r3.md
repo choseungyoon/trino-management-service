@@ -137,6 +137,39 @@ sudo -u <서비스계정> /etc/trino-management-service/venv/bin/tms-config-chec
 
 > **`StrictHostKeyChecking=no` 로 우회하지 마라.** 이 호스트는 전 Trino 노드에 대한 SSH 를 쥐고 있다 — 호스트 키 검증을 끄는 것은 그 권한 전체를 중간자에 노출하는 것이다. TMS 는 호스트 키 정책을 건드리지 않는다. 자기가 만든 샌드박스 때문에 깨진 것만 고친다.
 
+#### 비밀번호 인증을 쓸 때 — **비밀번호를 인벤토리에 적지 않는다**
+
+키 전환 전까지의 과도기 방식이다. 두 가지가 추가로 필요하다.
+
+**① `sshpass` 설치.** 없으면 Ansible 이 전 호스트에서 즉시 실패한다. 사내는 외부 저장소 접근이 막혀 있으니 내부 미러에서 받는다.
+
+**② `known_hosts` 가 반드시 채워져 있어야 한다 — 키 방식보다 엄격하다.** sshpass 는 *"이 호스트를 신뢰합니까?"* 프롬프트에 답하지 못하므로, 모르는 호스트 키는 경고가 아니라 **즉시 실패**다:
+
+```
+Using a SSH password instead of a key is not possible because
+Host Key checking is enabled and sshpass does not support this.
+```
+
+위 `ssh-keyscan` 단계가 이 오류의 해결책이다.
+
+**비밀번호는 `tms.env` 에 두고 인벤토리는 그걸 참조하게 한다.** TMS 는 `ansible-playbook` 을 **비대화형**으로 실행하므로 `--ask-pass` 는 쓸 수 없다 — 프롬프트가 뜨면 답할 사람이 없어 타임아웃까지 멈춘다. 그렇다고 인벤토리에 평문으로 적으면, 전 Trino 노드의 SSH 자격증명이 운영팀이 공유하는 파일에 남는다.
+
+```bash
+# /etc/tms/tms.env  (0600, root:<서비스계정>)
+TMS_ANSIBLE_SSH_PASSWORD=<비밀번호>
+```
+
+```ini
+# /etc/tms/ansible/cluster1.ini
+[all:vars]
+ansible_user=<원격 계정>
+ansible_password="{{ lookup('env', 'TMS_ANSIBLE_SSH_PASSWORD') }}"
+```
+
+유닛의 `EnvironmentFile=-/etc/tms/tms.env` 가 이 값을 서비스 환경에 넣고, TMS 는 환경을 상속해 `ansible-playbook` 에 넘긴다. **비밀이 있는 곳은 `tms.env` 한 곳뿐이고**, 다른 모든 자격증명과 같은 자리다.
+
+> **이건 과도기다.** 비밀번호는 그 계정 자체이므로 유출 시 SSH 만의 문제가 아니고, 노드별 회수도 안 된다. 키가 발급되면 `ansible_password` 줄을 지우고 `ansible_ssh_private_key_file` 로 바꾼다. `tms-config-check` 가 비밀번호 인증을 감지하면 계속 WARN 을 낸다 — 잊지 않기 위한 것이다.
+
 **증상 대조표**
 
 | Ansible 출력 | 원인 | 조치 |
