@@ -83,6 +83,21 @@ def _writable(path: str) -> bool:
     return bool(path) and os.path.isdir(path) and os.access(path, os.W_OK)
 
 
+# Ansible's own default (`-C -o ControlMaster=auto -o ControlPersist=60s`).
+# Repeated here because setting ANSIBLE_SSH_ARGS replaces the default outright
+# rather than adding to it, and losing connection multiplexing would open a
+# fresh SSH session per task on every node.
+_DEFAULT_SSH_ARGS = ("-C", "-o", "ControlMaster=auto", "-o", "ControlPersist=60s")
+
+
+def ssh_directory(state_dir: str) -> str:
+    return os.path.join(state_dir, ".ssh")
+
+
+def known_hosts_path(state_dir: str) -> str:
+    return os.path.join(ssh_directory(state_dir), "known_hosts")
+
+
 def ansible_environment(state_dir: str) -> Dict[str, str]:
     """The environment the playbook runs in.
 
@@ -90,11 +105,32 @@ def ansible_environment(state_dir: str) -> Dict[str, str]:
     things SSH and Ansible need to find (PATH, SSH_AUTH_SOCK, ANSIBLE_CONFIG).
     What is pinned is only what the sandbox breaks: everything Ansible wants to
     write under HOME goes to the service's own state directory instead.
+
+    ⛔ Setting HOME is not enough for SSH. OpenSSH expands `~` from the passwd
+    entry (`getpwuid`), *not* from `$HOME`, so the client still resolves
+    `~/.ssh` to the service account's real home - which `ProtectHome=true` makes
+    unreachable. The visible symptom is an Ansible failure that reads like a
+    network problem:
+
+        UNREACHABLE! => Failed to connect to the host via ssh:
+        Could not create directory '/home/<account>/.ssh' (Permission denied)
+
+    It is not a network problem, and no firewall rule fixes it. The client is
+    trying to write `known_hosts` before it has connected to anything. So the
+    known_hosts file is pointed somewhere the service can actually write.
+
+    Host key *policy* is deliberately left alone: `StrictHostKeyChecking` stays
+    at whatever the operator configured. TMS is repairing a condition it created
+    by sandboxing the unit - it is not deciding whether host keys get verified
+    on a host that holds SSH access to every Trino node (D-009).
     """
     environment = dict(os.environ)
     environment["HOME"] = state_dir
     environment["ANSIBLE_HOME"] = os.path.join(state_dir, ".ansible")
     environment["ANSIBLE_LOCAL_TEMP"] = os.path.join(state_dir, ".ansible", "tmp")
+    environment["ANSIBLE_SSH_ARGS"] = " ".join(
+        list(_DEFAULT_SSH_ARGS)
+        + ["-o", "UserKnownHostsFile=" + known_hosts_path(state_dir)])
     return environment
 
 
@@ -171,6 +207,20 @@ class AnsibleRestartExecutor(RestartExecutor):
                 "name must match state_dir. Note StateDirectory takes a name, "
                 "not a path: it is always relative to /var/lib."
                 .format(state_dir))
+
+        if runner is None:
+            # OpenSSH writes known_hosts but does not create the directory it
+            # lives in when the path is given explicitly - it only does that for
+            # its own `~/.ssh`. Without this the first connection fails with a
+            # message about known_hosts that reads like a connectivity problem.
+            # 0700 because ssh refuses a group- or world-writable directory.
+            try:
+                os.makedirs(ssh_directory(state_dir), mode=0o700, exist_ok=True)
+            except OSError as exc:
+                raise AnsibleError(
+                    "cannot create {!r} for SSH's known_hosts: {}. Ansible "
+                    "would fail on every host with 'Could not create directory'."
+                    .format(ssh_directory(state_dir), exc))
 
         self.binary = binary
         self.timeout_seconds = timeout_seconds

@@ -290,6 +290,41 @@ class EnvironmentTest(unittest.TestCase):
         self.assertIn("PATH", env)
         self.assertEqual(os.environ["PATH"], env["PATH"])
 
+    def test_known_hosts_is_moved_out_of_the_unreachable_home(self):
+        """Pinning HOME does not move ~/.ssh: OpenSSH expands `~` from the
+        passwd entry, not $HOME. Under ProtectHome=true that surfaces as every
+        host coming back UNREACHABLE with "Could not create directory"."""
+        env = ansible_environment("/var/lib/trino-management-service")
+        self.assertIn(
+            "-o UserKnownHostsFile=/var/lib/trino-management-service/.ssh/known_hosts",
+            env["ANSIBLE_SSH_ARGS"])
+
+    def test_connection_multiplexing_survives_the_override(self):
+        """ANSIBLE_SSH_ARGS replaces Ansible's default rather than adding to
+        it, so dropping ControlPersist here would open a fresh SSH session per
+        task on every node."""
+        args = ansible_environment("/var/lib/trino-management-service")["ANSIBLE_SSH_ARGS"]
+        self.assertIn("ControlMaster=auto", args)
+        self.assertIn("ControlPersist=60s", args)
+
+    def test_host_key_policy_is_left_to_the_operator(self):
+        """TMS repairs what its own sandbox broke. It does not decide whether
+        host keys are verified on a host holding SSH to every Trino node."""
+        args = ansible_environment("/var/lib/trino-management-service")["ANSIBLE_SSH_ARGS"]
+        self.assertNotIn("StrictHostKeyChecking", args)
+
+    def test_the_ssh_directory_is_created_for_known_hosts(self):
+        """ssh creates ~/.ssh for itself but not the parent of an explicitly
+        configured UserKnownHostsFile."""
+        with tempfile.TemporaryDirectory() as state_dir:
+            AnsibleRestartExecutor(
+                playbook=__file__, cluster_inventories={"prod-a": __file__},
+                binary=sys.executable, state_dir=state_dir)
+            created = os.path.join(state_dir, ".ssh")
+            self.assertTrue(os.path.isdir(created))
+            # ssh refuses a group- or world-writable directory.
+            self.assertEqual(0o700, os.stat(created).st_mode & 0o777)
+
     def test_an_unwritable_state_dir_is_refused_at_construction(self):
         """A startup error, not a failure discovered with a cluster already
         drained and out of rotation."""

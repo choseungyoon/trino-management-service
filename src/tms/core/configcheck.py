@@ -316,6 +316,24 @@ def check_cluster_ops(report: Report, config) -> None:
     else:
         report.add(OK, "ansible state_dir", settings.state_dir)
 
+        # OpenSSH resolves `~` from the passwd entry, not $HOME, so pointing
+        # HOME at state_dir does not move `~/.ssh` - ProtectHome=true then makes
+        # it unreachable and every host comes back UNREACHABLE with "Could not
+        # create directory". TMS redirects known_hosts here instead, which only
+        # works if the file is populated: an empty known_hosts plus the default
+        # StrictHostKeyChecking fails non-interactively on every host.
+        from tms.ops.ansible import known_hosts_path
+
+        known_hosts = known_hosts_path(settings.state_dir)
+        if not os.path.isfile(known_hosts) or os.path.getsize(known_hosts) == 0:
+            report.add(WARN, "ansible known_hosts",
+                       "{} 가 비어 있다 — 호스트 키가 없으면 첫 접속이 "
+                       "비대화형에서 실패한다. 서비스 계정으로 미리 채워라: "
+                       "ssh-keyscan -H <노드…> >> {}"
+                       .format(known_hosts, known_hosts))
+        else:
+            report.add(OK, "ansible known_hosts", known_hosts)
+
     for cluster in config.cluster_names:
         path = settings.inventories.get(cluster)
         if not path:

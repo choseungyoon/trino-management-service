@@ -119,6 +119,34 @@ cluster_ops:
 
 `manual` 이면 TMS 가 게이트(빈 클러스터 확인 → 헬스 확인)를 지키고 재시작은 사람이 한다. **추가 권한이 전혀 필요 없고, 사고를 막는 부분은 자동/수동이 완전히 동일하다.** 먼저 이 모드로 한 번 돌려본 뒤 자동화를 결정하라 — 자동 실행은 **TMS 호스트가 전 Trino 노드에 SSH 접근을 갖는다**는 뜻이고, 이는 보안 결정이다 (D-009).
 
+#### `ansible` 로 켤 때 — SSH 호스트 키를 먼저 심는다
+
+유닛이 `ProtectHome=true` 라 서비스 계정의 실제 홈에 접근할 수 없다. **`HOME` 을 옮기는 것만으로는 부족하다** — OpenSSH 는 `~` 를 `$HOME` 이 아니라 passwd 항목(`getpwuid`)에서 푼다. 그래서 TMS 는 `known_hosts` 를 `state_dir/.ssh/known_hosts` 로 따로 지정하고 그 디렉터리를 0700 으로 만든다.
+
+**그 파일이 비어 있으면 첫 접속이 비대화형에서 실패한다.** 서비스 계정으로 미리 채운다:
+
+```bash
+# tms-api 를 돌리는 계정으로 (User= 값을 확인할 것)
+sudo -u <서비스계정> ssh-keyscan -H <코디네이터> <워커1> <워커2> … \
+  >> /var/lib/trino-management-service/.ssh/known_hosts
+
+sudo -u <서비스계정> /etc/trino-management-service/venv/bin/tms-config-check
+```
+
+`ansible known_hosts` 가 `OK` 로 바뀌면 된다.
+
+> **`StrictHostKeyChecking=no` 로 우회하지 마라.** 이 호스트는 전 Trino 노드에 대한 SSH 를 쥐고 있다 — 호스트 키 검증을 끄는 것은 그 권한 전체를 중간자에 노출하는 것이다. TMS 는 호스트 키 정책을 건드리지 않는다. 자기가 만든 샌드박스 때문에 깨진 것만 고친다.
+
+**증상 대조표**
+
+| Ansible 출력 | 원인 | 조치 |
+|---|---|---|
+| `Could not create directory '/home/<계정>/.ssh'` | `ProtectHome=true` + SSH 의 `~` 해석 | TMS 가 고친다. 이 버전으로 올리면 사라진다 |
+| `Host key verification failed` | `known_hosts` 가 비어 있다 | 위 `ssh-keyscan` |
+| `Permission denied (publickey)` | 키가 없거나 서비스 계정이 못 읽는다 | `/etc/tms/` 아래 키를 두고 소유·권한을 서비스 계정에 맞춘다 |
+
+**셋 다 방화벽과 무관하다.** `UNREACHABLE` 라고 나오지만 아직 접속을 시도하지도 않은 단계다.
+
 ---
 
 ## 5. Gateway 연결 `[타 팀 협조]`
