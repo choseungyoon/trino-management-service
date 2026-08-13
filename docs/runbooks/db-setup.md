@@ -213,7 +213,7 @@ PY
 >
 > | 필요한 것 | 준비하는 곳 |
 > |---|---|
-> | `/opt/tms` 코드 + `venv` (`tms-collector` 실행 파일) | `deploy.md` §1~2 |
+> | `/etc/trino-management-service` 코드 + `venv` (`tms-collector` 실행 파일) | `deploy.md` §1~2 |
 > | `config.yaml` 의 실제 클러스터 주소 | `deploy.md` §6-1 |
 > | `/etc/tms/tms.env` (DB URL·Trino 비밀번호·세션 키) | `deploy.md` §6-2 |
 > | Trino `rules.json` 권한 | `deploy.md` §4 |

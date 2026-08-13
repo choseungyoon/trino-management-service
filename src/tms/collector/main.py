@@ -31,7 +31,7 @@ from tms.health.engine import HealthEngine
 
 log = logging.getLogger("tms.collector")
 
-DEFAULT_CONFIG_PATH = "/opt/tms/config/config.yaml"
+DEFAULT_CONFIG_PATH = "/etc/trino-management-service/config/config.yaml"
 # Floor on the sleep between ticks so a misconfigured interval cannot spin.
 MIN_TICK_SLEEP_SECONDS = 0.2
 

@@ -31,22 +31,22 @@
 ## 1. 코드 배치
 
 ```bash
-sudo useradd --system --home-dir /opt/tms --shell /usr/sbin/nologin tms
-sudo install -d -o tms -g tms -m 755 /opt/tms
-# /var/log/tms 는 만들 필요 없다 - 유닛의 LogsDirectory= 로 systemd 가 만든다
+sudo useradd --system --home-dir /etc/trino-management-service --shell /usr/sbin/nologin tms
+sudo install -d -o tms -g tms -m 755 /etc/trino-management-service
+# /var/log/trino-management-service 는 만들 필요 없다 - 유닛의 LogsDirectory= 로 systemd 가 만든다
 
-sudo -u tms git clone https://github.com/choseungyoon/trino-management-service.git /opt/tms
-cd /opt/tms
+sudo -u tms git clone https://github.com/choseungyoon/trino-management-service.git /etc/trino-management-service
+cd /etc/trino-management-service
 sudo -u tms git log --oneline -1     # 받은 리비전을 기록해 둘 것
 ```
 
 이미 받아 둔 경우:
 
 ```bash
-cd /opt/tms && sudo -u tms git pull
+cd /etc/trino-management-service && sudo -u tms git pull
 ```
 
-> **경로를 바꾸려면 systemd 유닛도 함께 고쳐야 한다.** `ops/systemd/*.service` 가 `/opt/tms`, `/opt/tms/venv/bin/`, `/opt/tms/config/config.yaml` 을 하드코딩하고 있다.
+> **경로를 바꾸려면 systemd 유닛도 함께 고쳐야 한다.** `ops/systemd/*.service` 가 `/etc/trino-management-service`, `/etc/trino-management-service/venv/bin/`, `/etc/trino-management-service/config/config.yaml` 을 하드코딩하고 있다.
 
 ---
 
@@ -54,26 +54,26 @@ cd /opt/tms && sudo -u tms git pull
 
 ```bash
 python3 --version          # 3.9 이상이어야 한다
-sudo -u tms python3 -m venv /opt/tms/venv
+sudo -u tms python3 -m venv /etc/trino-management-service/venv
 ```
 
 **Artifactory 경유로만 설치한다** (외부 PyPI 직접 접근 불가).
 
 ```bash
-sudo -u tms /opt/tms/venv/bin/pip install \
+sudo -u tms /etc/trino-management-service/venv/bin/pip install \
   --index-url https://<artifactory-host>/artifactory/api/pypi/<pypi-remote>/simple \
   --upgrade pip
 
-sudo -u tms /opt/tms/venv/bin/pip install \
+sudo -u tms /etc/trino-management-service/venv/bin/pip install \
   --index-url https://<artifactory-host>/artifactory/api/pypi/<pypi-remote>/simple \
-  /opt/tms
+  /etc/trino-management-service
 ```
 
 매번 `--index-url` 을 치기 싫으면 고정한다:
 
 ```bash
-sudo -u tms install -d -m 755 /opt/tms/.config/pip
-sudo -u tms tee /opt/tms/.config/pip/pip.conf >/dev/null <<EOF
+sudo -u tms install -d -m 755 /etc/trino-management-service/.config/pip
+sudo -u tms tee /etc/trino-management-service/.config/pip/pip.conf >/dev/null <<EOF
 [global]
 index-url = https://<artifactory-host>/artifactory/api/pypi/<pypi-remote>/simple
 EOF
@@ -82,7 +82,7 @@ EOF
 **설치 확인** — 두 실행 파일이 생겨야 한다.
 
 ```bash
-ls -l /opt/tms/venv/bin/tms-api /opt/tms/venv/bin/tms-collector
+ls -l /etc/trino-management-service/venv/bin/tms-api /etc/trino-management-service/venv/bin/tms-collector
 ```
 
 설치되는 의존성: `fastapi`, `uvicorn[standard]`, `PyYAML`, `Jinja2`, `httpx`, `psycopg[binary]`, `python-multipart`.
@@ -155,10 +155,10 @@ ls -l /opt/tms/venv/bin/tms-api /opt/tms/venv/bin/tms-collector
 **서비스를 띄우기 전에 여기서 막힌 걸 다 잡아라.** 기동 후 로그를 읽는 것보다 훨씬 빠르다.
 
 ```bash
-cd /opt/tms
+cd /etc/trino-management-service
 read -rs TMS_TRINO_PASSWORD && export TMS_TRINO_PASSWORD   # 화면·이력에 안 남는다
 
-/opt/tms/venv/bin/python scripts/verify_connectivity.py \
+/etc/trino-management-service/venv/bin/python scripts/verify_connectivity.py \
   --coordinator https://<trino-a-호스트>:8443 \
   --user tms-svc \
   --expected-workers 12
@@ -251,7 +251,7 @@ unset SESSION_SECRET
 | `TMS_DATABASE_URL` | `database.url` |
 | `TMS_TRINO_PASSWORD` | `trino.password` |
 | `TMS_SESSION_SECRET` | `portal.session_secret` |
-| `TMS_CONFIG` | 설정 파일 경로 (기본 `/opt/tms/config/config.yaml`) |
+| `TMS_CONFIG` | 설정 파일 경로 (기본 `/etc/trino-management-service/config/config.yaml`) |
 | `TMS_LOG_LEVEL` | 로그 레벨 (기본 `INFO`) |
 
 환경변수가 `config.secret.yaml` 보다 **우선**한다. 다만 **빈 값은 덮어쓰지 않는다** — 항목이 없으면 파일 값이 살아남는다.
@@ -293,8 +293,8 @@ EOF
 > **임시 조치다.** AD 연동 전까지만 쓴다 (D-007). 기동 시 WARN 로그로 이 사실을 알린다.
 
 ```bash
-cd /opt/tms
-sudo -u tms /opt/tms/venv/bin/python scripts/hash_password.py \
+cd /etc/trino-management-service
+sudo -u tms /etc/trino-management-service/venv/bin/python scripts/hash_password.py \
   --user <이름> --roles admin --temporary
 ```
 
@@ -305,8 +305,8 @@ sudo -u tms /opt/tms/venv/bin/python scripts/hash_password.py \
 출력을 `config.secret.yaml` 에 붙여넣는다.
 
 ```bash
-sudo -u tms cp /opt/tms/config/config.secret.yaml.example /opt/tms/config/config.secret.yaml
-sudo -u tms chmod 600 /opt/tms/config/config.secret.yaml
+sudo -u tms cp /etc/trino-management-service/config/config.secret.yaml.example /etc/trino-management-service/config/config.secret.yaml
+sudo -u tms chmod 600 /etc/trino-management-service/config/config.secret.yaml
 ```
 
 > **⛔ `sudo -u tms` 의 `-u tms` 를 빼먹지 마라.** 그냥 `sudo` 로 만들면 파일 소유자가 `root` 가 되고, 모드가 600 이라 **서비스 계정(`tms`)이 읽지 못한다.** 기동이 `permission denied ... config/config.secret.yaml` 로 실패한다. 편집기로 `sudo vi` 해서 만든 경우도 동일하다.
@@ -314,16 +314,16 @@ sudo -u tms chmod 600 /opt/tms/config/config.secret.yaml
 **소유권 확인** — 서비스를 띄우기 전에 이걸 확인하는 편이 빠르다.
 
 ```bash
-ls -l /opt/tms/config/config.secret.yaml     # tms tms, -rw-------
-sudo -u tms head -c1 /opt/tms/config/config.secret.yaml >/dev/null \
+ls -l /etc/trino-management-service/config/config.secret.yaml     # tms tms, -rw-------
+sudo -u tms head -c1 /etc/trino-management-service/config/config.secret.yaml >/dev/null \
   && echo "OK: tms 계정이 읽을 수 있다" || echo "FAIL: 아래 명령으로 고쳐라"
 ```
 
 틀어졌다면:
 
 ```bash
-sudo chown tms:tms /opt/tms/config/config.secret.yaml
-sudo chmod 600 /opt/tms/config/config.secret.yaml
+sudo chown tms:tms /etc/trino-management-service/config/config.secret.yaml
+sudo chmod 600 /etc/trino-management-service/config/config.secret.yaml
 ```
 
 ```yaml
@@ -358,7 +358,7 @@ portal:
 
 ```bash
 read -rs TMS_TRINO_PASSWORD && export TMS_TRINO_PASSWORD
-/opt/tms/venv/bin/tms-config-check --config /opt/tms/config/config.yaml
+/etc/trino-management-service/venv/bin/tms-config-check --config /etc/trino-management-service/config/config.yaml
 unset TMS_TRINO_PASSWORD
 ```
 
@@ -379,8 +379,8 @@ unset TMS_TRINO_PASSWORD
 ## 9. systemd 기동 — collector 먼저
 
 ```bash
-sudo cp /opt/tms/ops/systemd/tms-collector.service /etc/systemd/system/
-sudo cp /opt/tms/ops/systemd/tms-api.service       /etc/systemd/system/
+sudo cp /etc/trino-management-service/ops/systemd/tms-collector.service /etc/systemd/system/
+sudo cp /etc/trino-management-service/ops/systemd/tms-api.service       /etc/systemd/system/
 sudo systemctl daemon-reload
 ```
 
@@ -418,7 +418,7 @@ FROM collector_snapshot ORDER BY cluster, kind;
 | 증상 | 원인 | 조치 |
 |---|---|---|
 | `Unit tms-collector.service not found` | 유닛 미설치 | §9 첫 `cp` + `daemon-reload` |
-| `status=203/EXEC` | `/opt/tms/venv/bin/tms-collector` 없음 | §2 `pip install /opt/tms` 재확인 |
+| `status=203/EXEC` | `/etc/trino-management-service/venv/bin/tms-collector` 없음 | §2 `pip install /etc/trino-management-service` 재확인 |
 | **`status=226/NAMESPACE`** | **샌드박스 마운트 설정 실패** — Python 이 실행되기도 전이다 | 아래 9-3 |
 | 기동 실패 `permission denied ... config.secret.yaml` | 파일 소유자가 `root` (`sudo` 로 생성) | §8 소유권 확인. `sudo chown tms:tms` |
 | 기동 실패 `configuration error` / `is required` | `config.yaml` 또는 `/etc/tms/tms.env` 미완 | §6 |
@@ -457,16 +457,16 @@ curl -s http://127.0.0.1:8500/ready      # {"status":"ready"}
 `static`/`templates` 가 설치되지 않는 문제는 **0.1.0 최초 배포판의 패키징 버그**였다 (2026-08-07 수정). `pip install` 로 만들어지는 패키지에 UI 파일이 빠져 있었다. 최신 코드로 재설치하면 해결된다.
 
 ```bash
-cd /opt/tms && sudo -u tms git pull
-sudo -u tms /opt/tms/venv/bin/pip install --force-reinstall --no-deps \
-  --index-url https://<artifactory-host>/artifactory/api/pypi/<pypi-remote>/simple /opt/tms
+cd /etc/trino-management-service && sudo -u tms git pull
+sudo -u tms /etc/trino-management-service/venv/bin/pip install --force-reinstall --no-deps \
+  --index-url https://<artifactory-host>/artifactory/api/pypi/<pypi-remote>/simple /etc/trino-management-service
 sudo systemctl restart tms-api
 ```
 
 **설치 확인** — 아래가 비어 있으면 여전히 안 들어간 것이다.
 
 ```bash
-SP=$(/opt/tms/venv/bin/python -c "import tms,os;print(os.path.dirname(os.path.dirname(tms.__file__)))")
+SP=$(/etc/trino-management-service/venv/bin/python -c "import tms,os;print(os.path.dirname(os.path.dirname(tms.__file__)))")
 ls "$SP/tms/web/static" "$SP/tms/web/templates"
 ```
 
@@ -491,17 +491,17 @@ sudo journalctl -u tms-collector -n 40 --no-pager | grep -i "namespac\|mount\|Fa
 | 로그 | 원인 | 조치 |
 |---|---|---|
 | `Failed to set up mount namespacing: No such file or directory` | 유닛이 참조하는 경로가 없음 | 아래 (1) |
-| `ProtectHome` 관련 | `/opt/tms` 를 `/home` 아래에 두었음 | `ProtectHome=false` 로 완화하거나 경로 이동 |
+| `ProtectHome` 관련 | `/etc/trino-management-service` 를 `/home` 아래에 두었음 | `ProtectHome=false` 로 완화하거나 경로 이동 |
 | `Operation not permitted` | 구버전 systemd·컨테이너·SELinux | `systemctl --version` 확인, 아래 (2) |
 
-**(1) 과거 유닛의 `ReadWritePaths=/var/log/tms` — 가장 흔했던 원인**
+**(1) 과거 유닛의 `ReadWritePaths=/var/log/trino-management-service` — 가장 흔했던 원인**
 
-이전 버전 유닛에는 `ReadWritePaths=/var/log/tms` 가 있었다. **그 디렉터리가 없으면 네임스페이스 구성이 통째로 실패한다.** 게다가 앱은 디스크에 아무것도 쓰지 않으므로(로그는 전부 journald 로 간다) 애초에 불필요한 지시자였다.
+이전 버전 유닛에는 `ReadWritePaths=/var/log/trino-management-service` 가 있었다. **그 디렉터리가 없으면 네임스페이스 구성이 통째로 실패한다.** 게다가 앱은 디스크에 아무것도 쓰지 않으므로(로그는 전부 journald 로 간다) 애초에 불필요한 지시자였다.
 
-현재 유닛은 `LogsDirectory=tms` 로 바꿨다 — systemd 가 `/var/log/tms` 를 알아서 만들고 소유권도 `User=` 에 맞춘다. **최신 유닛을 다시 설치하면 해결된다.**
+현재 유닛은 `LogsDirectory=trino-management-service` 로 바꿨다 — systemd 가 `/var/log/trino-management-service` 를 알아서 만들고 소유권도 `User=` 에 맞춘다. **최신 유닛을 다시 설치하면 해결된다.**
 
 ```bash
-cd /opt/tms && sudo -u tms git pull
+cd /etc/trino-management-service && sudo -u tms git pull
 sudo cp ops/systemd/tms-collector.service ops/systemd/tms-api.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl restart tms-collector
@@ -510,7 +510,7 @@ sudo systemctl restart tms-collector
 옛 유닛을 그대로 쓰고 싶다면 디렉터리만 만들어도 된다.
 
 ```bash
-sudo install -d -o tms -g tms -m 755 /var/log/tms
+sudo install -d -o tms -g tms -m 755 /var/log/trino-management-service
 sudo systemctl restart tms-collector
 ```
 
@@ -696,10 +696,10 @@ sudo journalctl -u tms-collector -n 200 --no-pager
 **업데이트**
 
 ```bash
-cd /opt/tms
+cd /etc/trino-management-service
 sudo -u tms git pull
-sudo -u tms /opt/tms/venv/bin/pip install \
-  --index-url https://<artifactory-host>/artifactory/api/pypi/<pypi-remote>/simple /opt/tms
+sudo -u tms /etc/trino-management-service/venv/bin/pip install \
+  --index-url https://<artifactory-host>/artifactory/api/pypi/<pypi-remote>/simple /etc/trino-management-service
 sudo systemctl restart tms-collector tms-api
 ```
 
@@ -718,9 +718,9 @@ sudo systemctl stop tms-api tms-collector
 **롤백**
 
 ```bash
-cd /opt/tms
+cd /etc/trino-management-service
 sudo -u tms git checkout <직전 리비전>
-sudo -u tms /opt/tms/venv/bin/pip install --index-url <...> /opt/tms
+sudo -u tms /etc/trino-management-service/venv/bin/pip install --index-url <...> /etc/trino-management-service
 sudo systemctl restart tms-collector tms-api
 ```
 

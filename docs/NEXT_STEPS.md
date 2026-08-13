@@ -17,7 +17,7 @@
 | D-2 `ansible` 모드 | 시도 → `Errno 2` → **바이너리 검증 + `HOME` 처리까지 수정 완료** (`5684117`, `10473c1`). 켤지 말지는 **여전히 미결** |
 | V-2 Fleet | 인벤토리 설정 착수. **노드가 실제로 보이는지는 아직 미확인** |
 
-> **`ansible` 모드를 켜기 전에**: TMS 서버에 Ansible 설치 · `binary` 는 절대경로 · SSH 키는 `/etc/tms/ssh/`(`ProtectHome=true` 라 `/home/tms/.ssh` 는 못 읽는다) · 유닛 재배포로 `StateDirectory=tms` 반영 · `tms-config-check` 로 확인. 절차는 `runbooks/upgrade-r2-r3.md` §4-3-1.
+> **`ansible` 모드를 켜기 전에**: TMS 서버에 Ansible 설치 · `binary` 는 절대경로 · SSH 키는 `/etc/tms/ssh/`(`ProtectHome=true` 라 `/home/tms/.ssh` 는 못 읽는다) · 유닛 재배포로 `StateDirectory=trino-management-service` 반영 · `tms-config-check` 로 확인. 절차는 `runbooks/upgrade-r2-r3.md` §4-3-1.
 
 ---
 
@@ -147,9 +147,9 @@
 **왜**: 지금 프로덕션 코디네이터에 5초마다 폴링을 넣고 있는데 **그 비용을 실측한 적이 없다.** 게다가 Workload 를 켜면 폴링마다 MBean 열거 1회 + 그룹당 읽기 1회가 추가된다.
 
 ```bash
-cd /opt/tms && sudo -u tms git pull
+cd /etc/trino-management-service && sudo -u tms git pull
 read -rs TMS_TRINO_PASSWORD && export TMS_TRINO_PASSWORD
-sudo -E /opt/tms/venv/bin/python scripts/measure_production_load.py \
+sudo -E /etc/trino-management-service/venv/bin/python scripts/measure_production_load.py \
   --coordinator https://<trino-a>:8443 --coordinator https://<trino-b>:8443 \
   --pairs 6 --window 120
 unset TMS_TRINO_PASSWORD

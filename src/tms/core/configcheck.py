@@ -307,11 +307,11 @@ def check_cluster_ops(report: Report, config) -> None:
 
     # Ansible aborts at import time without a writable HOME (exit 5). The unit
     # sets ProtectHome=true, so this is the default outcome unless
-    # StateDirectory=tms is present.
+    # StateDirectory=trino-management-service is present.
     if not (os.path.isdir(settings.state_dir) and os.access(settings.state_dir, os.W_OK)):
         report.add(FAIL, "cluster_ops.ansible.state_dir",
                    "{} 에 쓸 수 없다 — Ansible 은 쓰기 가능한 HOME 없이 "
-                   "기동하지 않는다. 유닛에 StateDirectory=tms 를 추가하라"
+                   "기동하지 않는다. 유닛에 StateDirectory=trino-management-service 를 추가하라"
                    .format(settings.state_dir))
     else:
         report.add(OK, "ansible state_dir", settings.state_dir)

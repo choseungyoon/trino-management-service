@@ -189,8 +189,14 @@ class AnsibleConfig:
     # "Unable to create local directories '~/.ansible/tmp'", before it even
     # parses arguments. The tms-api unit sets ProtectHome=true, so the service
     # account's real home is inaccessible - this directory is what TMS points
-    # HOME at instead. systemd creates it via StateDirectory=tms.
-    state_dir: str = "/var/lib/tms"
+    # HOME at instead.
+    #
+    # systemd creates it from `StateDirectory=` in the unit. That setting takes
+    # a *name*, not a path - it is always relative to /var/lib - so the unit and
+    # this value have to be kept in agreement by hand. They disagree silently:
+    # the unit still creates its directory, TMS still looks in a different one,
+    # and the failure only shows up as a blocked restart.
+    state_dir: str = "/var/lib/trino-management-service"
     inventories: Dict[str, str] = field(default_factory=dict)
     extra_vars: Dict[str, str] = field(default_factory=dict)
 
@@ -471,7 +477,7 @@ def _build_cluster_ops(raw: Dict[str, Any], whole: Dict[str, Any]) -> ClusterOps
         playbook=str(ansible_raw.get("playbook") or ""),
         binary=str(ansible_raw.get("binary") or "ansible-playbook"),
         timeout_seconds=float(ansible_raw.get("timeout_seconds", 1800)),
-        state_dir=str(ansible_raw.get("state_dir") or "/var/lib/tms"),
+        state_dir=str(ansible_raw.get("state_dir") or "/var/lib/trino-management-service"),
         inventories=inventories,
         extra_vars={str(k): str(v) for k, v in (ansible_raw.get("extra_vars") or {}).items()},
     )

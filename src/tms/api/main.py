@@ -38,7 +38,7 @@ from tms.core.config import Config, load_config
 
 log = logging.getLogger("tms.api")
 
-DEFAULT_CONFIG_PATH = "/opt/tms/config/config.yaml"
+DEFAULT_CONFIG_PATH = "/etc/trino-management-service/config/config.yaml"
 
 
 def build_trino_clients(config: Config) -> dict:

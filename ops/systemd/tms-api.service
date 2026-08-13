@@ -13,15 +13,19 @@ Type=simple
 # Must match the owner of the virtualenv (TEAMS.md infra-agent).
 User=tms
 Group=tms
-WorkingDirectory=/opt/tms
+# Code and virtualenv live here; site secrets, the SSH key and the Ansible
+# assets stay under /etc/tms. ProtectSystem=strict below makes all of /etc
+# read-only, which is fine for running from it - the only visible effect is
+# that Python cannot cache bytecode, so start-up recompiles each time.
+WorkingDirectory=/etc/trino-management-service
 
 Environment=PYTHONUNBUFFERED=1
-Environment=TMS_CONFIG=/opt/tms/config/config.yaml
+Environment=TMS_CONFIG=/etc/trino-management-service/config/config.yaml
 # Credentials arrive through the environment so they never enter the repo,
 # which is PUBLIC. Keep this file 0600 and owned by root:tms.
 EnvironmentFile=-/etc/tms/tms.env
 
-ExecStart=/opt/tms/venv/bin/tms-api
+ExecStart=/etc/trino-management-service/venv/bin/tms-api
 
 Restart=on-failure
 RestartSec=5s
@@ -37,14 +41,22 @@ ProtectSystem=strict
 # makes /etc read-only, which is all a key needs), a key under /home/tms does
 # not.
 ProtectHome=true
-# systemd creates and owns /var/log/tms itself. An explicit
+# systemd creates and owns /var/log/trino-management-service itself. An explicit
 # ReadWritePaths= on a directory that does not exist yet makes the whole
 # mount namespace fail to build - the unit then dies with 226/NAMESPACE
 # before a single line of Python runs, which is a miserable first-deploy
 # experience. Nothing writes here today (logs go to the journal); the
 # directory exists so file logging can be added without touching this unit.
-LogsDirectory=tms
-# Writable state at /var/lib/tms, created and owned by systemd.
+LogsDirectory=trino-management-service
+# Writable state at /var/lib/trino-management-service, created and owned by
+# systemd.
+#
+# ⛔ This setting takes a NAME, not a path - it is always relative to /var/lib,
+# and an absolute path makes the unit fail to load. It must be kept equal to
+# `cluster_ops.ansible.state_dir` in config.yaml by hand. They disagree
+# silently: systemd still creates its directory, TMS still looks in a different
+# one, and the mismatch only surfaces as tms-config-check failing or a blocked
+# restart.
 #
 # ⛔ Required for cluster_ops.restart_mode: ansible. Ansible refuses to start
 # without a writable HOME - measured on ansible-core 2.21, it aborts at import
@@ -52,7 +64,7 @@ LogsDirectory=tms
 # '~/.ansible/tmp'". ProtectHome=true below makes the service account's real
 # home inaccessible, so TMS points the playbook's HOME here instead. Harmless
 # when restart_mode is manual: nothing writes to it.
-StateDirectory=tms
+StateDirectory=trino-management-service
 ProtectKernelTunables=true
 ProtectControlGroups=true
 RestrictSUIDSGID=true

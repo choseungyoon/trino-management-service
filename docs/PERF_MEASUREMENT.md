@@ -133,10 +133,10 @@ Bolt 2 DoD 항목이다. 아래를 실측하기 전까지 NFR-PERF-03 충족은 
 코디네이터 CPU를 JMX(`java.lang:type=OperatingSystem` / `ProcessCpuTime`)로 원격 조회하므로 **코디네이터 서버에 접속할 필요가 없다.** `tms-svc` 계정만 있으면 된다(이미 `system_information: read` 보유).
 
 ```bash
-cd /opt/tms
+cd /etc/trino-management-service
 read -rs TMS_TRINO_PASSWORD && export TMS_TRINO_PASSWORD
 
-sudo -E /opt/tms/venv/bin/python scripts/measure_production_load.py \
+sudo -E /etc/trino-management-service/venv/bin/python scripts/measure_production_load.py \
   --coordinator https://<trino-a>:8443 \
   --coordinator https://<trino-b>:8443 \
   --pairs 6 --window 120

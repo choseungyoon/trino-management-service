@@ -24,7 +24,7 @@
 롤백 판단을 위해서다. 30초 걸린다.
 
 ```bash
-cd /opt/tms && git rev-parse --short HEAD | tee /tmp/tms-rollback-to.txt
+cd /etc/trino-management-service && git rev-parse --short HEAD | tee /tmp/tms-rollback-to.txt
 sudo systemctl is-active tms-api tms-collector
 ```
 
@@ -33,10 +33,10 @@ sudo systemctl is-active tms-api tms-collector
 ## 2. 코드 배치
 
 ```bash
-cd /opt/tms
+cd /etc/trino-management-service
 sudo -u tms git pull
-sudo -u tms /opt/tms/venv/bin/pip install \
-  --index-url https://<artifactory-host>/artifactory/api/pypi/<pypi-remote>/simple /opt/tms
+sudo -u tms /etc/trino-management-service/venv/bin/pip install \
+  --index-url https://<artifactory-host>/artifactory/api/pypi/<pypi-remote>/simple /etc/trino-management-service
 ```
 
 > **아직 재시작하지 않는다.** 마이그레이션이 먼저다.
@@ -46,7 +46,7 @@ sudo -u tms /opt/tms/venv/bin/pip install \
 ## 3. ⛔ 마이그레이션 — 이것을 빠뜨리면 조용히 깨진다
 
 ```bash
-cd /opt/tms
+cd /etc/trino-management-service
 for f in 003_snapshot_kinds \
          004_restart_sequence 005_restart_sequence_grants \
          006_cluster_restart_action 007_restart_event_output_level \
@@ -158,7 +158,7 @@ Fleet 화면은 이것 없이도 **보인다.** 안 되는 건 shutdown 버튼�
 
 ```bash
 read -rs TMS_TRINO_PASSWORD && export TMS_TRINO_PASSWORD
-/opt/tms/venv/bin/tms-config-check --config /opt/tms/config/config.yaml -v
+/etc/trino-management-service/venv/bin/tms-config-check --config /etc/trino-management-service/config/config.yaml -v
 unset TMS_TRINO_PASSWORD
 ```
 
@@ -226,9 +226,9 @@ collector 를 먼저 올린다 — API 는 collector 가 쓴 스냅샷을 읽을
 
 ```bash
 sudo systemctl stop tms-api tms-collector
-cd /opt/tms
+cd /etc/trino-management-service
 sudo -u tms git checkout $(cat /tmp/tms-rollback-to.txt)
-sudo -u tms /opt/tms/venv/bin/pip install --index-url <...> /opt/tms
+sudo -u tms /etc/trino-management-service/venv/bin/pip install --index-url <...> /etc/trino-management-service
 sudo systemctl start tms-collector tms-api
 ```
 

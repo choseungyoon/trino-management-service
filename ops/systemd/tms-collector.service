@@ -13,15 +13,15 @@ Type=simple
 # Must match the owner of the virtualenv (TEAMS.md infra-agent).
 User=tms
 Group=tms
-WorkingDirectory=/opt/tms
+WorkingDirectory=/etc/trino-management-service
 
 Environment=PYTHONUNBUFFERED=1
-Environment=TMS_CONFIG=/opt/tms/config/config.yaml
+Environment=TMS_CONFIG=/etc/trino-management-service/config/config.yaml
 # Credentials arrive through the environment so they never enter the repo,
 # which is PUBLIC. Keep this file 0600 and owned by root:tms.
 EnvironmentFile=-/etc/tms/tms.env
 
-ExecStart=/opt/tms/venv/bin/tms-collector
+ExecStart=/etc/trino-management-service/venv/bin/tms-collector
 
 Restart=on-failure
 RestartSec=5s
@@ -36,13 +36,13 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-# systemd creates and owns /var/log/tms itself. An explicit
+# systemd creates and owns /var/log/trino-management-service itself. An explicit
 # ReadWritePaths= on a directory that does not exist yet makes the whole
 # mount namespace fail to build - the unit then dies with 226/NAMESPACE
 # before a single line of Python runs, which is a miserable first-deploy
 # experience. Nothing writes here today (logs go to the journal); the
 # directory exists so file logging can be added without touching this unit.
-LogsDirectory=tms
+LogsDirectory=trino-management-service
 ProtectKernelTunables=true
 ProtectControlGroups=true
 RestrictSUIDSGID=true

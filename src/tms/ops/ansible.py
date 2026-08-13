@@ -120,8 +120,8 @@ class AnsibleRestartExecutor(RestartExecutor):
         binary: str = "ansible-playbook",
         timeout_seconds: float = 900.0,
         extra_vars: Optional[Dict[str, str]] = None,
-        log_dir: str = "/var/log/tms",
-        state_dir: str = "/var/lib/tms",
+        log_dir: str = "/var/log/trino-management-service",
+        state_dir: str = "/var/lib/trino-management-service",
         runner: Optional[Any] = None,
     ) -> None:
         if not playbook or not os.path.isabs(playbook):
@@ -165,9 +165,12 @@ class AnsibleRestartExecutor(RestartExecutor):
             raise AnsibleError(
                 "cluster_ops.ansible.state_dir {!r} is not writable by this "
                 "service. Ansible refuses to run without a writable HOME, and "
-                "the unit sets ProtectHome=true. Add `StateDirectory=tms` to "
-                "the systemd unit (it creates and owns /var/lib/tms), or point "
-                "state_dir at a directory the service can write.".format(state_dir))
+                "the unit sets ProtectHome=true. Add "
+                "`StateDirectory=trino-management-service` to the systemd unit "
+                "- systemd then creates and owns /var/lib/<that name>, and the "
+                "name must match state_dir. Note StateDirectory takes a name, "
+                "not a path: it is always relative to /var/lib."
+                .format(state_dir))
 
         self.binary = binary
         self.timeout_seconds = timeout_seconds

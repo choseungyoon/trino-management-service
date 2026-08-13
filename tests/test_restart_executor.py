@@ -94,7 +94,7 @@ class BuildTest(unittest.TestCase):
     def test_an_unwritable_state_dir_falls_back_at_startup(self):
         """Ansible aborts at import time without a writable HOME (exit 5,
         measured on ansible-core 2.21). The tms-api unit sets ProtectHome=true,
-        so this is the default outcome unless StateDirectory=tms is set."""
+        so this is the default outcome unless StateDirectory=trino-management-service is set."""
         with tempfile.TemporaryDirectory() as tmp:
             playbook = os.path.join(tmp, "restart.yml")
             inventory = os.path.join(tmp, "cluster1.ini")

@@ -57,14 +57,14 @@ class FakeRunner:
 
 def executor(runner=None, **kwargs):
     return AnsibleRestartExecutor(
-        playbook="/opt/tms/ansible/restart.yml", cluster_inventories=INVENTORIES,
+        playbook="/etc/tms/ansible/restart.yml", cluster_inventories=INVENTORIES,
         runner=runner or FakeRunner(), **kwargs)
 
 
 def _real_executor():
     """An executor wired to the real subprocess runner.
 
-    `state_dir` is a temp directory rather than the default `/var/lib/tms`,
+    `state_dir` is a temp directory rather than the default `/var/lib/trino-management-service`,
     which does not exist on a developer machine - and the executor now refuses
     to build without a writable one, because Ansible refuses to run without it.
     """
@@ -91,7 +91,7 @@ class ConfigurationTest(unittest.TestCase):
         """There is no argument anywhere that selects a playbook."""
         ex = executor()
         command = ex.build_command("prod-a")
-        self.assertEqual("/opt/tms/ansible/restart.yml", command[-1])
+        self.assertEqual("/etc/tms/ansible/restart.yml", command[-1])
 
 
 class TargetingTest(unittest.TestCase):
@@ -128,7 +128,7 @@ class TargetingTest(unittest.TestCase):
     def test_a_relative_inventory_path_is_refused(self):
         """Defence in depth: bad configuration must not become a command."""
         with self.assertRaises(AnsibleError):
-            AnsibleRestartExecutor(playbook="/opt/tms/p.yml",
+            AnsibleRestartExecutor(playbook="/etc/tms/p.yml",
                                    cluster_inventories={"prod-a": "cluster1.ini"},
                                    runner=FakeRunner())
 
@@ -278,15 +278,15 @@ class EnvironmentTest(unittest.TestCase):
     """
 
     def test_home_is_pinned_to_the_state_directory(self):
-        env = ansible_environment("/var/lib/tms")
-        self.assertEqual("/var/lib/tms", env["HOME"])
-        self.assertEqual("/var/lib/tms/.ansible", env["ANSIBLE_HOME"])
-        self.assertEqual("/var/lib/tms/.ansible/tmp", env["ANSIBLE_LOCAL_TEMP"])
+        env = ansible_environment("/var/lib/trino-management-service")
+        self.assertEqual("/var/lib/trino-management-service", env["HOME"])
+        self.assertEqual("/var/lib/trino-management-service/.ansible", env["ANSIBLE_HOME"])
+        self.assertEqual("/var/lib/trino-management-service/.ansible/tmp", env["ANSIBLE_LOCAL_TEMP"])
 
     def test_the_rest_of_the_environment_is_inherited(self):
         """A wholly clean environment would drop what SSH and Ansible need to
         find themselves - PATH above all."""
-        env = ansible_environment("/var/lib/tms")
+        env = ansible_environment("/var/lib/trino-management-service")
         self.assertIn("PATH", env)
         self.assertEqual(os.environ["PATH"], env["PATH"])
 
@@ -297,7 +297,7 @@ class EnvironmentTest(unittest.TestCase):
             AnsibleRestartExecutor(
                 playbook=__file__, cluster_inventories={"prod-a": __file__},
                 binary=sys.executable, state_dir="/nonexistent/tms-state")
-        self.assertIn("StateDirectory=tms", str(caught.exception))
+        self.assertIn("StateDirectory=trino-management-service", str(caught.exception))
 
     def test_a_missing_binary_is_refused_at_construction(self):
         """Ansible commonly lives on a separate control node. Finding that out
