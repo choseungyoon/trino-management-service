@@ -267,6 +267,98 @@ trino.execution.resourcegroups:type=InternalResourceGroup,name=global.adhoc.dash
 
 ---
 
+### T1-4-1. `db` 리소스 그룹 매니저 — **실측 2026-08-13 (로컬 Trino 477)**
+
+D-010(파일 → DB 전환)의 선행 검증. **테이블 스키마는 업스트림 문서에 없다 — 아래가 유일한 근거다.**
+
+#### ① `?currentSchema=` 를 존중한다 — **확인**
+
+`resource-groups.config-db-url=jdbc:postgresql://…/db?currentSchema=trino_resource_groups` 로 기동하면 4개 테이블이 **전부 그 schema 에** 생성된다. `public` 오염 없음.
+
+```
+     table_schema      |            table_name
+-----------------------+-----------------------------------
+ trino_resource_groups | resource_groups
+ trino_resource_groups | selectors
+ trino_resource_groups | resource_groups_global_properties
+ trino_resource_groups | exact_match_source_selectors
+```
+
+→ **다른 시스템과 DB 를 공유하면서 schema 로 격리할 수 있다.** Gateway 19 가 남기는 동명 테이블과의 충돌도 이걸로 피한다.
+
+#### ② ⛔ **DB 가 닿지 않으면 코디네이터가 기동하지 못한다** — **확인**
+
+```
+INFO   io.trino.execution.resourcegroups.InternalResourceGroupManager  -- Loading resource group configuration manager --
+INFO   io.trino.plugin.resourcegroups.db.FlywayMigration               Performing migrations...
+ERROR  io.trino.server.Server   Unable to obtain connection from database (…) : Connection refused
+```
+
+프로세스가 종료된다 (`launcher status` → `Not running`). **재시도·백오프 없음.** `FlywayMigration.migrate()` 가 `Server.doStart()` 안에서 **HTTP 서버 바인딩 이전에 메인 스레드로 동기 실행**되기 때문이다.
+
+> **⚠️ `max-refresh-interval` 은 이걸 막지 못한다.** 그 설정은 *이미 돌고 있는* 코디네이터가 리프레시 실패를 견디는 시간이고, **기동 경로와 무관하다.**
+>
+> **운영 제약**: 리소스 그룹 DB 가 정지 중이면 Trino 코디네이터를 재시작할 수 없다. 안전 시퀀스(FR-CO-02) 4단계 진입 전에 DB 도달성을 확인해야 한다 — 유입을 차단해 놓고 되살리지 못하는 상태가 최악이다.
+
+#### ③ 반면 **이미 돌고 있는 코디네이터는 DB 가 사라져도 멀쩡하다** — **확인**
+
+DB 를 정지시킨 채 코디네이터를 그대로 두고 측정했다.
+
+| 확인 | 결과 |
+|---|---|
+| `GET /v1/info` | **200, `ACTIVE`** |
+| 기존 사용자의 쿼리 | **`FINISHED`** |
+| **한 번도 쿼리한 적 없는 사용자**의 쿼리 | **`FINISHED`** |
+| DB 복구 후 | **Trino 재시작 없이 자가 회복** |
+
+세 번째가 핵심이다. `${USER}` 그룹은 지연 생성이므로 *"DB 가 없으면 신규 사용자만 못 던지는"* 상태가 될 수 있었지만, **캐시된 설정만으로 그룹 생성과 셀렉터 매칭이 모두 성립한다.** 디스패치 시점에 DB 를 읽지 않는다.
+
+> **⚠️ 함정 — 장애 중 로그가 초당 1건씩 쌓인다**
+>
+> 재시도 간격은 `refresh-interval`(**기본 `1s`**)이다. `max-refresh-interval` 은 이 간격을 늘리지 않는다 — 그건 낡은 설정을 견디는 총 시간이다. 실측에서 **2분 9초 동안 129건**이 나왔고, 매 건마다 전체 스택 트레이스가 붙는다.
+>
+> ```
+> ERROR DbResourceGroupConfigurationManager  Error loading configuration from db
+> org.jdbi.v3.core.ConnectionException: … Connection refused
+> ```
+>
+> 기본값으로 두면 **DB 장애 하루 = 코디네이터당 ERROR 약 8.6만 건 + 스택 트레이스**다. 로그 저장소와 에러율 알림이 같이 흔들린다. 리소스 그룹 값은 자주 바뀌지 않으므로 **`resource-groups.refresh-interval=10s`** 로 늘리는 것을 권한다 (반영 지연 10초 ↔ 로그량 1/10).
+>
+> **회복은 아무 로그도 남기지 않는다.** 성공한 리프레시는 조용하다. 즉 **"에러가 멈춘 것"이 유일한 회복 신호**다 — 알림은 이 ERROR 의 *부재*로 판정해야 한다.
+
+#### ④ 실제 스키마 (`\d+`, Trino 477 이 자동 생성)
+
+**`resource_groups`**
+
+| 컬럼 | 타입 | NULL |
+|---|---|---|
+| `resource_group_id` | `bigint` (자동증가) | not null (**PK**) |
+| `name` | `varchar(250)` | **not null** |
+| `max_queued` | `integer` | **not null** |
+| `hard_concurrency_limit` | `integer` | **not null** |
+| `soft_memory_limit` | `varchar(128)` | null |
+| `soft_concurrency_limit` | `integer` | null |
+| `scheduling_policy` | `varchar(128)` | null |
+| `scheduling_weight` | `integer` | null |
+| `jmx_export` | `boolean` | null |
+| `soft_cpu_limit` / `hard_cpu_limit` | `varchar(128)` | null |
+| `hard_physical_data_scan_limit` | `varchar(128)` | null |
+| `parent` | `bigint` | null |
+| `environment` | `varchar(128)` | null |
+
+**`selectors`** — PK `id`(자동증가). `resource_group_id bigint not null`, `priority bigint not null`, `user_regex`/`source_regex`/`query_type`/`client_tags`/`original_user_regex`/`authenticated_user_regex` `varchar(512)`, `user_group_regex varchar(2048)`, `selector_resource_estimate varchar(1024)`.
+
+**`resource_groups_global_properties`** — PK `name varchar(128)`, `value varchar(512)`. **CHECK 제약으로 `name` 은 `cpu_quota_period` 와 `physical_data_scan_quota_period` 둘만 허용**된다.
+
+> **⛔ 함정 2가지 — FR-WL-07(편집 화면) 설계에 직결된다**
+>
+> 1. **`ON DELETE CASCADE` 가 걸려 있다.** `resource_groups.parent` 와 `selectors.resource_group_id` 양쪽 모두. **루트 그룹 한 줄을 지우면 하위 트리와 셀렉터 전부가 함께 사라진다.** 삭제 UI 는 영향 범위를 먼저 보여줘야 한다.
+> 2. **`(name, parent, environment)` 유니크 제약이 없다.** PK 는 자동증가 ID 뿐이다. 같은 INSERT 를 두 번 실행하면 **DB 가 조용히 중복을 받는다.** 멱등성은 전적으로 애플리케이션 책임이다.
+
+**관련**: `DECISIONS.md` D-010, `docs/templates/resource-groups-db.sql`
+
+---
+
 ### T1-5. 실행 중 쿼리 조회 및 kill — **확인**
 
 **REST** — **확인(소스)** `io/trino/server/QueryResource.java` @477

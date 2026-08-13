@@ -40,6 +40,17 @@
 -- empty tables. To change a value afterwards, UPDATE - the coordinators reload
 -- every second and no restart is needed. That is the whole point of db mode.
 --
+-- Nothing in the database stops a double run. Trino's schema has no unique
+-- constraint on (name, parent, environment); the only key is the autoincrement
+-- resource_group_id, so a second run silently produces a duplicate tree
+-- (verified 2026-08-13, TRINO_VERIFIED.md T1-4-1). Check before re-running:
+--
+--   SELECT environment, count(*) FROM resource_groups GROUP BY environment;
+--
+-- Deleting is likewise sharper than it looks: both resource_groups.parent and
+-- selectors.resource_group_id are ON DELETE CASCADE, so removing a root group
+-- takes its whole subtree and every selector pointing into it.
+--
 -- Column names are taken verbatim from the Trino 477 documentation example
 -- (https://trino.io/docs/477/admin/resource-groups.html).
 
