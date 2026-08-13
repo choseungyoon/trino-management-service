@@ -42,3 +42,6 @@ build/
 .codex/
 .impeccable/
 PRODUCT.md.tmp
+
+# Disposable local verification rig (Trino/PostgreSQL/certs) — never commit
+scratchpad/

@@ -17,7 +17,10 @@
 | 항목 | 값 |
 |---|---|
 | Trino 버전 | **477** |
-| 클러스터 | 2개 (코디네이터 1 + 워커 12 각각) |
+| 클러스터 | 2개 (코디네이터 1 + **워커 11** 각각, 2026-08-13 확인). `node.environment` 는 **클러스터마다 다른 값** |
+| 노드 사양 | 서버당 RAM **560GB**, JVM `-Xmx 250G`, `memory.heap-headroom-per-node 30GB` → 워커 쿼리 풀 220GB, **클러스터 총 2,420GB** |
+| ⛔ 메모리 위험 | **`query.max-memory=4016GB` 가 클러스터 총량보다 크다 = 상한이 없다.** 쿼리 1개가 클러스터의 80%(1,936GB)까지 점유 가능. 조치 미완 |
+| 리소스 그룹 | 현재 **file** 매니저. **group provider 없음** (`etc/group-provider.properties` 부재) → `userGroup`/`user_group_regex` 셀렉터는 영구 미매칭 |
 | Gateway | **버전 19** (2026-08-07 확인), 2대, PostgreSQL 공유 (현재 VM1에 co-located = **SPOF**) |
 | Gateway 설정 | 백엔드는 **Gateway UI로 등록**. **라우팅 그룹 미사용**(= 기본 랜덤 라우팅). `databaseCache` 활성, **`expireAfterWrite: 10m`** (⚠️ DB 장애 10분 초과 시 라우팅 실패 — §T2-4) |
 | LB | IP HASH (**세션 어피니티로 교체 예정 — 임시 우회책**) |

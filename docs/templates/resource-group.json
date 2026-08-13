@@ -1,0 +1,29 @@
+{
+  "rootGroups": [
+    {
+      "name": "global",
+      "softMemoryLimit": "80%",
+      "hardConcurrencyLimit": 100,
+      "maxQueued": 1000,
+      "jmxExport": true,
+      "subGroups": [
+        {
+          "name": "${USER}",
+          "softMemoryLimit": "30%",
+          "hardConcurrencyLimit": 8,
+          "maxQueued": 100
+        }
+      ]
+    },
+    {
+      "name": "admin",
+      "hardConcurrencyLimit": 20,
+      "maxQueued": 100,
+      "jmxExport": true
+    }
+  ],
+  "selectors": [
+    { "user": "^datalake\\.admin$", "group": "admin" },
+    { "group": "global.${USER}" }
+  ]
+}
