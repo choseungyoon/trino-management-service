@@ -231,6 +231,13 @@ class ResourceGroupStoreConfig:
 
     enabled: bool = False
     schema: str = "trino_resource_groups"
+    # Whether Trino has `etc/group-provider.properties`. TMS cannot see the
+    # coordinator's filesystem, and the consequence is not obvious: without a
+    # provider the groups Trino compares against are always empty, so any
+    # `user_group_regex` selector is a rule that can never match. Default False
+    # because that is the state a cluster starts in, and a warning about a rule
+    # that does work is cheaper than silence about one that does not.
+    group_provider_configured: bool = False
 
 
 @dataclass(frozen=True)
@@ -548,6 +555,8 @@ def build_config(raw: Dict[str, Any], where: str = "config.secret.yaml") -> Conf
     resource_groups = ResourceGroupStoreConfig(
         enabled=bool(resource_groups_raw.get("enabled", False)),
         schema=str(resource_groups_raw.get("schema") or "trino_resource_groups"),
+        group_provider_configured=bool(
+            resource_groups_raw.get("group_provider_configured", False)),
     )
     if resource_groups.enabled:
         from tms.ops.config_store import valid_schema_name

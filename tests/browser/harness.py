@@ -40,12 +40,14 @@ from tms.api.services import TmsService  # noqa: E402
 from tms.collector.snapshot import (  # noqa: E402
     KIND_HEALTH,
     KIND_QUERIES,
+    KIND_RESOURCE_GROUPS,
     InMemorySnapshotRepository,
     Snapshot,
     utcnow,
 )
 from tms.core.audit import AuditGuard, InMemoryAuditRepository  # noqa: E402
 from tms.core.config import build_config  # noqa: E402
+from tests.browser.rgstore import InMemoryResourceGroupStore
 from tms.core.passwords import hash_password  # noqa: E402
 
 USER = "operator1"
@@ -77,7 +79,8 @@ def _query(qid, user, source, elapsed_ms, long_running=False, state="RUNNING"):
     }
 
 
-def build_app(workload_enabled=False, seed=None, gateway=None):
+def build_app(workload_enabled=False, seed=None, gateway=None,
+              resource_groups=False):
     repository = InMemorySnapshotRepository()
     now = utcnow()
 
@@ -89,6 +92,15 @@ def build_app(workload_enabled=False, seed=None, gateway=None):
             _query("20260808_000000_00003_ccccc", "analyst", "tableau", 800.0,
                    state="QUEUED"),
         ],
+    }))
+    repository.save(Snapshot("prod-a", KIND_RESOURCE_GROUPS, now, payload={
+        "groups": [
+            {"id": "global", "path": ["global"], "name": "global", "depth": 0,
+             "running": 3, "queued": 1, "bottleneck": None},
+            {"id": "legacy.batch", "path": ["legacy", "batch"], "name": "batch",
+             "depth": 1, "running": 2, "queued": 0, "bottleneck": None},
+        ],
+        "tree": [], "summary": {}, "complete": False,
     }))
     repository.save(Snapshot("prod-a", KIND_HEALTH, now, payload={
         "rollup_state": "CONCERNING", "rollup_enabled": True, "stale": False,
@@ -119,9 +131,10 @@ def build_app(workload_enabled=False, seed=None, gateway=None):
     config = build_config({
         "clusters": [
             {"name": "prod-a", "coordinator_url": "https://a.invalid:8443",
-             "expected_workers": 12, "trino_ui_url": "https://a.invalid:8443/ui/"},
+             "expected_workers": 11, "trino_ui_url": "https://a.invalid:8443/ui/",
+             "node_environment": "cluster1"},
             {"name": "prod-b", "coordinator_url": "https://b.invalid:8443",
-             "expected_workers": 12},
+             "expected_workers": 11, "node_environment": "cluster2"},
         ],
         "trino": {"user": "tms-svc", "password": "pw"},
         "database": {"url": "postgresql://u:p@h:5432/d"},
@@ -129,6 +142,7 @@ def build_app(workload_enabled=False, seed=None, gateway=None):
         "deeplinks": {"superset_url": "https://superset.invalid/"},
         "workload": {"enabled": workload_enabled},
         "gateway": gateway or {},
+        "resource_groups": {"enabled": bool(resource_groups)},
         "portal": {
             "session_secret": "b" * 48,
             "local_users": {USER: {"password_hash": hash_password(PASSWORD, iterations=1000),
@@ -143,6 +157,7 @@ def build_app(workload_enabled=False, seed=None, gateway=None):
     service = TmsService(
         config=config, repository=repository, audit_guard=AuditGuard(audit),
         audit_repository=audit, trino_clients={name: trino for name in CLUSTERS},
+        config_store=InMemoryResourceGroupStore() if resource_groups else None,
     )
     return create_app(config=config, service=service), trino
 
@@ -167,11 +182,13 @@ def _free_port():
 
 
 @contextlib.contextmanager
-def serve(workload_enabled=False, seed=None, gateway=None):
+def serve(workload_enabled=False, seed=None, gateway=None,
+          resource_groups=False):
     """Run the console on a free port. Yields (base_url, stub_trino)."""
     import uvicorn
 
     app, trino = build_app(workload_enabled=workload_enabled, seed=seed,
+                           resource_groups=resource_groups,
                            gateway=gateway)
     port = _free_port()
     with tempfile.TemporaryDirectory() as tmp:

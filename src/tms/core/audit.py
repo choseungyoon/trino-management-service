@@ -43,6 +43,13 @@ ACTION_CLUSTER_RESTART = "CLUSTER_RESTART"
 # FR-FL-03. Taking a worker out of the cluster is a write like any other:
 # reason, audit, admin only.
 ACTION_NODE_SHUTDOWN = "NODE_SHUTDOWN"
+# FR-WL-08/09. Editing a resource group is query admission control: a bad value
+# reaches every coordinator within the refresh interval, with no restart to act
+# as a gate.
+ACTION_RESOURCE_GROUP_CHANGE = "RESOURCE_GROUP_CHANGE"
+# FR-WL-10. Its own type rather than a flag on CHANGE, so "how often are these
+# undone" stays an answerable question.
+ACTION_RESOURCE_GROUP_REVERT = "RESOURCE_GROUP_REVERT"
 
 ALLOWED_ACTION_TYPES = frozenset(
     [
@@ -53,6 +60,8 @@ ALLOWED_ACTION_TYPES = frozenset(
         ACTION_AUDIT_EXPORT,
         ACTION_CLUSTER_RESTART,
         ACTION_NODE_SHUTDOWN,
+        ACTION_RESOURCE_GROUP_CHANGE,
+        ACTION_RESOURCE_GROUP_REVERT,
     ]
 )
 
@@ -60,6 +69,7 @@ TARGET_QUERY = "query"
 TARGET_CLUSTER = "cluster"
 TARGET_HEALTH_TEST = "health_test"
 TARGET_NODE = "node"
+TARGET_RESOURCE_GROUP = "resource_group"
 
 # The reason is forwarded to Trino and shown to the user whose query was killed,
 # so it is capped and flattened to a single line.

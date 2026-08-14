@@ -114,6 +114,11 @@ resource_groups:
   # their own schema, so a TMS migration has no path to the rows Trino reads to
   # decide whether to admit a query.
   schema: trino_resource_groups
+  # Does the coordinator have etc/group-provider.properties? TMS cannot see
+  # that file, and the consequence of getting it wrong is quiet: without a
+  # provider Trino always passes empty groups, so a `user_group_regex` selector
+  # never matches anything. Left false, the editor warns whenever one is used.
+  group_provider_configured: false
 
 fleet:
   # FR-FL-01 / FR-FL-03 — node inventory and graceful shutdown.

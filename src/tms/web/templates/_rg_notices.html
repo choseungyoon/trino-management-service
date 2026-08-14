@@ -1,0 +1,31 @@
+{% import "_icons.html" as ui %}
+{# Whatever the last change had to say. Rendered into the page once and then
+   replaced out-of-band by every htmx response, so a message about a row that
+   has since scrolled away is still visible in one predictable place.
+
+   `hx-swap-oob` needs the id to already exist in the DOM, which is why this is
+   always emitted - empty when there is nothing to say. #}
+<div id="rg-notices" hx-swap-oob="true">
+  {% if error %}
+  <div class="banner banner--bad" role="alert">
+    {{ ui.icon('bad', 15, 2) }}
+    <div><b>Not saved.</b> {{ error }}</div>
+  </div>
+  {% endif %}
+  {% for warning in warnings or [] %}
+  {# Saved, but with a consequence people repeatedly fail to predict. Not an
+     error: the configuration is legal and may well be what was intended. #}
+  <div class="banner banner--concerning" role="status">
+    {{ ui.icon('concerning', 15, 2) }}
+    <div><b>{{ warning.target }}</b> — {{ warning.message }}</div>
+  </div>
+  {% endfor %}
+  {% if saved %}
+  <div class="banner banner--good" role="status">
+    {{ ui.icon('good', 15, 2) }}
+    <div>Saved. The coordinators pick this up within
+      <code class="mono">resource-groups.refresh-interval</code> — it is not
+      instant, and no restart is involved.</div>
+  </div>
+  {% endif %}
+</div>

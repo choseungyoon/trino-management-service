@@ -488,6 +488,11 @@ class EveryScreenTest(unittest.IsolatedAsyncioTestCase):
         "test_id": "H-01",
         "sequence_id": "1",
         "host": "w1",
+        # Resource group rows are addressed by their id in Trino's table. The
+        # sweep only checks the route renders; a row that does not exist still
+        # has to answer with a page rather than a traceback.
+        "row_id": "1",
+        "selector_id": "1",
     }
 
     #: Routes that legitimately answer with something other than 200.

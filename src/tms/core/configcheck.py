@@ -447,6 +447,11 @@ _REQUIRED_OBJECTS = (
     ("007_restart_event_output_level.sql", "level", "output"),
     ("008_snapshot_kind_fleet.sql", "kind", "fleet"),
     ("009_node_shutdown_action.sql", "action", "NODE_SHUTDOWN"),
+    ("010_resource_group_revision.sql", "table", "resource_group_revision"),
+    ("010_resource_group_revision.sql", "action", "RESOURCE_GROUP_CHANGE"),
+    # 011 only grants; a privilege is not an object, so there is nothing here to
+    # look for. Missing it shows up as a permission error on the first write,
+    # which names itself clearly enough.
 )
 
 _CONSTRAINT_FOR = {

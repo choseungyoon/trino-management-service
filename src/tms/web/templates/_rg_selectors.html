@@ -1,0 +1,114 @@
+{# Selectors, in evaluation order. Swapped as a unit: priorities are relative,
+   so changing one row changes what every row below it means. #}
+<div id="rg-selectors">
+  <div class="table-scroll">
+    <table class="table">
+      <thead>
+        <tr>
+          <th class="num">Priority</th>
+          <th>Matches</th>
+          <th>Sends to</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for selector in groups.selectors %}
+        {% set last_catch_all = selector.catch_all
+              and groups.selectors | selectattr('catch_all') | list | length == 1 %}
+        {% if confirm_selector_id is defined and confirm_selector_id == selector.id %}
+        <tr class="row-deleting">
+          <td colspan="4">
+            <div class="confirm">
+              <div class="confirm__body">
+                <b>Delete this selector?</b>
+                Queries it was placing go to whichever rule matches next — for
+                most, that is the catch-all.
+              </div>
+              <div class="confirm__actions">
+                <input class="input input--sm" name="reason" required
+                       placeholder="Why is this being deleted?" aria-label="Reason">
+                <button type="button" class="btn btn--sm btn--danger"
+                        hx-post="/clusters/{{ selected_cluster | urlencode }}/resource-groups/selectors/{{ selector.id }}/delete"
+                        hx-include="closest tr" hx-target="#rg-selectors"
+                        hx-swap="outerHTML" data-busy="Deleting…">Delete</button>
+                <button type="button" class="btn btn--sm btn--ghost"
+                        hx-get="/clusters/{{ selected_cluster | urlencode }}/resource-groups/selectors"
+                        hx-target="#rg-selectors" hx-swap="outerHTML">Cancel</button>
+              </div>
+            </div>
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td class="num">{{ selector.priority }}</td>
+          <td>
+            {% if selector.catch_all %}
+            <b>everything else</b>
+            {% else %}
+            {% for key, value in selector.matchers.items() %}
+            <code class="mono">{{ key }}={{ value }}</code>{% if not loop.last %} &amp; {% endif %}
+            {% endfor %}
+            {% endif %}
+          </td>
+          <td><code class="mono">{{ selector.target or '(unknown group)' }}</code></td>
+          <td class="row-actions">
+            {% if can_edit %}
+            {% if last_catch_all %}
+            {# No delete button at all on the last catch-all. Trino 477 does not
+               document what happens to a query matching no selector, so the
+               state is unreachable rather than merely discouraged (V10). The
+               server refuses it too; this stops the offer being made. #}
+            <span class="hint" title="Removing the last catch-all would leave unmatched queries with nowhere to go">required</span>
+            {% else %}
+            <button type="button" class="btn btn--sm btn--ghost"
+                    hx-get="/clusters/{{ selected_cluster | urlencode }}/resource-groups/selectors/{{ selector.id }}/delete"
+                    hx-target="#rg-selectors" hx-swap="outerHTML">Delete</button>
+            {% endif %}
+            {% endif %}
+          </td>
+        </tr>
+        {% endif %}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if can_edit %}
+  <details class="rg-add">
+    <summary>Add a selector</summary>
+    <div class="rg-add__grid">
+      <label class="field">Priority
+        <input class="input num" name="priority" type="number" value="15">
+      </label>
+      <label class="field">Match on
+        <select class="input" name="matcher">
+          <option value="user_regex">user_regex</option>
+          <option value="source_regex">source_regex</option>
+          <option value="query_type">query_type</option>
+          <option value="client_tags">client_tags</option>
+          <option value="original_user_regex">original_user_regex</option>
+          <option value="authenticated_user_regex">authenticated_user_regex</option>
+          <option value="user_group_regex">user_group_regex</option>
+        </select>
+      </label>
+      <label class="field">Pattern
+        <input class="input mono" name="pattern" placeholder="^datalake\.admin$">
+      </label>
+      <label class="field">Sends to
+        <select class="input" name="target_row_id">
+          {% for row in groups.rows %}
+          <option value="{{ row.row_id }}">{{ row.id }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="field">Reason
+        <input class="input" name="reason" required placeholder="Why is this being added?">
+      </label>
+      <button type="button" class="btn btn--primary"
+              hx-post="/clusters/{{ selected_cluster | urlencode }}/resource-groups/selectors"
+              hx-include="closest .rg-add" hx-target="#rg-selectors"
+              hx-swap="outerHTML" data-busy="Adding…">Add selector</button>
+    </div>
+  </details>
+  {% endif %}
+</div>

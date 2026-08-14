@@ -1,0 +1,69 @@
+{# The whole tree table. Swapped as a unit after any structural change, because
+   a delete cascades and an insert reparents - the rows that moved are not
+   knowable from the one that was clicked. Value edits swap a single row. #}
+<div id="rg-tree" class="table-scroll">
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Group</th>
+        <th class="num">Concurrency</th>
+        <th class="num">Max queued</th>
+        <th>Memory</th>
+        <th>Policy</th>
+        <th class="num">Running</th>
+        <th class="num">Queued</th>
+        <th>State</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in groups.rows %}
+      {% include "_rg_row.html" %}
+      {% endfor %}
+
+    </tbody>
+  </table>
+</div>
+
+{% if can_edit %}
+{# Outside the table on purpose. An add form squeezed into the tree's columns
+   has to share widths with data it has nothing to do with, and the first
+   attempt clipped a checkbox label down to a single letter. #}
+<details class="rg-add">
+  <summary>Add a group</summary>
+  <div class="rg-add__grid">
+    <label class="field">Name
+      <input class="input mono" name="name" placeholder="reporting" maxlength="250">
+    </label>
+    <label class="field">Parent
+      <select class="input" name="parent_row_id">
+        {# Trino allows several roots; the shipped template has two. #}
+        <option value="">(root group)</option>
+        {% for row in groups.rows %}
+        <option value="{{ row.row_id }}">under {{ row.id }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="field">Concurrency
+      <input class="input num" name="hard_concurrency_limit" type="number" min="1" value="10">
+    </label>
+    <label class="field">Max queued
+      <input class="input num" name="max_queued" type="number" min="1" value="100">
+    </label>
+    <label class="field">Memory
+      <input class="input" name="soft_memory_limit" placeholder="80% or 100GB" maxlength="128">
+    </label>
+    <label class="field">Reason
+      <input class="input" name="reason" required placeholder="Why is this being added?">
+    </label>
+    <label class="check">
+      <input type="checkbox" name="jmx_export" value="1" checked>
+      visible on the Workload screen
+    </label>
+    <button type="button" class="btn btn--primary"
+            hx-post="/clusters/{{ selected_cluster | urlencode }}/resource-groups"
+            hx-include="closest .rg-add" hx-target="#rg-tree" hx-swap="outerHTML"
+            data-busy="Adding…">Add group</button>
+  </div>
+</details>
+{% endif %}

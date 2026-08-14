@@ -134,5 +134,8 @@
 {% block overlays %}{% endblock %}
 <script src="{{ url_for('web_static', path='tms.js') }}"></script>
 {% block scripts %}{% endblock %}
+{# htmx is loaded only by the screens that need it (D-011). Vendored as a file
+   rather than fetched from a CDN: there is no npm, no build step and no
+   outbound network on the deployment host. #}
 </body>
 </html>

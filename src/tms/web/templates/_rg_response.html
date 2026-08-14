@@ -1,0 +1,13 @@
+{# Every htmx response from this screen: the fragment that was asked for, plus
+   the notices region swapped out of band.
+
+   One template rather than one per fragment, so a message can never be lost by
+   a route that forgot to append it - errors come back attached to the row the
+   operator was editing, and warnings survive the row scrolling away. #}
+{% if fragment == 'tree' %}{% include "_rg_tree.html" %}
+{% elif fragment == 'row' %}{% include "_rg_row.html" %}
+{% elif fragment == 'row_edit' %}{% include "_rg_row_edit.html" %}
+{% elif fragment == 'row_delete' %}{% include "_rg_row_delete.html" %}
+{% elif fragment == 'selectors' %}{% include "_rg_selectors.html" %}
+{% endif %}
+{% include "_rg_notices.html" %}

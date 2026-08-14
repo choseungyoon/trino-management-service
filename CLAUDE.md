@@ -20,7 +20,7 @@
 | 클러스터 | 2개 (코디네이터 1 + **워커 11** 각각, 2026-08-13 확인). `node.environment` 는 **클러스터마다 다른 값** |
 | 노드 사양 | 서버당 RAM **560GB**, JVM `-Xmx 250G`, `memory.heap-headroom-per-node 30GB` → 워커 쿼리 풀 220GB, **클러스터 총 2,420GB** |
 | ⛔ 메모리 위험 | **`query.max-memory=4016GB` 가 클러스터 총량보다 크다 = 상한이 없다.** 쿼리 1개가 클러스터의 80%(1,936GB)까지 점유 가능. 조치 미완 |
-| 리소스 그룹 | 현재 **file** 매니저. **group provider 없음** (`etc/group-provider.properties` 부재) → `userGroup`/`user_group_regex` 셀렉터는 영구 미매칭 |
+| 리소스 그룹 | **db 매니저** (D-010, 2026-08-14 사내 적용). TMS PostgreSQL 의 `trino_resource_groups` schema. 값 변경은 `UPDATE` → 10초 반영, 재시작 없음. **group provider 없음** (`etc/group-provider.properties` 부재) → `userGroup`/`user_group_regex` 셀렉터는 영구 미매칭 |
 | Gateway | **버전 19** (2026-08-07 확인), 2대, PostgreSQL 공유 (현재 VM1에 co-located = **SPOF**) |
 | Gateway 설정 | 백엔드는 **Gateway UI로 등록**. **라우팅 그룹 미사용**(= 기본 랜덤 라우팅). `databaseCache` 활성, **`expireAfterWrite: 10m`** (⚠️ DB 장애 10분 초과 시 라우팅 실패 — §T2-4) |
 | LB | IP HASH (**세션 어피니티로 교체 예정 — 임시 우회책**) |
@@ -101,7 +101,7 @@ TMS가 완전히 다운되어도 모든 쿼리는 정상 실행되어야 한다.
 | `docs/REQUIREMENTS.md` | 구현 착수 시. **릴리스 계획은 부록 B 가 최신** (부록 A = v0.2 추가분) |
 | `docs/BACKLOG.md` | 작업 범위 확인 시. 항목별 SETUP/BUILD/DELEGATE/REJECT 판정 |
 | `docs/DESIGN_R2.md` | R2 착수 시. 설계 + 착수 가능 여부 판정 |
-| `docs/DESIGN_WL07.md` | 리소스 그룹 편집(FR-WL-07~10) 착수 시. 검증 규칙 전량 · 단계 |
+| `docs/DESIGN_WL07.md` | 리소스 그룹 편집(FR-WL-07~10). **검증 규칙 전량(V1~V11 · W1~W5)은 여기가 출처** |
 
 ### 어떻게 만들었나 (구현 참조)
 
@@ -153,9 +153,9 @@ TMS가 완전히 다운되어도 모든 쿼리는 정상 실행되어야 한다.
 
 ---
 
-## 현재 상태 (2026-08-12 갱신)
+## 현재 상태 (2026-08-14 갱신)
 
-**단계**: R1 실환경 배포 완료 → R2 설계(Bolt 3) 완료 → Bolt 4 안전 재시작(FR-CO-02) 구현·실환경 검증 완료 → **Fleet(FR-FL-01/03) 구현 완료**
+**단계**: R1 실환경 배포 완료 → Bolt 4 안전 재시작(FR-CO-02) → Fleet(FR-FL-01/03) → **리소스 그룹 db 전환(D-010) 사내 적용 완료 + 편집 화면(FR-WL-07~10) 구현 완료**
 
 **다음에 무엇을 할지는 `docs/NEXT_STEPS.md` 에 있다.** 그 문서가 유일한 "할 일" 목록이다 — 여기에 별도 목록을 만들지 않는다.
 

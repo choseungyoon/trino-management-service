@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% import "_icons.html" as ui %}
+{% block title %}Resource Group History · {{ selected_cluster }}{% endblock %}
+{% block heading %}Resource Group History{% endblock %}
+
+{% block topbar_extra %}
+<nav class="segmented" aria-label="Cluster">
+  {% for name in cluster_names %}
+  <a href="/clusters/{{ name | urlencode }}/resource-groups/history"
+     {% if selected_cluster == name %}aria-current="page"{% endif %}>{{ name }}</a>
+  {% endfor %}
+</nav>
+{% endblock %}
+
+{% block content %}
+{% if unavailable_reason %}
+<div class="banner" role="status">
+  {{ ui.icon('info', 15, 2) }}
+  <div><b>TMS is not reading Trino's resource group store.</b> {{ unavailable_reason }}</div>
+</div>
+{% endif %}
+
+<div class="banner" role="status">
+  {{ ui.icon('info', 15, 2) }}
+  <div>
+    Trino's own tables keep no history and have nowhere to record why a value
+    was chosen, so TMS keeps this alongside them. Reverting <b>appends</b> — it
+    never removes what came before.
+  </div>
+</div>
+
+<section class="panel">
+  <div class="panel__head">
+    <span class="panel__title">Changes</span>
+    <span class="spacer"></span>
+    <a class="btn btn--sm btn--ghost"
+       href="/clusters/{{ selected_cluster | urlencode }}/resource-groups">Back to groups</a>
+  </div>
+
+  {% if revisions %}
+  <div class="table-scroll">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>When</th>
+          <th>Who</th>
+          <th>What</th>
+          <th>Reason</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for revision in revisions %}
+        <tr>
+          <td>{{ revision.occurred_at | relative_time }}</td>
+          <td><code class="mono">{{ revision.actor }}</code></td>
+          <td>
+            <span class="status">{{ revision.kind | replace('_', ' ') }}</span>
+            <code class="mono">{{ revision.target }}</code>
+          </td>
+          <td>{{ revision.reason }}</td>
+          <td class="row-actions">
+            {% if can_edit %}
+            <form method="post"
+                  action="/clusters/{{ selected_cluster | urlencode }}/resource-groups/history/{{ revision.id }}/revert">
+              <input class="input input--sm" name="reason" required
+                     placeholder="Why revert?" aria-label="Reason">
+              {# Restores the whole environment, not one field: partial undo
+                 multiplies the states that have to be validated, and every one
+                 of them is a way to leave the tree in a shape nobody tested. #}
+              <button class="btn btn--sm btn--danger" type="submit"
+                      data-busy="Reverting…"
+                      data-confirm="Restore the whole tree to how it was before this change?">
+                Revert to before
+              </button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty">
+    {{ ui.icon('info', 22, 1.6) }}
+    <h2>No changes recorded</h2>
+    <p>Nothing has been changed through TMS for this cluster. Rows loaded by
+      the setup script are not revisions — they had no TMS action behind
+      them.</p>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}

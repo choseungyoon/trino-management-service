@@ -544,12 +544,268 @@ def register(app, service, config, authenticator, codec, session_cookie: str,
         except ApiError as exc:
             return _error_page(request, principal, exc)
 
+        context = _rg_context(request, principal, cluster)
+        return render("resource_groups.html", context)
+
+    # -------------------------------------------- FR-WL-08/09, editing (htmx)
+    #
+    # Every write below answers with an HTML fragment rather than JSON, so the
+    # validation that refused it is written once - on the server, where it is
+    # the security boundary anyway - and comes back as something the page can
+    # display without a second implementation in the browser (D-011).
+
+    def _rg_context(request: Request, principal: Principal, cluster: str,
+                    **extra) -> Dict[str, Any]:
+        result = service.get_resource_group_config(principal, cluster)
         context = base_context(request, principal, "resource-groups")
         context.update({
             "groups": result.get("data") or {},
             "selected_cluster": cluster,
+            "can_edit": MANAGE_HEALTH in principal.capabilities,
         })
-        return render("resource_groups.html", context)
+        context.update(extra)
+        return context
+
+    def _rg_row(context, row_id):
+        for row in (context["groups"].get("rows") or []):
+            if str(row.get("row_id")) == str(row_id):
+                return row
+        return None
+
+    def _rg_fragment(request, principal, cluster, fragment, **extra):
+        context = _rg_context(request, principal, cluster, fragment=fragment, **extra)
+        if fragment in ("row", "row_edit"):
+            row = _rg_row(context, extra.get("row_id"))
+            if row is not None and extra.get("submitted"):
+                # A refused change was rolled back, so re-reading the store
+                # returns the old values - and redrawing those would silently
+                # throw away what the operator typed, next to an error telling
+                # them it was wrong. Show what they submitted.
+                row = dict(row, **{k: v for k, v in extra["submitted"].items()
+                                   if v is not None})
+                context["row"] = row
+            if row is None:
+                # The row went away while the screen was open - most likely
+                # someone else deleted it. Re-render the whole tree rather than
+                # an empty row, so the page matches the store again.
+                context["fragment"] = "tree"
+            else:
+                context["row"] = row
+        return render("_rg_response.html", context)
+
+    @app.get("/clusters/{cluster}/resource-groups/{row_id}/row",
+             response_class=HTMLResponse, include_in_schema=False)
+    def resource_group_row(request: Request, cluster: str, row_id: int):
+        """Cancel. Re-reads rather than trusting what the browser still holds."""
+        principal, claims = principal_or_redirect(request)
+        if claims is None:
+            return principal
+        return _rg_fragment(request, principal, cluster, "row", row_id=row_id)
+
+    @app.get("/clusters/{cluster}/resource-groups/{row_id}/edit",
+             response_class=HTMLResponse, include_in_schema=False)
+    def resource_group_edit(request: Request, cluster: str, row_id: int):
+        principal, claims = principal_or_redirect(request)
+        if claims is None:
+            return principal
+        return _rg_fragment(request, principal, cluster, "row_edit", row_id=row_id)
+
+    @app.get("/clusters/{cluster}/resource-groups/{row_id}/delete",
+             response_class=HTMLResponse, include_in_schema=False)
+    def resource_group_delete_confirm(request: Request, cluster: str, row_id: int):
+        """What this delete would take with it, before it is done."""
+        principal, claims = principal_or_redirect(request)
+        if claims is None:
+            return principal
+        try:
+            impact = service.resource_group_deletion_impact(principal, cluster, row_id)
+        except ApiError as exc:
+            return _rg_fragment(request, principal, cluster, "tree", error=str(exc.message))
+        if impact.get("group") is None:
+            return _rg_fragment(request, principal, cluster, "tree")
+        context = _rg_context(request, principal, cluster,
+                              fragment="row_delete", impact=impact)
+        return render("_rg_response.html", context)
+
+    @app.post("/clusters/{cluster}/resource-groups/{row_id}",
+              response_class=HTMLResponse, include_in_schema=False)
+    async def resource_group_save(request: Request, cluster: str, row_id: int):
+        principal, claims = principal_or_redirect(request)
+        if claims is None:
+            return principal
+        form = await request.form()
+        changes = {
+            "name": (form.get("name") or "").strip(),
+            "hard_concurrency_limit": _int_or_none(form.get("hard_concurrency_limit")),
+            "max_queued": _int_or_none(form.get("max_queued")),
+            # An empty box means "no limit", which is a real setting - so it is
+            # written as NULL rather than skipped, or clearing a limit would be
+            # impossible from this screen.
+            "soft_memory_limit": (form.get("soft_memory_limit") or "").strip() or None,
+            "scheduling_policy": (form.get("scheduling_policy") or "").strip() or None,
+            "jmx_export": bool(form.get("jmx_export")),
+        }
+        try:
+            result = service.update_resource_group(
+                principal, cluster, row_id, changes, form.get("reason"))
+        except ApiError as exc:
+            # Back to the edit row, with the values still in the boxes and the
+            # reason next to them.
+            return _rg_fragment(request, principal, cluster, "row_edit",
+                                row_id=row_id, error=str(exc.message),
+                                submitted=changes,
+                                submitted_reason=form.get("reason"))
+        return _rg_fragment(request, principal, cluster, "row", row_id=row_id,
+                            saved=True, warnings=result.get("warnings"))
+
+    @app.post("/clusters/{cluster}/resource-groups/{row_id}/delete",
+              response_class=HTMLResponse, include_in_schema=False)
+    async def resource_group_delete(request: Request, cluster: str, row_id: int):
+        principal, claims = principal_or_redirect(request)
+        if claims is None:
+            return principal
+        form = await request.form()
+        try:
+            result = service.delete_resource_group(
+                principal, cluster, row_id, form.get("reason"))
+        except ApiError as exc:
+            return _rg_fragment(request, principal, cluster, "tree",
+                                error=str(exc.message))
+        # The whole tree, not the one row: a cascade moves rows the browser has
+        # no way to know about.
+        return _rg_fragment(request, principal, cluster, "tree", saved=True,
+                            warnings=result.get("warnings"))
+
+    @app.post("/clusters/{cluster}/resource-groups",
+              response_class=HTMLResponse, include_in_schema=False)
+    async def resource_group_add(request: Request, cluster: str):
+        principal, claims = principal_or_redirect(request)
+        if claims is None:
+            return principal
+        form = await request.form()
+        values = {
+            "hard_concurrency_limit": _int_or_none(form.get("hard_concurrency_limit")),
+            "max_queued": _int_or_none(form.get("max_queued")),
+            "soft_memory_limit": (form.get("soft_memory_limit") or "").strip() or None,
+            "jmx_export": bool(form.get("jmx_export")),
+        }
+        try:
+            result = service.create_resource_group(
+                principal, cluster, (form.get("name") or "").strip(),
+                _int_or_none(form.get("parent_row_id")), values, form.get("reason"))
+        except ApiError as exc:
+            return _rg_fragment(request, principal, cluster, "tree",
+                                error=str(exc.message))
+        return _rg_fragment(request, principal, cluster, "tree", saved=True,
+                            warnings=result.get("warnings"))
+
+    @app.get("/clusters/{cluster}/resource-groups/selectors",
+             response_class=HTMLResponse, include_in_schema=False)
+    def resource_group_selectors(request: Request, cluster: str):
+        """Cancel out of a delete confirmation."""
+        principal, claims = principal_or_redirect(request)
+        if claims is None:
+            return principal
+        return _rg_fragment(request, principal, cluster, "selectors")
+
+    @app.get("/clusters/{cluster}/resource-groups/selectors/{selector_id}/delete",
+             response_class=HTMLResponse, include_in_schema=False)
+    def resource_group_selector_confirm(request: Request, cluster: str,
+                                        selector_id: int):
+        """Two-step, like deleting a group.
+
+        A reason box on every row would put a text field beside data an operator
+        is only reading, and make the destructive action the most prominent
+        thing in the table.
+        """
+        principal, claims = principal_or_redirect(request)
+        if claims is None:
+            return principal
+        return _rg_fragment(request, principal, cluster, "selectors",
+                            confirm_selector_id=selector_id)
+
+    @app.post("/clusters/{cluster}/resource-groups/selectors",
+              response_class=HTMLResponse, include_in_schema=False)
+    async def resource_group_selector_add(request: Request, cluster: str):
+        principal, claims = principal_or_redirect(request)
+        if claims is None:
+            return principal
+        form = await request.form()
+        pattern = (form.get("pattern") or "").strip()
+        matchers = {}
+        if pattern:
+            matchers[(form.get("matcher") or "user_regex")] = pattern
+        try:
+            result = service.create_resource_group_selector(
+                principal, cluster, _int_or_none(form.get("target_row_id")),
+                _int_or_none(form.get("priority")) or 0, matchers, form.get("reason"))
+        except ApiError as exc:
+            return _rg_fragment(request, principal, cluster, "selectors",
+                                error=str(exc.message))
+        return _rg_fragment(request, principal, cluster, "selectors", saved=True,
+                            warnings=result.get("warnings"))
+
+    @app.post("/clusters/{cluster}/resource-groups/selectors/{selector_id}/delete",
+              response_class=HTMLResponse, include_in_schema=False)
+    async def resource_group_selector_delete(request: Request, cluster: str,
+                                             selector_id: int):
+        principal, claims = principal_or_redirect(request)
+        if claims is None:
+            return principal
+        form = await request.form()
+        try:
+            result = service.delete_resource_group_selector(
+                principal, cluster, selector_id, form.get("reason"))
+        except ApiError as exc:
+            return _rg_fragment(request, principal, cluster, "selectors",
+                                error=str(exc.message))
+        return _rg_fragment(request, principal, cluster, "selectors", saved=True,
+                            warnings=result.get("warnings"))
+
+    @app.get("/clusters/{cluster}/resource-groups/history",
+             response_class=HTMLResponse, include_in_schema=False)
+    def resource_group_history(request: Request, cluster: str):
+        principal, claims = principal_or_redirect(request)
+        if claims is None:
+            return principal
+        unavailable = None
+        revisions = []
+        try:
+            revisions = service.resource_group_revisions(principal, cluster)
+        except ApiError as exc:
+            # Same treatment as the groups screen: "the store is not wired up"
+            # is a state to explain on the page, not a 503. An error page here
+            # would read as a fault rather than as a setting.
+            unavailable = str(exc.message)
+        context = base_context(request, principal, "resource-groups")
+        context.update({
+            "revisions": revisions,
+            "unavailable_reason": unavailable,
+            "selected_cluster": cluster,
+            "can_edit": MANAGE_HEALTH in principal.capabilities,
+        })
+        return render("resource_group_history.html", context)
+
+    @app.post("/clusters/{cluster}/resource-groups/history/{revision_id}/revert",
+              include_in_schema=False)
+    async def resource_group_revert(request: Request, cluster: str, revision_id: int):
+        principal, claims = principal_or_redirect(request)
+        if claims is None:
+            return principal
+        form = await request.form()
+        response = RedirectResponse(
+            "/clusters/" + _quote(cluster) + "/resource-groups/history",
+            status_code=303)
+        try:
+            service.revert_resource_group(
+                principal, cluster, revision_id, form.get("reason"))
+        except ApiError as exc:
+            _flash(response, "bad", str(exc.message))
+        else:
+            _flash(response, "good",
+                   "Reverted. The coordinators pick this up within the refresh "
+                   "interval — no restart.")
+        return response
 
     @app.get("/clusters/{cluster}/health", response_class=HTMLResponse, include_in_schema=False)
     def health(request: Request, cluster: str):
@@ -919,6 +1175,19 @@ def _quote(value: str) -> str:
     from urllib.parse import quote
 
     return quote(value, safe="")
+
+
+def _int_or_none(value) -> Optional[int]:
+    """Form fields arrive as strings, and an empty one means "not set".
+
+    Returning None rather than 0 matters: 0 is a real value for a concurrency
+    limit (it stops the group entirely) and validation refuses it on purpose,
+    so silently turning a blank box into 0 would turn a typo into an outage.
+    """
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
 
 
 def _to_csv(rows: List[Dict[str, Any]]) -> str:

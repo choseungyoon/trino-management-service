@@ -1,0 +1,36 @@
+{# One configured group, display mode. Swapped in and out by htmx as a whole
+   <tr>, so the id has to live on the row itself. #}
+<tr id="rg-{{ row.row_id }}">
+  <td style="padding-left: {{ 12 + row.depth * 18 }}px">
+    <code class="mono">{{ row.name }}</code>
+  </td>
+  <td class="num">{{ row.hard_concurrency_limit if row.hard_concurrency_limit is not none else '—' }}</td>
+  <td class="num">{{ row.max_queued if row.max_queued is not none else '—' }}</td>
+  <td>{{ row.soft_memory_limit or '—' }}</td>
+  <td>{{ row.scheduling_policy or 'fair' }}</td>
+  <td class="num">{{ row.running if row.running is not none else '—' }}</td>
+  <td class="num">{{ row.queued if row.queued is not none else '—' }}</td>
+  <td>
+    {% if row.status == 'running' %}
+    <span class="status status--good">running</span>
+    {% elif row.status == 'idle' %}
+    <span class="status">no traffic yet</span>
+    {% elif row.status == 'hidden' %}
+    {# Not a fault. Per-user groups deliberately skip jmxExport: one MBean per
+       user is 50 today and 50,000 at the target scale. #}
+    <span class="status" title="jmxExport is off, so TMS cannot see whether this group is running">not exported</span>
+    {% else %}
+    <span class="status">unknown</span>
+    {% endif %}
+  </td>
+  <td class="row-actions">
+    {% if can_edit %}
+    <button type="button" class="btn btn--sm btn--ghost"
+            hx-get="/clusters/{{ selected_cluster | urlencode }}/resource-groups/{{ row.row_id }}/edit"
+            hx-target="#rg-{{ row.row_id }}" hx-swap="outerHTML">Edit</button>
+    <button type="button" class="btn btn--sm btn--ghost"
+            hx-get="/clusters/{{ selected_cluster | urlencode }}/resource-groups/{{ row.row_id }}/delete"
+            hx-target="#rg-{{ row.row_id }}" hx-swap="outerHTML">Delete</button>
+    {% endif %}
+  </td>
+</tr>

@@ -211,6 +211,60 @@ python scripts/verify_connectivity.py    # node_environment 가 OK 로 나오는
 
 ---
 
+## 7-1. TMS 편집 화면 켜기 (FR-WL-07~10)
+
+여기까지 하면 **`psql` 없이 TMS 화면에서 값을 고칠 수 있다.** 필요한 것은 마이그레이션 두 개와 권한뿐이다.
+
+```bash
+# 1) 리비전 테이블과 감사 액션 타입 (010), 권한 (011)
+cd /etc/trino-management-service
+sudo -u trino-gateway git pull
+psql -h <TMS DB host> -U <소유자> -d <db> -f migrations/010_resource_group_revision.sql
+psql -h <TMS DB host> -U <소유자> -d <db> -f migrations/011_resource_group_grants.sql
+
+# 2) TMS 애플리케이션 계정에 Trino 의 schema 접근 권한
+psql -h <TMS DB host> -U <소유자> -d <db> <<'SQL'
+GRANT USAGE ON SCHEMA trino_resource_groups TO tms_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA trino_resource_groups TO tms_app;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA trino_resource_groups TO tms_app;
+SQL
+
+sudo systemctl restart tms-api
+sudo -u trino-gateway /etc/trino-management-service/venv/bin/tms-config-check
+```
+
+> **⛔ 별도 쓰기 계정(`tms_rg_writer`)을 만들지 않는다.** 설계 단계에서는 그 편이 나아 보였지만(D-010 H-1), 구현하면서 **원자성과 맞바꾸는 거래**라는 것이 드러났다. 두 계정은 두 연결이고, 두 연결은 한 트랜잭션이 될 수 없다. 같은 연결을 쓰면 **변경과 리비전 스냅샷이 함께 커밋되거나 함께 실패한다** — 스냅샷 없는 변경이 생길 수 없다. 감사 기록은 다른 모든 쓰기 액션과 동일하게 감사 선행 + outcome 기록으로 남는다.
+
+**`group_provider_configured`** 도 함께 확인한다. `etc/group-provider.properties` 가 생기기 전까지는 `false` 로 둔다 — 그래야 `user_group_regex` 셀렉터를 만들 때 "이 규칙은 매칭되지 않는다"고 경고한다.
+
+```yaml
+resource_groups:
+  enabled: true
+  schema: trino_resource_groups
+  group_provider_configured: false
+```
+
+### 화면에서 할 수 있는 것
+
+| | |
+|---|---|
+| **조회** | 설정된 전체 트리 + 실행 중 상태 대조. `viewer` 도 볼 수 있다 |
+| **값 수정** | 행 인라인 편집. `reason` 필수, **admin 한정** |
+| **추가/삭제** | 그룹·셀렉터. 삭제는 CASCADE 파급을 목록으로 먼저 보여준다 |
+| **이력/되돌리기** | 누가·왜 바꿨는지. 되돌리기는 트리 전체 복원이며 **이력을 지우지 않고 덧붙인다** |
+
+### 저장이 거부되는 경우
+
+검증 규칙 전량은 `DESIGN_WL07.md` §4 에 있다. 실무에서 자주 걸리는 것:
+
+- **`hard_concurrency_limit: 0`** — Trino 는 받지만 그 그룹이 아무것도 실행하지 않게 된다. 튜닝 값의 탈을 쓴 삭제라 거부한다
+- **catch-all 셀렉터가 없어지는 변경** — 477 문서가 미매칭 쿼리의 동작을 규정하지 않으므로 그 상태에 도달할 수 없다. 마지막 catch-all 에는 삭제 버튼이 아예 없다
+- **형제 그룹 이름 중복** — DB 에 유니크 제약이 없어 중복 트리가 조용히 생긴다
+
+경고(저장은 됨)로 나오는 것: 스캔·CPU 쿼터 추가, `jmx_export` 끄기, group provider 없는 `user_group_regex`, 형제 메모리 합 초과.
+
+---
+
 ## 8. 이후의 값 변경 — 재시작 없음
 
 ```sql

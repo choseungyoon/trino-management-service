@@ -13,6 +13,7 @@ Python 3.9 compatible.
 """
 
 import logging
+import uuid
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 
@@ -37,6 +38,7 @@ from tms.api.permissions import (
 from tms.clients.errors import TrinoClientError, TrinoNotFound
 from tms.clients.trino import build_kill_message
 from tms.collector.resourcegroups import reconcile
+from tms.ops.config_store import ChangeRejected
 from tms.collector.snapshot import (
     GATEWAY_SCOPE,
     KIND_GATEWAY,
@@ -52,9 +54,12 @@ from tms.core.audit import (
     ACTION_HEALTH_TEST_TOGGLE,
     ACTION_HEALTH_THRESHOLD_CHANGE,
     ACTION_QUERY_KILL,
+    ACTION_RESOURCE_GROUP_CHANGE,
+    ACTION_RESOURCE_GROUP_REVERT,
     TARGET_CLUSTER,
     TARGET_HEALTH_TEST,
     TARGET_QUERY,
+    TARGET_RESOURCE_GROUP,
     AuditGuard,
     AuditUnavailable,
     ReasonRequired,
@@ -606,6 +611,109 @@ class TmsService:
                 "advice": configured.advice,
             },
         }
+
+    # ------------------------------------- FR-WL-08/09/10, resource group writes
+
+    def _rg_store_or_503(self, cluster: str):
+        cluster_config = self._cluster_or_404(cluster)
+        if self.config_store is None:
+            raise UpstreamUnavailable(
+                "TMS is not reading Trino's resource group store "
+                "(resource_groups.enabled).")
+        if not cluster_config.node_environment:
+            raise InvalidRequest(
+                "This cluster has no node_environment configured, so TMS cannot "
+                "tell which rows in the store belong to it.")
+        return self.config_store, cluster_config.node_environment
+
+    def _rg_write(self, principal: Principal, cluster: str, reason: str,
+                  target_id: str, operation, action_type=None):
+        """Every resource group write goes through here.
+
+        Admin only, reason required, audited - absolute rule 3, and the same
+        shape as killing a query or restarting a cluster. Changing a group's
+        concurrency limit is query admission control: it reaches every
+        coordinator within the refresh interval, with no restart in between to
+        act as a gate.
+        """
+        require(principal, MANAGE_HEALTH)
+        store, environment = self._rg_store_or_503(cluster)
+        request_id = str(uuid.uuid4())
+
+        with self.audit.action(
+            actor=principal.username, roles=principal.roles,
+            action_type=action_type or ACTION_RESOURCE_GROUP_CHANGE,
+            target_kind=TARGET_RESOURCE_GROUP, target_id=str(target_id),
+            target_cluster=cluster, reason=reason, actor_ip=principal.ip,
+            request_id=request_id,
+        ):
+            try:
+                result = operation(store, environment, request_id)
+            except ChangeRejected as exc:
+                # A refused change is a 400, not a 500: the operator can fix it.
+                # The audit row still records the attempt and its outcome.
+                raise InvalidRequest(
+                    "; ".join(f.message for f in exc.findings))
+        return {
+            "revision_id": result.revision_id,
+            "warnings": [f.as_dict() for f in result.warnings],
+        }
+
+    def update_resource_group(self, principal, cluster, row_id, changes, reason):
+        return self._rg_write(
+            principal, cluster, reason, row_id,
+            lambda store, env, rid: store.update_group(
+                env, row_id, changes, principal.username, reason, rid,
+                self.config.resource_groups.group_provider_configured))
+
+    def create_resource_group(self, principal, cluster, name, parent_row_id,
+                              values, reason):
+        return self._rg_write(
+            principal, cluster, reason, name,
+            lambda store, env, rid: store.create_group(
+                env, name, parent_row_id, values, principal.username, reason, rid,
+                self.config.resource_groups.group_provider_configured))
+
+    def delete_resource_group(self, principal, cluster, row_id, reason):
+        return self._rg_write(
+            principal, cluster, reason, row_id,
+            lambda store, env, rid: store.delete_group(
+                env, row_id, principal.username, reason, rid,
+                self.config.resource_groups.group_provider_configured))
+
+    def create_resource_group_selector(self, principal, cluster, target_row_id,
+                                       priority, matchers, reason):
+        return self._rg_write(
+            principal, cluster, reason, target_row_id,
+            lambda store, env, rid: store.create_selector(
+                env, target_row_id, priority, matchers, principal.username,
+                reason, rid, self.config.resource_groups.group_provider_configured))
+
+    def delete_resource_group_selector(self, principal, cluster, selector_id, reason):
+        return self._rg_write(
+            principal, cluster, reason, selector_id,
+            lambda store, env, rid: store.delete_selector(
+                env, selector_id, principal.username, reason, rid,
+                self.config.resource_groups.group_provider_configured))
+
+    def revert_resource_group(self, principal, cluster, revision_id, reason):
+        return self._rg_write(
+            principal, cluster, reason, revision_id,
+            lambda store, env, rid: store.revert(
+                env, revision_id, principal.username, reason, rid,
+                self.config.resource_groups.group_provider_configured),
+            action_type=ACTION_RESOURCE_GROUP_REVERT)
+
+    def resource_group_deletion_impact(self, principal, cluster, row_id):
+        """What a delete would take with it. Read-only, so viewers may see it."""
+        require(principal, VIEW_HEALTH)
+        store, environment = self._rg_store_or_503(cluster)
+        return store.deletion_impact(environment, row_id)
+
+    def resource_group_revisions(self, principal, cluster, limit: int = 50):
+        require(principal, VIEW_HEALTH)
+        store, environment = self._rg_store_or_503(cluster)
+        return store.revisions(environment, limit=limit)
 
     def _add_queue_age(self, cluster: str, payload: Dict[str, Any]) -> None:
         """How long the longest-waiting query in each group has been queued.
