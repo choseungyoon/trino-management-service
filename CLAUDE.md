@@ -101,6 +101,7 @@ TMS가 완전히 다운되어도 모든 쿼리는 정상 실행되어야 한다.
 | `docs/REQUIREMENTS.md` | 구현 착수 시. **릴리스 계획은 부록 B 가 최신** (부록 A = v0.2 추가분) |
 | `docs/BACKLOG.md` | 작업 범위 확인 시. 항목별 SETUP/BUILD/DELEGATE/REJECT 판정 |
 | `docs/DESIGN_R2.md` | R2 착수 시. 설계 + 착수 가능 여부 판정 |
+| `docs/DESIGN_WL07.md` | 리소스 그룹 편집(FR-WL-07~10) 착수 시. 검증 규칙 전량 · 단계 |
 
 ### 어떻게 만들었나 (구현 참조)
 
