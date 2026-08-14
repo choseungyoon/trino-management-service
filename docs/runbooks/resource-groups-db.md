@@ -265,6 +265,61 @@ resource_groups:
 
 ---
 
+## 7-2. 메모리 상한만 따로 바꾸기 (db 전환 이후)
+
+§2-2 는 메모리 변경을 db 전환에 묶어 두었다. 전환이 끝난 뒤 메모리만 손대는 경우는 이쪽이다.
+
+**고치는 이유는 하나다**: `query.max-memory=4016GB` 는 **클러스터 총량보다 커서 절대 발동하지 않는다.** 쿼리 하나가 클러스터 전체를 먹어도 아무것도 막지 않는다. 문서상 이 값은 초과 쿼리를 *죽이는* 유일한 장치인데, 그게 꺼져 있는 상태다.
+
+### ⛔ 힙을 함께 바꾸는지에 따라 값이 다르다
+
+두 설정은 제약으로 묶여 있다 — `query.max-memory-per-node + memory.heap-headroom-per-node < 최대 힙`.
+
+| | **A. 힙 유지 (`-Xmx 250G`)** | **B. 힙도 400G 로** |
+|---|---|---|
+| 워커 쿼리 풀 | 220GB | 340GB |
+| **클러스터 총량** | **2,420GB** | **3,740GB** |
+| `query.max-memory-per-node` | **176GB 유지** — 270GB 는 못 넣는다 (270+30 > 250) | `270GB` |
+| `memory.heap-headroom-per-node` | 30GB 유지 | `60GB` |
+| `query.max-memory` **600GB** | 클러스터의 **25%** ← 권장 | — |
+| `query.max-memory` **900GB** | 클러스터의 **37%** | 클러스터의 **24%** ← 권장 |
+| `jvm.config` 변경 | 없음 | 있음 |
+| 재시작 | 필요 (전 노드) | 필요 (전 노드) |
+
+**A 에서 900GB 를 넣어도 동작한다.** 상한이 없던 것에 비하면 큰 개선이고, 나중에 힙을 400G 로 올릴 때 그대로 맞는 값이 된다. 다만 그때까지는 쿼리 하나가 클러스터의 **1/3 이상**을 쓸 수 있다는 뜻이다. **힙 변경 계획이 없다면 600GB 를 권한다.**
+
+> **⛔ A 에서 `query.max-memory-per-node` 를 270GB 로 올리지 마라.** `270 + 30 = 300GB > 250GB` 라 제약 위반이고, **코디네이터가 기동하지 않는다.**
+
+### 절차 (A 기준)
+
+```bash
+# 0) 현재 값과 백업
+grep -E 'query.max-memory|heap-headroom' /etc/trino/config.properties
+sudo cp /etc/trino/config.properties /etc/trino/config.properties.bak-$(date +%F)
+
+# 1) 전 노드(코디네이터 + 워커 11)의 config.properties
+#    query.max-memory=600GB          (또는 900GB)
+#    query.max-memory-per-node       ← 손대지 않는다 (176GB 유지)
+#    query.max-total-memory 줄이 있으면 지운다 → 자동으로 max-memory × 2
+```
+
+**2) TMS 안전 시퀀스로 클러스터당 1회 재시작.** 한 번에 한 클러스터씩이고, `cluster1` 을 복구·검증한 뒤 `cluster2` 로 간다.
+
+> **이제 재시작 전에 TMS 가 리소스 그룹 저장소를 확인한다** (D-010 완화 1). 저장소가 안 닿거나 그 클러스터 행이 없으면 4단계 버튼이 막힌다 — db 매니저를 쓰는 코디네이터는 저장소 없이 기동하지 못하기 때문이다. 화면에 이유가 뜬다.
+
+**3) 검증** — 재시작 후 값이 실제로 들어갔는지 본다:
+
+```bash
+grep query.max-memory /etc/trino/config.properties
+# 그리고 쿼리 하나를 흘려 정상 동작 확인
+```
+
+### 되돌리기
+
+`config.properties.bak-*` 복원 후 **안전 시퀀스로** 재시작. 이 변경은 상한을 *좁히는* 것이므로, 되돌릴 이유는 대개 "정상 배치가 상한에 걸려 죽는다"이다. 그 경우 되돌리기보다 **값을 올리는 쪽**이 맞다 — 상한이 없는 상태로 돌아가지 마라.
+
+---
+
 ## 8. 이후의 값 변경 — 재시작 없음
 
 ```sql
