@@ -11,10 +11,17 @@ clusters:
     coordinator_url: https://trino-a-coordinator.example.internal:8443
     expected_workers: 12
     trino_ui_url: https://trino-a-coordinator.example.internal:8443/ui/
+    # This cluster's `node.environment`, copied from the COORDINATOR's
+    # node.properties. Trino's db resource group manager scopes every row by
+    # it, so it is how TMS asks "is this cluster's configuration loaded" before
+    # restarting it (D-010). Only needed when resource_groups.enabled is true;
+    # a cluster without it is skipped by that check rather than blocked.
+    node_environment: cluster1
   - name: prod-b
     coordinator_url: https://trino-b-coordinator.example.internal:8443
     expected_workers: 12
     trino_ui_url: https://trino-b-coordinator.example.internal:8443/ui/
+    node_environment: cluster2
 
 trino:
   # Basic auth service account. Password comes from config.secret.yaml or
@@ -82,6 +89,31 @@ workload:
   # groups without it are invisible to TMS (TRINO_VERIFIED.md §T1-4).
   enabled: false
   poll_interval_seconds: 15
+
+resource_groups:
+  # D-010 — Trino's `db` resource group manager tables. NOT the same thing as
+  # `workload` above, and the two are independent:
+  #
+  #   workload         reads JMX MBeans   -> what each group is doing right now
+  #   resource_groups  reads the database -> what groups are configured at all
+  #
+  # This one is not a screen. It exists because a Trino 477 coordinator using
+  # the db manager exits at startup if it cannot read that store - it does not
+  # come up degraded (TRINO_VERIFIED.md T1-4-1). So before the safe sequence
+  # stops a cluster, TMS asks whether that cluster could start again, and
+  # refuses the step when the answer is no. A cluster stopped with its traffic
+  # already blocked and nothing able to restart it is the worst outcome the
+  # sequence can produce.
+  #
+  # Leave this off while Trino still uses the `file` manager. Off means TMS
+  # makes no claim either way - it does not mean the store was checked and
+  # found healthy.
+  enabled: false
+  # Must match `?currentSchema=` in the coordinator's
+  # resource-groups.config-db-url. The tables live in the TMS database but in
+  # their own schema, so a TMS migration has no path to the rows Trino reads to
+  # decide whether to admit a query.
+  schema: trino_resource_groups
 
 fleet:
   # FR-FL-01 / FR-FL-03 — node inventory and graceful shutdown.
