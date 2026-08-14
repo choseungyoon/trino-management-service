@@ -200,6 +200,66 @@ class Collection:
         }
 
 
+# Why a configured group is, or is not, visible in JMX. Before D-010 moved the
+# configuration into a database, TMS saw only the JMX side and could not tell
+# these apart: an absent MBean meant either "no traffic yet" or "jmxExport is
+# off", and there was no way to know which. The store answers that now.
+STATUS_RUNNING = "running"      # configured, and its MBean is registered
+STATUS_IDLE = "idle"            # configured and exported, but never used
+STATUS_HIDDEN = "hidden"        # configured with jmx_export off - invisible by design
+STATUS_UNMANAGED = "unmanaged"  # an MBean with no row behind it
+STATUS_UNKNOWN = "unknown"      # the JMX side was not collected at all
+
+
+def reconcile(configured, live, live_available=True):
+    """Line the configured groups up against the ones actually running.
+
+    Two independent sources answer two different questions - the store says
+    what is configured, JMX says what has admitted a query - and an operator
+    needs them side by side. A group in one and not the other is the
+    interesting case, in both directions.
+
+    `live_available` is False when workload collection is switched off. Every
+    status is then UNKNOWN rather than IDLE: "no MBean" is only evidence of
+    idleness if someone was looking.
+    """
+    by_id = {group["id"]: group for group in live or []}
+
+    rows = []
+    for group in configured or []:
+        row = dict(group)
+        observed = by_id.get(group["id"])
+        if not live_available:
+            row["status"] = STATUS_UNKNOWN
+        elif observed is not None:
+            row["status"] = STATUS_RUNNING
+        elif not group.get("jmx_export"):
+            row["status"] = STATUS_HIDDEN
+        else:
+            row["status"] = STATUS_IDLE
+        row["running"] = (observed or {}).get("running")
+        row["queued"] = (observed or {}).get("queued")
+        row["bottleneck"] = (observed or {}).get("bottleneck")
+        rows.append(row)
+
+    # Groups running with nothing behind them. Either someone edited the
+    # database by hand, or `node.environment` does not match what this
+    # coordinator actually runs with - both worth surfacing rather than
+    # quietly dropping, since the second means the whole screen is describing
+    # the wrong cluster.
+    configured_ids = {group["id"] for group in configured or []}
+    unmanaged = []
+    if live_available:
+        for group in live or []:
+            if group["id"] in configured_ids:
+                continue
+            row = dict(group)
+            row["status"] = STATUS_UNMANAGED
+            unmanaged.append(row)
+
+    return rows, unmanaged
+
+
 NO_GROUPS_ADVICE = (
     "No resource group MBeans are registered. Either no group has admitted a "
     "query yet, or resource-groups.json is missing \"jmxExport\": true - groups "

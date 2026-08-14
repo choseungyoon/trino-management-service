@@ -269,6 +269,12 @@ svg { display: block; flex: none; }
 }
 .panel__title { font-size: 13px; font-weight: 700; }
 .panel__sub { font-size: 11.5px; color: var(--tx-2); }
+/* Sits under a table to explain what the table is, rather than above it where
+   it would push the data down on every visit. */
+.panel__note {
+  font-size: 11.5px; color: var(--tx-2); line-height: 1.6;
+  padding: 10px 16px 14px; border-top: 1px solid var(--line); margin: 0;
+}
 .panel__head .spacer { flex: 1; }
 
 /* ── Overview ───────────────────────────────────────────────────────── */

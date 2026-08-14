@@ -26,7 +26,7 @@ Python 3.9 compatible.
 
 import logging
 import re
-from typing import Any, Optional
+from typing import Any, Dict, List, Optional
 
 log = logging.getLogger(__name__)
 
@@ -73,11 +73,99 @@ UNCONFIGURED = StoreProbe(
     None, "TMS is not checking the resource group store for this cluster.")
 
 
+# Column order is pinned rather than SELECT *: the schema is Trino's, and a
+# future release adding a column should not silently shift what TMS reads.
+_GROUP_COLUMNS = (
+    "resource_group_id", "name", "parent", "soft_memory_limit",
+    "soft_concurrency_limit", "hard_concurrency_limit", "max_queued",
+    "scheduling_policy", "scheduling_weight", "jmx_export", "soft_cpu_limit",
+    "hard_cpu_limit", "hard_physical_data_scan_limit",
+)
+
+# Every way a selector can narrow what it matches. A row with all of these null
+# is the catch-all, and there must always be one - Trino 477 does not document
+# what happens to a query that matches no selector (DESIGN_WL07.md V10).
+_MATCHER_COLUMNS = (
+    "user_regex", "user_group_regex", "source_regex", "query_type",
+    "client_tags", "original_user_regex", "authenticated_user_regex",
+)
+
+_SELECTOR_COLUMNS = ("id", "priority", "resource_group_id") + _MATCHER_COLUMNS
+
+
+class ConfiguredTree:
+    """What the store says is configured for one `node.environment`.
+
+    Distinct from the JMX view in `collector/resourcegroups.py`, which reports
+    groups that have *admitted a query*. A group configured but never used has
+    no MBean at all, so until D-010 moved the configuration into a database TMS
+    could not report the configured set (DESIGN_R2.md 1-3). This is that set.
+    """
+
+    __slots__ = ("groups", "tree", "selectors", "error", "advice")
+
+    def __init__(self, groups, selectors, error=None, advice=None):
+        from tms.collector.resourcegroups import build_tree
+
+        self.groups = groups
+        self.tree = build_tree(groups)
+        self.selectors = selectors
+        self.error = error
+        self.advice = advice
+
+    @property
+    def catch_all(self):
+        """The selector that matches everything, or None - see V10."""
+        for selector in self.selectors:
+            if selector.get("catch_all"):
+                return selector
+        return None
+
+    def as_payload(self) -> Dict[str, Any]:
+        return {
+            "groups": self.groups,
+            "tree": self.tree,
+            "selectors": self.selectors,
+            "has_catch_all": self.catch_all is not None,
+        }
+
+
+def _dotted_paths(rows: List[Dict[str, Any]]) -> Dict[Any, List[str]]:
+    """Row id -> ['global', 'adhoc'], following `parent` upwards.
+
+    Trino stores the hierarchy as parent ids; every other part of TMS - the JMX
+    MBean names, the workload screen, the selectors' targets - speaks dotted
+    paths. Converting once here keeps that one representation everywhere.
+    """
+    by_id = {row["resource_group_id"]: row for row in rows}
+    paths: Dict[Any, List[str]] = {}
+
+    def resolve(row_id, seen):
+        if row_id in paths:
+            return paths[row_id]
+        row = by_id.get(row_id)
+        if row is None or row_id in seen:
+            # A missing parent or a cycle. Neither should exist, but reading a
+            # table TMS does not own means neither can be assumed away, and
+            # recursing forever is a worse failure than a shortened path.
+            return []
+        seen.add(row_id)
+        parent = row.get("parent")
+        prefix = resolve(parent, seen) if parent is not None else []
+        paths[row_id] = prefix + [row["name"]]
+        return paths[row_id]
+
+    for row in rows:
+        resolve(row["resource_group_id"], set())
+    return paths
+
+
 class ResourceGroupStore:
     """Reads Trino's resource group tables. Never writes.
 
-    Writing is FR-WL-07's job and will use its own account; this exists only so
-    the restart sequence can look before it leaps.
+    Writing is FR-WL-08's job and will use its own account (DESIGN_WL07.md
+    H-1); this reads, so that the restart sequence can look before it leaps and
+    so the configured tree can be shown next to the running one.
     """
 
     def __init__(self, dsn: str, schema: str) -> None:
@@ -146,6 +234,98 @@ class ResourceGroupStore:
             "Resource group store reachable: {groups} group(s), {selectors} "
             "selector(s) for node.environment '{env}'."
         ).format(groups=groups, selectors=selectors, env=environment))
+
+
+    def load_configured(self, environment: str) -> ConfiguredTree:
+        """The configured groups and selectors for one environment.
+
+        Never raises, for the same reason `probe` does not: this feeds a screen
+        an operator opens during an incident, and a traceback where the tree
+        should be answers nothing.
+        """
+        if not (environment or "").strip():
+            return ConfiguredTree([], [], error="no node_environment configured",
+                                  advice=NO_ENVIRONMENT_ADVICE)
+        environment = environment.strip()
+
+        group_sql = "SELECT {cols} FROM {schema}.resource_groups WHERE environment = %s".format(
+            cols=", ".join(_GROUP_COLUMNS), schema=self._schema)
+        selector_sql = (
+            "SELECT {cols} FROM {schema}.selectors s"
+            " JOIN {schema}.resource_groups g"
+            "   ON s.resource_group_id = g.resource_group_id"
+            " WHERE g.environment = %s"
+            " ORDER BY s.priority DESC, s.id"
+        ).format(cols=", ".join("s." + c for c in _SELECTOR_COLUMNS),
+                 schema=self._schema)
+
+        try:
+            with self._connect() as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(group_sql, (environment,))
+                    group_rows = [dict(zip(_GROUP_COLUMNS, row))
+                                  for row in cursor.fetchall() or []]
+                    cursor.execute(selector_sql, (environment,))
+                    selector_rows = [dict(zip(_SELECTOR_COLUMNS, row))
+                                     for row in cursor.fetchall() or []]
+        except Exception as exc:  # noqa: BLE001 - a screen, not a crash
+            log.warning("resource group store read failed for %s: %s", environment, exc)
+            return ConfiguredTree([], [], error=_unreachable_detail(exc, self._schema))
+
+        paths = _dotted_paths(group_rows)
+        groups = []
+        for row in group_rows:
+            path = paths.get(row["resource_group_id"]) or [row["name"]]
+            groups.append({
+                "id": ".".join(path),
+                "path": path,
+                "name": row["name"],
+                "depth": len(path) - 1,
+                "row_id": row["resource_group_id"],
+                "jmx_export": bool(row.get("jmx_export")),
+                "hard_concurrency_limit": row.get("hard_concurrency_limit"),
+                "soft_concurrency_limit": row.get("soft_concurrency_limit"),
+                "max_queued": row.get("max_queued"),
+                "soft_memory_limit": row.get("soft_memory_limit"),
+                "soft_cpu_limit": row.get("soft_cpu_limit"),
+                "hard_cpu_limit": row.get("hard_cpu_limit"),
+                "hard_physical_data_scan_limit": row.get("hard_physical_data_scan_limit"),
+                "scheduling_policy": row.get("scheduling_policy"),
+                "scheduling_weight": row.get("scheduling_weight"),
+            })
+
+        target_of = {g["row_id"]: g["id"] for g in groups}
+        selectors = []
+        for row in selector_rows:
+            matchers = {name: row.get(name) for name in _MATCHER_COLUMNS
+                        if row.get(name) not in (None, "")}
+            selectors.append({
+                "id": row["id"],
+                "priority": row["priority"],
+                "target": target_of.get(row["resource_group_id"], ""),
+                "matchers": matchers,
+                "catch_all": not matchers,
+            })
+
+        error = None
+        advice = None
+        if not groups:
+            error = "no resource groups configured for '{}'".format(environment)
+            advice = NO_ROWS_ADVICE.format(env=environment)
+        return ConfiguredTree(groups, selectors, error=error, advice=advice)
+
+
+NO_ENVIRONMENT_ADVICE = (
+    "This cluster has no `node_environment` in config.yaml, so TMS cannot tell "
+    "which rows in the store belong to it. Copy the value from the "
+    "coordinator's node.properties."
+)
+
+NO_ROWS_ADVICE = (
+    "The store holds no rows for node.environment '{env}'. Either the value "
+    "does not match the coordinator's node.properties, or this cluster's rows "
+    "were never loaded - see runbooks/resource-groups-db.md."
+)
 
 
 def _unreachable_detail(exc: Exception, schema: str) -> str:

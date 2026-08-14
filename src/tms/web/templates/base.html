@@ -43,6 +43,9 @@
       <a href="/queries" {% if page == 'queries' %}aria-current="page"{% endif %}>{{ ui.icon('queries') }}Live Queries</a>
       <a href="/clusters/{{ cluster_names[0] }}/health" {% if page == 'health' %}aria-current="page"{% endif %}>{{ ui.icon('health') }}Health</a>
       <a href="/clusters/{{ cluster_names[0] }}/workload" {% if page == 'workload' %}aria-current="page"{% endif %}>{{ ui.icon('queries') }}Workload</a>
+      {% if resource_groups_enabled %}
+      <a href="/clusters/{{ cluster_names[0] }}/resource-groups" {% if page == 'resource-groups' %}aria-current="page"{% endif %}>{{ ui.icon('queries') }}Resource Groups</a>
+      {% endif %}
       {% if fleet_enabled %}
       <a href="/clusters/{{ cluster_names[0] }}/fleet" {% if page == 'fleet' %}aria-current="page"{% endif %}>{{ ui.icon('overview') }}Fleet</a>
       {% endif %}

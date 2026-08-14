@@ -1,0 +1,198 @@
+{% extends "base.html" %}
+{% import "_icons.html" as ui %}
+{% block title %}Resource Groups · {{ selected_cluster }}{% endblock %}
+{% block heading %}Resource Groups{% endblock %}
+
+{% block topbar_extra %}
+<nav class="segmented" aria-label="Cluster">
+  {% for name in cluster_names %}
+  <a href="/clusters/{{ name | urlencode }}/resource-groups"
+     {% if selected_cluster == name %}aria-current="page"{% endif %}>{{ name }}</a>
+  {% endfor %}
+</nav>
+{% endblock %}
+
+{% block content %}
+{% if not groups.enabled %}
+<div class="banner" role="status">
+  {{ ui.icon('info', 15, 2) }}
+  <div>
+    <b>TMS is not reading Trino's resource group store.</b>
+    {{ groups.unavailable_reason }}
+  </div>
+</div>
+
+{% else %}
+
+{% if groups.unavailable_reason %}
+<div class="banner banner--bad" role="alert">
+  {{ ui.icon('bad', 15, 2) }}
+  <div>
+    <b>{{ groups.unavailable_reason }}</b>
+    {% if groups.advice %}<div>{{ groups.advice }}</div>{% endif %}
+  </div>
+</div>
+{% endif %}
+
+{# The one invariant worth interrupting for. Trino 477 does not document what
+   happens to a query matching no selector, so a tree without a catch-all is a
+   configuration nobody has tested - including Trino's own authors. #}
+{% if groups.rows and not groups.has_catch_all %}
+<div class="banner banner--bad" role="alert">
+  {{ ui.icon('bad', 15, 2) }}
+  <div>
+    <b>No catch-all selector.</b>
+    Every selector here narrows what it matches, so a query matching none of
+    them has nowhere to go — and Trino 477 does not document what it does in
+    that case. Add a selector with no conditions at the lowest priority.
+  </div>
+</div>
+{% endif %}
+
+{% if not groups.live_available and groups.rows %}
+<div class="banner" role="status">
+  {{ ui.icon('info', 15, 2) }}
+  <div>{{ groups.live_reason }} The <b>Running</b> column is blank for that
+    reason, not because the groups are idle.</div>
+</div>
+{% endif %}
+
+{% if groups.unmanaged %}
+{# A group running with no row behind it means either someone edited the
+   database by hand or node.environment does not match this coordinator. The
+   second is worse: it means everything else on this page describes the wrong
+   cluster. #}
+<div class="banner banner--concerning" role="alert">
+  {{ ui.icon('concerning', 15, 2) }}
+  <div>
+    <b>{{ groups.unmanaged | length }} group(s) are running with no configuration behind them:</b>
+    {% for row in groups.unmanaged %}<code class="mono">{{ row.id }}</code>{% if not loop.last %}, {% endif %}{% endfor %}.
+    Either the store was edited outside TMS, or this cluster's
+    <code class="mono">node.environment</code> is not
+    <code class="mono">{{ groups.environment }}</code>.
+  </div>
+</div>
+{% endif %}
+
+<section class="panel">
+  <div class="panel__head">
+    <span class="panel__title">Configured groups</span>
+    <span class="spacer"></span><span class="panel__sub">
+      node.environment <code class="mono">{{ groups.environment }}</code>
+    </span>
+  </div>
+
+  {% if groups.rows %}
+  <div class="table-scroll">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Group</th>
+          <th class="num">Concurrency</th>
+          <th class="num">Max queued</th>
+          <th>Memory</th>
+          <th>Policy</th>
+          <th class="num">Running</th>
+          <th class="num">Queued</th>
+          <th>State</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in groups.rows %}
+        <tr>
+          <td style="padding-left: {{ 12 + row.depth * 18 }}px">
+            <code class="mono">{{ row.name }}</code>
+          </td>
+          <td class="num">{{ row.hard_concurrency_limit if row.hard_concurrency_limit is not none else '—' }}</td>
+          <td class="num">{{ row.max_queued if row.max_queued is not none else '—' }}</td>
+          <td>{{ row.soft_memory_limit or '—' }}</td>
+          <td>{{ row.scheduling_policy or 'fair' }}</td>
+          <td class="num">{{ row.running if row.running is not none else '—' }}</td>
+          <td class="num">{{ row.queued if row.queued is not none else '—' }}</td>
+          <td>
+            {% if row.status == 'running' %}
+            <span class="status status--good">running</span>
+            {% elif row.status == 'idle' %}
+            <span class="status">no traffic yet</span>
+            {% elif row.status == 'hidden' %}
+            {# Not a fault. Per-user groups deliberately skip jmxExport: one
+               MBean per user is 50 today and 50,000 at the target scale. #}
+            <span class="status" title="jmxExport is off for this group, so TMS cannot see whether it is running">not exported</span>
+            {% else %}
+            <span class="status">unknown</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="panel__note">
+    This is the <b>configured</b> set, read from the store — unlike the
+    Workload screen, a group appears here whether or not it has ever run a
+    query. Changes made in the database reach the coordinators within
+    <code class="mono">resource-groups.refresh-interval</code>, with no restart.
+  </p>
+  {% else %}
+  <div class="empty">
+    {{ ui.icon('info', 22, 1.6) }}
+    <h2>No groups configured</h2>
+    <p>The store holds no rows for
+      <code class="mono">{{ groups.environment or 'this cluster' }}</code>.</p>
+  </div>
+  {% endif %}
+</section>
+
+<section class="panel">
+  <div class="panel__head">
+    <span class="panel__title">Selectors</span>
+    <span class="spacer"></span><span class="panel__sub">evaluated top to bottom</span>
+  </div>
+
+  {% if groups.selectors %}
+  <div class="table-scroll">
+    <table class="table">
+      <thead>
+        <tr>
+          <th class="num">Priority</th>
+          <th>Matches</th>
+          <th>Sends to</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for selector in groups.selectors %}
+        <tr>
+          <td class="num">{{ selector.priority }}</td>
+          <td>
+            {% if selector.catch_all %}
+            <b>everything else</b>
+            {% else %}
+            {% for key, value in selector.matchers.items() %}
+            <code class="mono">{{ key }}={{ value }}</code>{% if not loop.last %} &amp; {% endif %}
+            {% endfor %}
+            {% endif %}
+          </td>
+          <td><code class="mono">{{ selector.target or '(unknown group)' }}</code></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="panel__note">
+    Order is meaning: Trino takes the first selector that matches, in
+    descending priority. <code class="mono">user_group_regex</code> only ever
+    matches when a group provider is configured
+    (<code class="mono">etc/group-provider.properties</code>) — without one it
+    is a dead rule.
+  </p>
+  {% else %}
+  <div class="empty">
+    {{ ui.icon('info', 22, 1.6) }}
+    <h2>No selectors</h2>
+    <p>Nothing routes queries into these groups.</p>
+  </div>
+  {% endif %}
+</section>
+
+{% endif %}
+{% endblock %}

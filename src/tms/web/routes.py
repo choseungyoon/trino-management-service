@@ -124,6 +124,12 @@ def register(app, service, config, authenticator, codec, session_cookie: str,
         # swapping two panels (tms.js), because a whole-page reload every few
         # seconds would throw away the operator's place in a progress log that
         # is still being written to.
+        #
+        # "resource-groups" is absent too, for the opposite reason: it shows
+        # configuration, which changes when a person changes it rather than on
+        # a timer. Polling it would put a query per interval on the database
+        # Trino itself reads to admit queries, to re-fetch an answer that is
+        # almost always identical to the last one.
     }
 
     def base_context(request: Request, principal: Principal, page: str) -> Dict[str, Any]:
@@ -145,6 +151,7 @@ def register(app, service, config, authenticator, codec, session_cookie: str,
             "gateway_enabled": config.gateway.enabled,
             "restarts_enabled": restarts is not None,
             "fleet_enabled": fleet is not None,
+            "resource_groups_enabled": config.resource_groups.enabled,
             # A cluster held out of rotation is invisible on every other
             # screen: the remaining clusters are green, so the console looks
             # healthy while traffic is being refused. The banner follows the
@@ -518,6 +525,31 @@ def register(app, service, config, authenticator, codec, session_cookie: str,
             "selected_cluster": cluster,
         })
         return render("workload.html", context)
+
+    @app.get("/clusters/{cluster}/resource-groups", response_class=HTMLResponse,
+             include_in_schema=False)
+    def resource_groups(request: Request, cluster: str):
+        """The configured tree (FR-WL-07), read only.
+
+        No envelope and no staleness banner: this comes from the store rather
+        than a collector snapshot, so it is current by construction. The one
+        part that can be stale is the JMX column, and the payload says so
+        separately.
+        """
+        principal, claims = principal_or_redirect(request)
+        if claims is None:
+            return principal
+        try:
+            result = service.get_resource_group_config(principal, cluster)
+        except ApiError as exc:
+            return _error_page(request, principal, exc)
+
+        context = base_context(request, principal, "resource-groups")
+        context.update({
+            "groups": result.get("data") or {},
+            "selected_cluster": cluster,
+        })
+        return render("resource_groups.html", context)
 
     @app.get("/clusters/{cluster}/health", response_class=HTMLResponse, include_in_schema=False)
     def health(request: Request, cluster: str):

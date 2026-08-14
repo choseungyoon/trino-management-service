@@ -36,6 +36,7 @@ from tms.api.permissions import (
 )
 from tms.clients.errors import TrinoClientError, TrinoNotFound
 from tms.clients.trino import build_kill_message
+from tms.collector.resourcegroups import reconcile
 from tms.collector.snapshot import (
     GATEWAY_SCOPE,
     KIND_GATEWAY,
@@ -135,6 +136,7 @@ class TmsService:
         audit_repository,
         trino_clients: Dict[str, Any],
         clock: Optional[Callable[[], datetime]] = None,
+        config_store=None,
     ) -> None:
         self.config = config
         self.repository = repository
@@ -142,6 +144,10 @@ class TmsService:
         self.audit_repository = audit_repository
         self.trino_clients = trino_clients
         self._clock = clock or utcnow
+        # Trino's resource group tables (D-010). None while Trino still uses
+        # the file manager - the screen then says so rather than showing an
+        # empty tree that looks like "nothing is configured".
+        self.config_store = config_store
 
     @property
     def _stale_threshold(self) -> float:
@@ -548,6 +554,58 @@ class TmsService:
             payload["advice"] = snapshot.advice
         self._add_queue_age(cluster, payload)
         return envelope(snapshot, payload, self._stale_threshold)
+
+    def get_resource_group_config(self, principal: Principal, cluster: str) -> Dict[str, Any]:
+        """The configured resource group tree, next to what is running (FR-WL-07).
+
+        Reads the store directly rather than a collector snapshot. Configuration
+        changes when a person changes it, not on a timer, and polling it would
+        add a query per interval to answer a question whose answer is almost
+        always the same as last time.
+
+        The JMX side does come from a snapshot, and may be missing - workload
+        collection is off by default. The two are kept distinct in the payload
+        so the screen can say which half it has.
+        """
+        require(principal, VIEW_HEALTH)
+        cluster_config = self._cluster_or_404(cluster)
+
+        if self.config_store is None:
+            return {
+                "data": {
+                    "enabled": False, "rows": [], "unmanaged": [], "selectors": [],
+                    "unavailable_reason": (
+                        "TMS is not reading Trino's resource group store "
+                        "(resource_groups.enabled). Trino is presumably still "
+                        "using the file configuration manager, which TMS cannot "
+                        "read."),
+                },
+            }
+
+        configured = self.config_store.load_configured(cluster_config.node_environment)
+
+        snapshot = self.repository.load(cluster, KIND_RESOURCE_GROUPS)
+        live_available = bool(self.config.workload.enabled and snapshot is not None)
+        live = ((snapshot.payload or {}).get("groups") or []) if snapshot else []
+
+        rows, unmanaged = reconcile(configured.groups, live, live_available=live_available)
+        return {
+            "data": {
+                "enabled": True,
+                "environment": cluster_config.node_environment,
+                "rows": rows,
+                "unmanaged": unmanaged,
+                "selectors": configured.selectors,
+                "has_catch_all": configured.catch_all is not None,
+                "live_available": live_available,
+                "live_reason": (
+                    None if live_available else
+                    "Workload collection is off (workload.enabled), so TMS "
+                    "cannot say which of these groups are running."),
+                "unavailable_reason": configured.error,
+                "advice": configured.advice,
+            },
+        }
 
     def _add_queue_age(self, cluster: str, payload: Dict[str, Any]) -> None:
         """How long the longest-waiting query in each group has been queued.

@@ -65,7 +65,7 @@ def build_trino_clients(config: Config) -> dict:
 SESSION_COOKIE = "tms_session"
 
 
-def build_restart_service(config: Config, service: TmsService):
+def build_restart_service(config: Config, service: TmsService, config_store=None):
     """Assemble the safe restart sequence (FR-CO-02), or None if it cannot run.
 
     None rather than a half-built service: without the Gateway there is no way
@@ -99,7 +99,10 @@ def build_restart_service(config: Config, service: TmsService):
         gateway_client=gateway_client,
         audit_guard=service.audit,
         executor=build_executor(config),
-        config_store=build_resource_group_store(config),
+        # Built once by the caller and shared with TmsService: one store, one
+        # place that knows whether it is configured at all.
+        config_store=(config_store if config_store is not None
+                      else build_resource_group_store(config)),
     )
 
 
@@ -170,6 +173,8 @@ def create_app(config: Optional[Config] = None, service: Optional[TmsService] = 
             len(authenticator.users),
         )
 
+    config_store = build_resource_group_store(config)
+
     if service is None:
         snapshots = PostgresSnapshotRepository(config.database_url.reveal())
         audit_repository = PostgresAuditRepository(config.database_url.reveal())
@@ -179,10 +184,11 @@ def create_app(config: Optional[Config] = None, service: Optional[TmsService] = 
             audit_guard=AuditGuard(audit_repository),
             audit_repository=audit_repository,
             trino_clients=build_trino_clients(config),
+            config_store=config_store,
         )
 
     if restarts is None:
-        restarts = build_restart_service(config, service)
+        restarts = build_restart_service(config, service, config_store=config_store)
     if fleet is None:
         fleet = build_fleet_service(config, service)
 
