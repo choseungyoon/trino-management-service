@@ -180,15 +180,25 @@ def register(app, service, config, authenticator, codec, session_cookie: str,
         )
 
     def _flash(response, level: str, message: str) -> None:
-        response.set_cookie("tms_flash", "{}|{}".format(level, message),
+        # Percent-encoded because a cookie value is latin-1 only, and these
+        # messages are not: they carry typographic punctuation, and the error
+        # variants are built from exception text that can contain anything at
+        # all. An em dash used to raise UnicodeEncodeError from inside
+        # set_cookie - a 500 produced while reporting the outcome of an action
+        # that had already succeeded.
+        from urllib.parse import quote
+
+        response.set_cookie("tms_flash", "{}|{}".format(level, quote(message)),
                             max_age=15, path="/", samesite="strict")
 
     def _take_flash(request: Request) -> Optional[Dict[str, str]]:
+        from urllib.parse import unquote
+
         raw = request.cookies.get("tms_flash")
         if not raw or "|" not in raw:
             return None
         level, message = raw.split("|", 1)
-        return {"level": level, "message": message}
+        return {"level": level, "message": unquote(message)}
 
     # ── auth ───────────────────────────────────────────────────────────
 
@@ -627,6 +637,48 @@ def register(app, service, config, authenticator, codec, session_cookie: str,
                               fragment="row_delete", impact=impact)
         return render("_rg_response.html", context)
 
+    # ⛔ Ordering matters below. FastAPI matches routes in registration order,
+    # and `{row_id}` is typed `int`, so a literal segment registered after it -
+    # `/resource-groups/selectors` - is read as a row id, fails to parse, and
+    # answers 422 without its own handler ever running. Literal paths first.
+    @app.post("/clusters/{cluster}/resource-groups/selectors",
+              response_class=HTMLResponse, include_in_schema=False)
+    async def resource_group_selector_add(request: Request, cluster: str):
+        principal, claims = principal_or_redirect(request)
+        if claims is None:
+            return principal
+        form = await request.form()
+        pattern = (form.get("pattern") or "").strip()
+        matchers = {}
+        if pattern:
+            matchers[(form.get("matcher") or "user_regex")] = pattern
+        try:
+            result = service.create_resource_group_selector(
+                principal, cluster, _int_or_none(form.get("target_row_id")),
+                _int_or_none(form.get("priority")) or 0, matchers, form.get("reason"))
+        except ApiError as exc:
+            return _rg_fragment(request, principal, cluster, "selectors",
+                                error=str(exc.message))
+        return _rg_fragment(request, principal, cluster, "selectors", saved=True,
+                            warnings=result.get("warnings"))
+
+    @app.post("/clusters/{cluster}/resource-groups/selectors/{selector_id}/delete",
+              response_class=HTMLResponse, include_in_schema=False)
+    async def resource_group_selector_delete(request: Request, cluster: str,
+                                             selector_id: int):
+        principal, claims = principal_or_redirect(request)
+        if claims is None:
+            return principal
+        form = await request.form()
+        try:
+            result = service.delete_resource_group_selector(
+                principal, cluster, selector_id, form.get("reason"))
+        except ApiError as exc:
+            return _rg_fragment(request, principal, cluster, "selectors",
+                                error=str(exc.message))
+        return _rg_fragment(request, principal, cluster, "selectors", saved=True,
+                            warnings=result.get("warnings"))
+
     @app.post("/clusters/{cluster}/resource-groups/{row_id}",
               response_class=HTMLResponse, include_in_schema=False)
     async def resource_group_save(request: Request, cluster: str, row_id: int):
@@ -723,44 +775,6 @@ def register(app, service, config, authenticator, codec, session_cookie: str,
             return principal
         return _rg_fragment(request, principal, cluster, "selectors",
                             confirm_selector_id=selector_id)
-
-    @app.post("/clusters/{cluster}/resource-groups/selectors",
-              response_class=HTMLResponse, include_in_schema=False)
-    async def resource_group_selector_add(request: Request, cluster: str):
-        principal, claims = principal_or_redirect(request)
-        if claims is None:
-            return principal
-        form = await request.form()
-        pattern = (form.get("pattern") or "").strip()
-        matchers = {}
-        if pattern:
-            matchers[(form.get("matcher") or "user_regex")] = pattern
-        try:
-            result = service.create_resource_group_selector(
-                principal, cluster, _int_or_none(form.get("target_row_id")),
-                _int_or_none(form.get("priority")) or 0, matchers, form.get("reason"))
-        except ApiError as exc:
-            return _rg_fragment(request, principal, cluster, "selectors",
-                                error=str(exc.message))
-        return _rg_fragment(request, principal, cluster, "selectors", saved=True,
-                            warnings=result.get("warnings"))
-
-    @app.post("/clusters/{cluster}/resource-groups/selectors/{selector_id}/delete",
-              response_class=HTMLResponse, include_in_schema=False)
-    async def resource_group_selector_delete(request: Request, cluster: str,
-                                             selector_id: int):
-        principal, claims = principal_or_redirect(request)
-        if claims is None:
-            return principal
-        form = await request.form()
-        try:
-            result = service.delete_resource_group_selector(
-                principal, cluster, selector_id, form.get("reason"))
-        except ApiError as exc:
-            return _rg_fragment(request, principal, cluster, "selectors",
-                                error=str(exc.message))
-        return _rg_fragment(request, principal, cluster, "selectors", saved=True,
-                            warnings=result.get("warnings"))
 
     @app.get("/clusters/{cluster}/resource-groups/history",
              response_class=HTMLResponse, include_in_schema=False)

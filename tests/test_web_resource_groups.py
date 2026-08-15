@@ -149,5 +149,87 @@ class ResourceGroupPageTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("/resource-groups", body)
 
 
+@unittest.skipUnless(WEB_DEPS, "web dependencies not installed")
+class WritePathTest(unittest.IsolatedAsyncioTestCase):
+    """The POST routes.
+
+    Nothing covered these until two of them failed in a browser: the selector
+    routes answered 422 because a literal path segment was registered after an
+    int-typed `{row_id}` and got parsed as one, and revert answered 500 because
+    its success message contained an em dash and cookies are latin-1. The screen
+    sweep in test_web_restart only walks GET routes, so both were invisible.
+    """
+
+    def setUp(self):
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from tests.browser.rgstore import InMemoryResourceGroupStore
+
+        self.store = InMemoryResourceGroupStore()
+        self.app = build(self.store)
+
+    def client(self):
+        return httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=self.app),
+            base_url="https://tms.test", follow_redirects=False)
+
+    async def post(self, client, path, data):
+        await client.post("/login", data={"username": USER, "password": PASSWORD,
+                                          "next": "/"})
+        return await client.post("/clusters/prod-a" + path, data=data)
+
+    async def test_adding_a_selector_reaches_its_own_handler(self):
+        """`/resource-groups/selectors` must not be read as a row id."""
+        async with self.client() as c:
+            response = await self.post(c, "/resource-groups/selectors", {
+                "priority": "15", "matcher": "user_regex", "pattern": "^bob$",
+                "target_row_id": "3", "reason": "give bob his own rule"})
+        self.assertEqual(200, response.status_code, response.text[:400])
+        self.assertEqual(3, len(self.store.selectors))
+
+    async def test_deleting_a_selector_reaches_its_own_handler(self):
+        async with self.client() as c:
+            response = await self.post(
+                c, "/resource-groups/selectors/10/delete", {"reason": "no longer used"})
+        self.assertEqual(200, response.status_code)
+        self.assertEqual([11], [s["id"] for s in self.store.selectors])
+
+    async def test_saving_a_group_still_matches_the_row_id_route(self):
+        """Putting the literal routes first must not shadow this one."""
+        async with self.client() as c:
+            response = await self.post(c, "/resource-groups/2", {
+                "name": "${USER}", "hard_concurrency_limit": "12",
+                "max_queued": "100", "soft_memory_limit": "30%",
+                "scheduling_policy": "fair", "reason": "dashboards were queueing"})
+        self.assertEqual(200, response.status_code)
+        leaf = next(g for g in self.store.groups if g["row_id"] == 2)
+        self.assertEqual(12, leaf["hard_concurrency_limit"])
+
+    async def test_adding_a_group_reaches_the_collection_route(self):
+        async with self.client() as c:
+            response = await self.post(c, "/resource-groups", {
+                "name": "reporting", "parent_row_id": "", "jmx_export": "1",
+                "hard_concurrency_limit": "10", "max_queued": "100",
+                "reason": "new team"})
+        self.assertEqual(200, response.status_code)
+        self.assertIn("reporting", [g["name"] for g in self.store.groups])
+
+    async def test_reverting_redirects_instead_of_failing_on_its_own_message(self):
+        """The success message carries an em dash; a cookie holds latin-1."""
+        async with self.client() as c:
+            response = await self.post(
+                c, "/resource-groups/history/1/revert", {"reason": "made it worse"})
+        self.assertEqual(303, response.status_code, response.text[:400])
+        self.assertIn("/resource-groups/history", response.headers["location"])
+
+    async def test_the_flash_message_survives_the_round_trip_intact(self):
+        """Percent-encoding must not leak into what the operator reads."""
+        async with self.client() as c:
+            await self.post(c, "/resource-groups/history/1/revert",
+                            {"reason": "made it worse"})
+            page = await c.get("/clusters/prod-a/resource-groups/history")
+        self.assertIn("Reverted.", page.text)
+        self.assertNotIn("%20", page.text.split("Reverted.")[1][:200])
+
+
 if __name__ == "__main__":
     unittest.main()
