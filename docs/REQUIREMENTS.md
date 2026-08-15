@@ -274,7 +274,7 @@ _런타임 정보 (실시간 조회 소스)_: Trino 버전, systemd 유닛 상�
 | FR-GW-01 | Gateway 인스턴스 상태 및 백엔드 클러스터 목록     | 전체 표시                 |
 | FR-GW-02 | Routing group별 소속 클러스터 및 헬스             | 그룹 트리 표시            |
 | FR-GW-03 | 클러스터 활성/비활성 토글 (Blue/Green 배포 지원)  | 토글 후 라우팅 반영       |
-| FR-GW-04 | Gateway 백엔드 DB 상태 및 databaseCache 동작 여부 | **AC 축소** — "백엔드 클러스터 목록"의 캐시 폴백만 표시 |
+| FR-GW-04 | Gateway 백엔드 DB 상태 및 databaseCache 동작 여부 | ⛔ **미충족 확정 (2026-08-15)** — 아래 참조 |
 | FR-GW-05 | 라우팅 규칙 조회 (읽기 전용)                      | 현재 규칙 표시            |
 
 ~~**[VERIFY]** 현재 Trino Gateway 버전의 REST API 스펙~~
@@ -293,7 +293,15 @@ _런타임 정보 (실시간 조회 소스)_: Trino 버전, systemd 유닛 상�
 
 > **FR-CO-02 안전 시퀀스의 1단계(비활성화)·5단계(재활성화)와 FR-BM-04(벤치마크 프로덕션 보호)는 `deactivate/{name}` / `activate/{name}` 로 구현한다. 경로가 확정되었다.**
 
-**⚠️ FR-GW-04 AC 축소 근거**: `databaseCache`(기본 `enabled: false`)가 캐시하는 것은 문서 원문 기준 *"only the list of backend Trino clusters used for query routing"* 뿐이다. 쿼리 히스토리 기록과 queryId→backend 조회는 캐시되지 않는다. 또한 `expireAfterWrite`(기본 `1h`) 만료 후에도 DB가 죽어 있으면 **stale 폴백 없이 요청이 실패한다**. 따라서 "DB 다운 시 전 기능 정상"은 성립하지 않으며, AC는 **"신규 쿼리 라우팅이 계속되는지"** 로 한정한다.
+> **⛔ FR-GW-04 미충족 (2026-08-15, 구현 시도 중 확정)**
+>
+> 축소된 AC("백엔드 목록의 캐시 폴백 표시")조차 **TMS 가 알 수 없다.** Gateway 는 응답이 캐시에서 왔는지 DB 에서 왔는지 구분할 신호를 노출하지 않고, "목록이 안 변한다"는 것은 **캐시 폴백과 그냥 클러스터가 안 바뀌는 것을 구분하지 못한다.** 추측으로 표시하면 DB 가 멀쩡할 때 장애라고 말하거나 그 반대가 된다.
+>
+> **대신 화면은 결과를 말한다** — 캐시되는 것은 백엔드 목록뿐이고(쿼리 히스토리·queryId 조회는 즉시 멈춘다), `expireAfterWrite` 가 지나면 **stale 폴백 없이 라우팅이 실패한다**. 현 배포는 10분이므로 Gateway DB 장애는 10분 뒤 라우팅 장애가 된다. 운영자가 행동해야 하는 것은 이쪽이다.
+>
+> **풀리는 조건**: Gateway 가 캐시 적중/DB 도달 여부를 노출하는 엔드포인트나 메트릭을 제공하면. 그때까지는 만들지 않는다 — 없는 신호를 지어내는 것보다 모른다고 쓰는 편이 낫다.
+
+**⚠️ FR-GW-04 AC 축소 근거(당시)**: `databaseCache`(기본 `enabled: false`)가 캐시하는 것은 문서 원문 기준 *"only the list of backend Trino clusters used for query routing"* 뿐이다. 쿼리 히스토리 기록과 queryId→backend 조회는 캐시되지 않는다. 또한 `expireAfterWrite`(기본 `1h`) 만료 후에도 DB가 죽어 있으면 **stale 폴백 없이 요청이 실패한다**. 따라서 "DB 다운 시 전 기능 정상"은 성립하지 않으며, AC는 **"신규 쿼리 라우팅이 계속되는지"** 로 한정한다.
 
 ---
 

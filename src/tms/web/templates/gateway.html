@@ -162,6 +162,43 @@
 </div>
 {% endif %}
 
+{% if gateway.enabled and gateway.backends %}
+{# FR-GW-04, reduced to what is true. The AC asked TMS to show whether the
+   backend list is being served from `databaseCache` - and TMS cannot know that.
+   The Gateway exposes no signal for it, and inferring it from a frozen list is
+   indistinguishable from a cluster list that simply is not changing.
+
+   So this states the consequence instead, which is the part an operator has to
+   act on: the cache buys minutes, not safety, and what it buys them for is
+   getting the database back. #}
+<div class="panel">
+  <div class="panel__head">
+    <span class="panel__title">What this screen does not know</span>
+  </div>
+  <div class="seq__act">
+    <p class="seq__act-why">
+      TMS cannot tell whether this list came from the Gateway's database or from
+      its <code class="mono">databaseCache</code>. The Gateway reports nothing
+      that distinguishes the two, and a list that has not changed looks the same
+      either way.
+    </p>
+    <p class="seq__act-why">
+      <b>What the cache does and does not cover.</b> Only the backend cluster
+      list is cached. Query history and the queryId→backend lookup are not, so a
+      database outage stops those immediately while routing carries on.
+    </p>
+    <p class="seq__act-why">
+      <b>And it expires.</b> After
+      <code class="mono">expireAfterWrite</code> the Gateway has no stale value
+      to fall back on and routing fails outright — it does not degrade. On this
+      deployment that window is <b>10 minutes</b>, so a Gateway database outage
+      becomes a routing outage in ten. Treat the cache as time to fix the
+      database, not as tolerance for losing it.
+    </p>
+  </div>
+</div>
+{% endif %}
+
 {% if gateway.enabled and not gateway.backends and not gateway.unavailable_reason %}
 <div class="empty">
   {{ ui.icon('info', 22, 1.6) }}
