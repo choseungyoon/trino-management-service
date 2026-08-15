@@ -80,7 +80,7 @@ def _query(qid, user, source, elapsed_ms, long_running=False, state="RUNNING"):
 
 
 def build_app(workload_enabled=False, seed=None, gateway=None,
-              resource_groups=False):
+              resource_groups=False, password=None, session_secret=None):
     repository = InMemorySnapshotRepository()
     now = utcnow()
 
@@ -144,9 +144,14 @@ def build_app(workload_enabled=False, seed=None, gateway=None,
         "gateway": gateway or {},
         "resource_groups": {"enabled": bool(resource_groups)},
         "portal": {
-            "session_secret": "b" * 48,
-            "local_users": {USER: {"password_hash": hash_password(PASSWORD, iterations=1000),
-                                   "roles": ["admin"]}},
+            # Overridable so a hosted demo does not run on a password that is
+            # sitting in a public repository. Local runs keep the fixed pair -
+            # a throwaway credential the browser tests can type.
+            "session_secret": session_secret or ("b" * 48),
+            "local_users": {
+                USER: {"password_hash": hash_password(password or PASSWORD,
+                                                      iterations=1000),
+                       "roles": ["admin"]}},
         },
     })
     for snapshot in seed or []:
