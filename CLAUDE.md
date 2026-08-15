@@ -19,7 +19,7 @@
 | Trino 버전 | **477** |
 | 클러스터 | 2개 (코디네이터 1 + **워커 11** 각각, 2026-08-13 확인). `node.environment` 는 **클러스터마다 다른 값** |
 | 노드 사양 | 서버당 RAM **560GB**, JVM `-Xmx 250G`, `memory.heap-headroom-per-node 30GB` → 워커 쿼리 풀 220GB, **클러스터 총 2,420GB** |
-| ⛔ 메모리 위험 | **`query.max-memory=4016GB` 가 클러스터 총량(2,420GB)보다 크다 = 상한이 없다.** 쿼리 1개가 클러스터의 80%(1,936GB)까지 점유 가능. **조치 진행 중** — 절차는 `runbooks/resource-groups-db.md` §7-2. ⚠️ `query.max-memory-per-node` 를 270GB 로 올리려면 힙도 400G 여야 한다 (250G 에서는 제약 위반으로 기동 실패) |
+| 메모리 상한 | **`query.max-memory` 적용 완료 (2026-08-15).** 이전 값 4016GB 는 클러스터 총량보다 커서 상한이 없는 상태였다. ⚠️ 힙이 아직 250G 면 클러스터가 2,420GB 이므로 900GB = **37%** 다 — 힙을 400G 로 올리면 24% 가 된다. `query.max-memory-per-node` 는 176GB 유지 (270GB 는 힙 400G 를 요구한다) |
 | 리소스 그룹 | **db 매니저** (D-010, 2026-08-14 사내 적용). TMS PostgreSQL 의 `trino_resource_groups` schema. 값 변경은 `UPDATE` → 10초 반영, 재시작 없음. **group provider 없음** (`etc/group-provider.properties` 부재) → `userGroup`/`user_group_regex` 셀렉터는 영구 미매칭 |
 | Gateway | **버전 19** (2026-08-07 확인), 2대, PostgreSQL 공유 (현재 VM1에 co-located = **SPOF**) |
 | Gateway 설정 | 백엔드는 **Gateway UI로 등록**. **라우팅 그룹 미사용**(= 기본 랜덤 라우팅). `databaseCache` 활성, **`expireAfterWrite: 10m`** (⚠️ DB 장애 10분 초과 시 라우팅 실패 — §T2-4) |
