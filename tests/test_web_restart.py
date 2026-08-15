@@ -493,6 +493,7 @@ class EveryScreenTest(unittest.IsolatedAsyncioTestCase):
         # has to answer with a page rather than a traceback.
         "row_id": "1",
         "selector_id": "1",
+        "revision_id": "1",
     }
 
     #: Routes that legitimately answer with something other than 200.
@@ -506,6 +507,34 @@ class EveryScreenTest(unittest.IsolatedAsyncioTestCase):
     #: through the sweep and turn every later route into a redirect to /login -
     #: which looks like the sweep passing over pages it never rendered.
     NOT_SCREENS = ("/logout",)
+
+    #: Not write routes in the sense this sweep means. `/login` would replace
+    #: the session mid-run and turn every later route into a redirect; the
+    #: password change would do the same by invalidating it.
+    NOT_WRITES = ("/login", "/logout", "/account/password")
+
+    #: One body for every write route. Deliberately a superset - each route
+    #: reads the fields it knows and ignores the rest, so a single dict covers
+    #: all of them without the sweep needing to know what any route wants.
+    #: `reason` is the one field they all share, because every write in TMS
+    #: requires one (absolute rule 3).
+    WRITE_BODY = {
+        "reason": "route sweep",
+        "message": "route sweep",
+        "name": "sweep",
+        "priority": "5",
+        "matcher": "user_regex",
+        "pattern": "^sweep$",
+        "target_row_id": "1",
+        "parent_row_id": "",
+        "hard_concurrency_limit": "10",
+        "max_queued": "100",
+        "soft_memory_limit": "10%",
+        "scheduling_policy": "fair",
+        "state": "on",
+        "value": "1",
+        "theme": "light",
+    }
 
     def _app(self):
         from tms.collector.snapshot import GATEWAY_SCOPE, KIND_GATEWAY, KIND_RESOURCE_GROUPS
@@ -591,6 +620,58 @@ class EveryScreenTest(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(
                     self.EXPECTED.get(path, 200), response.status_code,
                     "{} returned {}".format(url, response.status_code))
+
+    async def test_no_write_route_answers_with_a_traceback(self):
+        """Every POST, with a plausible body and a reason.
+
+        The GET sweep above left every write route uncovered, and two of them
+        shipped broken: the resource group selector routes answered 422 because
+        a literal path segment was registered after an int-typed `{row_id}` and
+        got parsed as one, and revert answered 500 because its success message
+        contained an em dash - cookies are latin-1.
+
+        This does not assert that the action *worked*; the feature tests do
+        that. It asserts the far weaker thing that was missing entirely - that
+        the route exists, is reachable, and fails in a way a person can read.
+        A 4xx is a fine outcome here: it means the request was understood and
+        refused. A 5xx or a 422 from path parsing is not.
+        """
+        app, _config = self._app()
+        posts = []
+        for route in app.routes:
+            path = getattr(route, "path", "")
+            methods = getattr(route, "methods", set()) or set()
+            if "POST" not in methods or path.startswith(("/api/", "/ui/static")):
+                continue
+            if path in self.NOT_WRITES:
+                continue
+            missing = [p for p in _path_params(path) if p not in self.PARAMS]
+            self.assertEqual(
+                [], missing,
+                "write route {} has path parameter(s) {} with no test value - "
+                "add them to EveryScreenTest.PARAMS".format(path, missing))
+            posts.append(path)
+
+        self.assertGreater(len(posts), 5, "write route discovery found almost nothing")
+
+        client = client_for(app)
+        async with client:
+            await sign_in(client)
+            for path in posts:
+                url = path
+                for name, value in self.PARAMS.items():
+                    url = url.replace("{" + name + "}", value)
+                response = await client.post(url, data=dict(self.WRITE_BODY))
+                self.assertLess(
+                    response.status_code, 500,
+                    "{} returned {} - a write route must refuse in words, not "
+                    "with a traceback:\n{}".format(
+                        url, response.status_code, response.text[:600]))
+                self.assertNotEqual(
+                    422, response.status_code,
+                    "{} returned 422, which usually means a literal path "
+                    "segment is being parsed as a typed path parameter - check "
+                    "route registration order".format(url))
 
 
 def _path_params(path):
