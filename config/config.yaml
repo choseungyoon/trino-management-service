@@ -158,6 +158,33 @@ fleet:
   # perfectly healthy shutdown.
   shutdown_timeout_seconds: 900
 
+  # FR-FL-04/05 — playbooks TMS may run on request. Empty by default, and empty
+  # means the panel does not appear: this uses the TMS host's SSH access to
+  # every node, the same reach D-009 weighed, so it exists only where an
+  # administrator has said what may be run.
+  #
+  # ⛔ Never point one of these at a playbook that restarts anything. TMS reads
+  # a path and an exit code; it cannot know whether a cluster was drained
+  # first, so a restart declared here is a button that restarts without
+  # stopping traffic — the path CLAUDE.md rule 5 closes. tms-config-check
+  # refuses that exact case.
+  #
+  # Parameters are integers only, with bounds. A scale-out that cannot say
+  # "how many" is not much use, but a string parameter would hand the request a
+  # way onto the command line. An integer cannot be anything but an integer.
+  jobs: {}
+  #   scale_out:
+  #     title: Add workers
+  #     description: Provisions new worker VMs and joins them to the cluster.
+  #     playbook: /etc/tms/ansible/scale-out.yml
+  #     timeout_seconds: 3600
+  #     parameters:
+  #       count:
+  #         label: Workers to add
+  #         min: 1
+  #         max: 4
+  #         default: 2
+
 cluster_ops:
   # FR-CO-02 — the safe restart sequence.
   #

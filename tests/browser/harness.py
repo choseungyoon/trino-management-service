@@ -39,6 +39,7 @@ from tms.api.main import create_app  # noqa: E402
 from tms.api.services import TmsService  # noqa: E402
 from tms.collector.snapshot import (  # noqa: E402
     KIND_HEALTH,
+    KIND_FLEET,
     KIND_QUERIES,
     KIND_RESOURCE_GROUPS,
     InMemorySnapshotRepository,
@@ -80,7 +81,8 @@ def _query(qid, user, source, elapsed_ms, long_running=False, state="RUNNING"):
 
 
 def build_app(workload_enabled=False, seed=None, gateway=None,
-              resource_groups=False, password=None, session_secret=None):
+              resource_groups=False, password=None, session_secret=None,
+              fleet_jobs=False):
     repository = InMemorySnapshotRepository()
     now = utcnow()
 
@@ -157,6 +159,25 @@ def build_app(workload_enabled=False, seed=None, gateway=None,
     for snapshot in seed or []:
         repository.save(snapshot)
 
+    if fleet_jobs:
+        # The fleet screen needs an inventory snapshot before its job panel has
+        # anywhere to live.
+        repository.save(Snapshot("prod-a", KIND_FLEET, now, payload={
+            "nodes": [
+                {"host": "trino-a-w1", "address": "10.0.0.11", "role": "worker",
+                 "cluster": "prod-a", "reachable": True, "state": "ACTIVE",
+                 "version": "477", "environment": "cluster1", "uptime": "6d",
+                 "coordinator": False, "error": None},
+                {"host": "trino-a-c1", "address": "10.0.0.10", "role": "coordinator",
+                 "cluster": "prod-a", "reachable": True, "state": "ACTIVE",
+                 "version": "477", "environment": "cluster1", "uptime": "6d",
+                 "coordinator": True, "error": None},
+            ],
+            "summary": {"total": 2, "reachable": 2, "unreachable": 0,
+                        "workers": 1, "shutting_down": 0},
+            "notes": [], "node_counts": {"ActiveNodeCount": 2}, "inventory_size": 2,
+        }))
+
     trino = StubTrino()
     audit = InMemoryAuditRepository()
     service = TmsService(
@@ -164,7 +185,51 @@ def build_app(workload_enabled=False, seed=None, gateway=None,
         audit_repository=audit, trino_clients={name: trino for name in CLUSTERS},
         config_store=InMemoryResourceGroupStore() if resource_groups else None,
     )
-    return create_app(config=config, service=service), trino
+    fleet = None
+    if fleet_jobs:
+        from tms.fleet.jobs import JobRunner, build_jobs
+        from tms.fleet.jobstore import InMemoryJobRepository
+        from tms.fleet.service import FleetService
+
+        definitions = build_jobs({
+            "scale_out": {
+                "playbook": __file__, "title": "Add workers",
+                "description": "Provisions worker VMs and joins them to the cluster.",
+                "parameters": {"count": {"label": "Workers to add", "min": 1,
+                                         "max": 4, "default": 2}},
+            },
+        })
+        job_repository = InMemoryJobRepository()
+        past = job_repository.create("prod-a", "scale_out", "sre.kim", ["admin"],
+                                     "month-end reporting load", {"count": 2})
+        for line in ("PLAY [add workers] " + "*" * 40,
+                     "TASK [provision : create VM] " + "*" * 32,
+                     "changed: [trino-a-w12]",
+                     "changed: [trino-a-w13]",
+                     "TASK [trino : join cluster] " + "*" * 34,
+                     "ok: [trino-a-w12]",
+                     "ok: [trino-a-w13]",
+                     "PLAY RECAP " + "*" * 49,
+                     "trino-a-w12 : ok=7  changed=4  unreachable=0  failed=0",
+                     "trino-a-w13 : ok=7  changed=4  unreachable=0  failed=0"):
+            job_repository.append_output(past["id"], line)
+        job_repository.finish(past["id"], "SUCCEEDED", exit_code=0)
+
+        def demo_runner(command, timeout, on_line, env=None, cwd=None):
+            for line in ("PLAY [add workers] " + "*" * 40,
+                         "TASK [provision : create VM] " + "*" * 32):
+                on_line(line)
+            return {"rc": 0}
+
+        fleet = FleetService(
+            config=config, snapshots=repository, audit_guard=AuditGuard(audit),
+            transport_factory=lambda: None,
+            job_runner=JobRunner(jobs=definitions,
+                                 cluster_inventories={"prod-a": __file__},
+                                 runner=demo_runner),
+            job_repository=job_repository)
+
+    return create_app(config=config, service=service, fleet=fleet), trino
 
 
 def _make_cert(directory):
@@ -188,13 +253,13 @@ def _free_port():
 
 @contextlib.contextmanager
 def serve(workload_enabled=False, seed=None, gateway=None,
-          resource_groups=False):
+          resource_groups=False, fleet_jobs=False):
     """Run the console on a free port. Yields (base_url, stub_trino)."""
     import uvicorn
 
     app, trino = build_app(workload_enabled=workload_enabled, seed=seed,
                            resource_groups=resource_groups,
-                           gateway=gateway)
+                           fleet_jobs=fleet_jobs, gateway=gateway)
     port = _free_port()
     with tempfile.TemporaryDirectory() as tmp:
         key, crt = _make_cert(tmp)

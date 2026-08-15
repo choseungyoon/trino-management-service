@@ -166,6 +166,15 @@ class FleetConfig:
     poll_interval_seconds: float = 60.0
     inventories: Dict[str, str] = field(default_factory=dict)
     node_url_template: str = ""
+    # Playbooks TMS may run on request (FR-FL-04). Empty by default, and empty
+    # means the feature does not appear at all - the same stance as
+    # `cluster_ops.restart_mode`, and for the same reason: this uses the TMS
+    # host's SSH access to every node (D-009).
+    #
+    # ⛔ Never point one of these at a playbook that restarts anything. Nothing
+    # here checks that a cluster was drained, so a restart declared as a job is
+    # a way around CLAUDE.md rule 5. tms-config-check refuses that one case.
+    jobs: Dict[str, Any] = field(default_factory=dict)
     # Trino needs at least 2 x shutdown.grace-period plus running tasks before
     # a worker exits - four minutes on the defaults (TRINO_VERIFIED T1-2). A
     # shorter deadline times out on a perfectly healthy shutdown.
@@ -442,6 +451,17 @@ def _build_fleet(raw: Dict[str, Any]) -> FleetConfig:
     template = str(raw.get("node_url_template") or "")
     interval = float(raw.get("poll_interval_seconds", 60))
     timeout = float(raw.get("shutdown_timeout_seconds", 900))
+    jobs = raw.get("jobs") or {}
+
+    if jobs:
+        # Validated at load so a malformed job is a startup error rather than a
+        # discovery made while someone is trying to add capacity.
+        from tms.fleet.jobs import JobError, build_jobs
+
+        try:
+            build_jobs(jobs)
+        except JobError as exc:
+            raise ConfigError("fleet.jobs: {}".format(exc))
 
     if enabled:
         if not inventories:
@@ -463,7 +483,7 @@ def _build_fleet(raw: Dict[str, Any]) -> FleetConfig:
 
     return FleetConfig(enabled=enabled, poll_interval_seconds=interval,
                        inventories=inventories, node_url_template=template,
-                       shutdown_timeout_seconds=timeout)
+                       jobs=dict(jobs), shutdown_timeout_seconds=timeout)
 
 
 def _build_cluster_ops(raw: Dict[str, Any], whole: Dict[str, Any]) -> ClusterOpsConfig:

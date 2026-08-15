@@ -187,6 +187,64 @@
     scheduleSequence();
   }
 
+  /* ── Fleet job log (FR-FL-05) ──────────────────────────────────── */
+  /* The same shape as the restart console above, deliberately: an operator who
+     has watched one playbook run should not have to learn a second behaviour
+     for the next. Kept separate rather than generalised because the two poll
+     different endpoints and stop on different conditions, and folding them
+     together would mean a bug in either could break both. */
+
+  var jobTimer = null;
+
+  function scheduleJob() {
+    window.clearTimeout(jobTimer);
+    var node = document.getElementById("job-log");
+    if (!node || node.dataset.running !== "true") return;
+    jobTimer = window.setTimeout(function () {
+      if (document.hidden) { scheduleJob(); return; }
+      pollJob();
+    }, 2000);
+  }
+
+  function pollJob() {
+    var node = document.getElementById("job-log");
+    if (!node || node.dataset.running !== "true") return;
+
+    var pane = document.getElementById("console");
+    var follow = !pane || atBottom(pane);
+    var scrolled = pane ? pane.scrollTop : 0;
+
+    fetch("/fleet/jobs/" + node.dataset.run + "?fragment=1",
+          { headers: { "X-Requested-With": "fetch" }, credentials: "same-origin" })
+      .then(function (response) {
+        if (!response.ok) throw new Error(String(response.status));
+        return response.text();
+      })
+      .then(function (html) {
+        var holder = document.createElement("div");
+        holder.innerHTML = html;
+        var fresh = holder.querySelector("#job-log");
+        if (!fresh) throw new Error("unexpected fragment");
+        node.replaceWith(fresh);
+        var refreshed = document.getElementById("console");
+        if (refreshed) {
+          refreshed.scrollTop = follow ? refreshed.scrollHeight : scrolled;
+        }
+        scheduleJob();
+      })
+      .catch(function () { scheduleJob(); });
+  }
+
+  var jobLog = document.getElementById("job-log");
+  if (jobLog) {
+    var jobPane = document.getElementById("console");
+    if (jobPane) jobPane.scrollTop = jobPane.scrollHeight;
+    document.addEventListener("visibilitychange", function () {
+      if (!document.hidden) scheduleJob();
+    });
+    scheduleJob();
+  }
+
   /* ── Write-action guards ───────────────────────────────────────── */
 
   document.addEventListener("submit", function (event) {

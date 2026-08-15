@@ -494,6 +494,7 @@ class EveryScreenTest(unittest.IsolatedAsyncioTestCase):
         "row_id": "1",
         "selector_id": "1",
         "revision_id": "1",
+        "run_id": "1",
     }
 
     #: Routes that legitimately answer with something other than 200.
@@ -583,7 +584,27 @@ class EveryScreenTest(unittest.IsolatedAsyncioTestCase):
                         "workers": 1, "shutting_down": 0},
             "notes": [], "node_counts": {"ActiveNodeCount": 2}, "inventory_size": 1,
         }))
+        # A configured job and one finished run, so the sweep renders the job
+        # panel and the run page rather than skipping past both. Without this
+        # the routes exist and nothing ever draws them.
+        from tms.fleet.jobs import JobRunner, build_jobs
+        from tms.fleet.jobstore import InMemoryJobRepository
+
+        job_definitions = build_jobs({
+            "scale_out": {"playbook": __file__, "title": "Add workers",
+                          "parameters": {"count": {"min": 1, "max": 4, "default": 2}}},
+        })
+        job_repository = InMemoryJobRepository()
+        seeded = job_repository.create("prod-a", "scale_out", "syhcho", ["admin"],
+                                       "rendering test", {"count": 2})
+        job_repository.append_output(seeded["id"], "PLAY [add workers]")
+        job_repository.finish(seeded["id"], "SUCCEEDED", exit_code=0)
+
         fleet = FleetService(
+            job_runner=JobRunner(jobs=job_definitions,
+                                 cluster_inventories={"prod-a": __file__},
+                                 runner=lambda *a, **k: {"rc": 0}),
+            job_repository=job_repository,
             config=config, snapshots=service.repository, audit_guard=service.audit,
             transport_factory=lambda: None)
         return create_app(config=config, service=service, restarts=restarts,

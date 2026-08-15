@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% import "_icons.html" as ui %}
+{% block title %}{{ run.job }} · {{ run.cluster }} · TMS{% endblock %}
+{% block heading %}Fleet job{% endblock %}
+
+{% block topbar_extra %}
+<a class="btn btn--sm btn--ghost"
+   href="/clusters/{{ run.cluster | urlencode }}/fleet">Back to fleet</a>
+{% endblock %}
+
+{% block content %}
+{# ⛔ Said on the page, not only in the code: this ran a playbook, and TMS has
+   no idea what the playbook did beyond its exit code. Someone reading a green
+   "succeeded" should know the limit of that claim. #}
+<div class="banner" role="status">
+  {{ ui.icon('info', 15, 2) }}
+  <div>
+    TMS started this playbook and watched its output. It does not know what the
+    playbook changed — only whether it exited cleanly. Confirm the result on the
+    <a href="/clusters/{{ run.cluster | urlencode }}/fleet">fleet inventory</a>.
+  </div>
+</div>
+
+{% include "_fleet_job_log.html" %}
+{% endblock %}

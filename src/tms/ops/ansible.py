@@ -48,6 +48,7 @@ import subprocess
 import threading
 from typing import Any, Callable, Dict, List, Optional
 
+from tms.ops.process import redact, stream_command
 from tms.ops.executor import (
     FAILED,
     RUNNING,
@@ -61,19 +62,6 @@ log = logging.getLogger(__name__)
 # A conservative name shape. The value is also matched against configured
 # clusters, so this is belt-and-braces against anything odd reaching argv.
 SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
-
-# The leading `[\w-]*` matters: Ansible's own secret variables are almost never
-# bare words. `vault_password`, `ansible_ssh_pass` and `become_password` all
-# failed a `\bpassword\b` anchor, because there is no word boundary inside
-# `vault_password` - so the most likely secrets in this output were the ones
-# that got through.
-# `pass` is the one keyword pinned to the end of the word (`ansible_ssh_pass`).
-# Letting it take a suffix too would redact `passed: 3`, and hiding a line the
-# operator needs is its own kind of failure.
-_REDACT = re.compile(
-    r"(?i)\b([\w-]*(?:password|passwd|secret|token|api[_-]?key)[\w-]*|[\w-]*pass)\b"
-    r"(\s*[:=]\s*)(\S+)")
-
 
 class AnsibleError(Exception):
     """Configuration or invocation problem, raised before anything runs."""
@@ -132,15 +120,6 @@ def ansible_environment(state_dir: str) -> Dict[str, str]:
         list(_DEFAULT_SSH_ARGS)
         + ["-o", "UserKnownHostsFile=" + known_hosts_path(state_dir)])
     return environment
-
-
-def redact(text: str) -> str:
-    """Mask obvious `key: value` secrets in captured output.
-
-    Best effort only - Ansible output is not structured and this cannot be
-    exhaustive. The log is treated as sensitive regardless of what this catches.
-    """
-    return _REDACT.sub(lambda m: m.group(1) + m.group(2) + "***", text or "")
 
 
 class AnsibleRestartExecutor(RestartExecutor):
@@ -253,54 +232,11 @@ class AnsibleRestartExecutor(RestartExecutor):
 
     def _run_subprocess(self, command: List[str], timeout: float,
                         on_line: Callable[[str], None]) -> Dict[str, Any]:
-        """Run the playbook, handing each line to `on_line` as it is produced.
-
-        Deliberately Popen and not `subprocess.run`: capturing output only
-        returns it once the process has exited, and a restart playbook runs for
-        minutes. An operator watching a screen that shows nothing until the
-        work is over cannot tell "connecting to the first host" from "hung",
-        which is exactly the moment they need to know.
-        """
-        try:
-            process = subprocess.Popen(  # noqa: S603 - list form, no shell
-                command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                stdin=subprocess.DEVNULL, text=True, bufsize=1, shell=False,
-                env=ansible_environment(self.state_dir), cwd=self.state_dir,
-            )
-        except OSError as exc:
-            return {"rc": None, "error": str(exc)}
-
-        # A watchdog rather than `run(timeout=...)`, which cannot interrupt a
-        # read loop. A playbook that hangs must fail the step, not hold a
-        # deactivated cluster out of rotation indefinitely.
-        expired = threading.Event()
-
-        def give_up() -> None:
-            expired.set()
-            try:
-                process.kill()
-            except OSError:  # pragma: no cover - already gone
-                pass
-
-        watchdog = threading.Timer(timeout, give_up)
-        watchdog.daemon = True
-        watchdog.start()
-        try:
-            for raw in process.stdout:
-                line = redact(raw.rstrip("\r\n"))
-                if line.strip():
-                    on_line(line)
-            returncode = process.wait()
-        finally:
-            watchdog.cancel()
-            try:
-                process.stdout.close()
-            except Exception:  # noqa: BLE001 - pragma: no cover
-                pass
-
-        if expired.is_set():
-            return {"rc": None, "timed_out": True}
-        return {"rc": returncode}
+        """Streaming, watchdog and redaction all live in ops/process.py now -
+        fleet jobs need the same behaviour, and two copies of it would drift."""
+        return stream_command(command, timeout, on_line,
+                              env=ansible_environment(self.state_dir),
+                              cwd=self.state_dir)
 
     # -------------------------------------------------------------- lifecycle
 

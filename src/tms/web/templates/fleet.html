@@ -165,6 +165,102 @@
   </div>
 </div>
 
+{% if jobs.enabled %}
+{# FR-FL-04/05. Deliberately below the inventory: this screen is read far more
+   often than it is acted on, and a control that changes the cluster should not
+   be the first thing under the operator's cursor. #}
+<div class="panel">
+  <div class="panel__head">
+    <span class="panel__title">Jobs</span>
+    <span class="spacer"></span>
+    <span class="panel__sub">configured playbooks, run on request</span>
+  </div>
+
+  {% if jobs.active %}
+  <div class="banner banner--concerning" role="status">
+    {{ ui.icon('clock', 15, 2) }}
+    <div>
+      <b>A job is running on this cluster.</b>
+      <a href="/fleet/jobs/{{ jobs.active.id }}">Follow it</a> — a second one
+      cannot start until it ends. Two playbooks writing the same inventory at
+      once is not a conflict anyone can untangle afterwards.
+    </div>
+  </div>
+  {% elif can_manage %}
+  {% for job in jobs.definitions %}
+  <form class="rg-add" method="post"
+        action="/clusters/{{ selected_cluster | urlencode }}/fleet/jobs">
+    <input type="hidden" name="job" value="{{ job.key }}">
+    <div class="rg-add__grid">
+      <div class="field">
+        <b>{{ job.title }}</b>
+        {% if job.description %}<div class="panel__sub">{{ job.description }}</div>{% endif %}
+      </div>
+      {% for parameter in job.parameters %}
+      <label class="field">{{ parameter.label }}
+        <input class="input num" type="number" name="{{ parameter.name }}"
+               value="{{ parameter.default }}"
+               min="{{ parameter.min }}" max="{{ parameter.max }}">
+      </label>
+      {% endfor %}
+      <label class="field">Reason
+        <input class="input" name="reason" required
+               placeholder="Why is this being run?">
+      </label>
+      <button class="btn btn--danger" type="submit" data-busy="Starting…"
+              data-confirm="Run {{ job.title }} against {{ selected_cluster }}?">
+        Run
+      </button>
+    </div>
+  </form>
+  {% endfor %}
+  {% endif %}
+
+  {% if jobs.runs %}
+  <div class="table-scroll">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Started</th><th>Job</th><th>By</th><th>Reason</th><th>Result</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in jobs.runs %}
+        <tr>
+          <td class="num">{{ item.started_at | relative_time }}</td>
+          <td><code class="mono">{{ item.job }}</code></td>
+          <td>{{ item.actor }}</td>
+          <td class="wrap">{{ item.reason }}</td>
+          <td>
+            {% if item.state == 'RUNNING' %}
+            <span class="status status--running">running</span>
+            {% elif item.state == 'SUCCEEDED' %}
+            <span class="status status--good">succeeded</span>
+            {% elif item.state == 'UNKNOWN' %}
+            <span class="status status--unknown" title="TMS restarted while this was running, so its outcome was never observed">unknown</span>
+            {% else %}
+            <span class="status status--bad">failed</span>
+            {% endif %}
+          </td>
+          <td class="row-actions">
+            <a class="btn btn--sm btn--ghost" href="/fleet/jobs/{{ item.id }}">Open</a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  <p class="panel__note">
+    ⛔ These are not restarts. TMS runs the playbook and reads its exit code; it
+    does not know whether anything was drained first. Restarting a cluster goes
+    through the <a href="/clusters/{{ selected_cluster | urlencode }}/restart">safe
+    restart sequence</a>, which stops traffic before anything stops.
+  </p>
+</div>
+{% endif %}
+
 {% elif not fleet.unavailable_reason %}
 <div class="panel">
   <div class="empty">

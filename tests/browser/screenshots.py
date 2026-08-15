@@ -29,6 +29,8 @@ SHOTS = (
     ("06-history", "/clusters/prod-a/resource-groups/history", None),
     ("07-not-loaded", "/clusters/prod-b/resource-groups", None),
     ("08-dark-theme", "/clusters/prod-a/resource-groups", "toggle_theme"),
+    ("09-fleet-jobs", "/clusters/prod-a/fleet", None),
+    ("10-job-log", "/fleet/jobs/1", None),
 )
 
 
@@ -80,7 +82,8 @@ def main(out_dir):
     os.makedirs(out_dir, exist_ok=True)
     written = []
 
-    with serve(workload_enabled=True, resource_groups=True) as (base_url, _trino):
+    with serve(workload_enabled=True, resource_groups=True,
+               fleet_jobs=True) as (base_url, _trino):
         with sync_playwright() as pw:
             browser = pw.chromium.launch()
             for name, path, action in SHOTS:

@@ -914,11 +914,16 @@ def register(app, service, config, authenticator, codec, session_cookie: str,
             return _error_page(request, principal, exc)
 
         data = envelope.get("data") or {}
+        try:
+            jobs = fleet.list_jobs(principal, cluster)
+        except ApiError:
+            jobs = {"enabled": False, "definitions": [], "runs": [], "active": None}
         context = base_context(request, principal, "fleet")
         context.update({
             "envelope": envelope,
             "fleet": data,
             "nodes": data.get("nodes") or [],
+            "jobs": jobs,
             "selected_cluster": cluster,
             "can_manage": principal.can(MANAGE_HEALTH),
             # Set when the confirm form is open for one node.
@@ -926,6 +931,59 @@ def register(app, service, config, authenticator, codec, session_cookie: str,
             "error": error,
         })
         return render("fleet.html", context)
+
+    # ── fleet jobs (FR-FL-04/05) ───────────────────────────────────────
+    #
+    # ⛔ Not the restart sequence and not a replacement for it. TMS sees a
+    # configured path and an exit code; it cannot know whether a playbook
+    # drained anything first. Restarts go through FR-CO-02, which has gates.
+
+    @app.post("/clusters/{cluster}/fleet/jobs", include_in_schema=False)
+    async def fleet_job_start(request: Request, cluster: str):
+        principal, claims = principal_or_redirect(request)
+        if claims is None:
+            return principal
+        if fleet is None:
+            return _error_page(request, principal, NotFound("Fleet is not configured."))
+        form = await request.form()
+        # Everything except these is a declared parameter. The job definition
+        # decides which of them it will look at; nothing undeclared gets through.
+        parameters = {k: v for k, v in form.items()
+                      if k not in ("job", "reason")}
+        try:
+            run = fleet.start_job(principal, cluster, form.get("job") or "",
+                                  parameters, reason=form.get("reason") or "")
+        except ApiError as exc:
+            return RedirectResponse(
+                "/clusters/{}/fleet?error={}".format(
+                    _quote(cluster), _quote(exc.message)), status_code=303)
+
+        response = RedirectResponse(
+            "/fleet/jobs/{}".format(run["id"]), status_code=303)
+        _flash(response, "good",
+               "Started. This page follows the playbook as it runs.")
+        return response
+
+    @app.get("/fleet/jobs/{run_id}", response_class=HTMLResponse,
+             include_in_schema=False)
+    def fleet_job_run(request: Request, run_id: int, fragment: int = 0):
+        principal, claims = principal_or_redirect(request)
+        if claims is None:
+            return principal
+        if fleet is None:
+            return _error_page(request, principal, NotFound("Fleet is not configured."))
+        try:
+            run = fleet.get_job_run(principal, run_id)
+        except ApiError as exc:
+            return _error_page(request, principal, exc)
+
+        context = base_context(request, principal, "fleet")
+        context.update({"run": run, "selected_cluster": run.get("cluster")})
+        if fragment:
+            # Swapped in place by tms.js while the playbook runs, so a log
+            # someone is reading does not jump to the top every few seconds.
+            return render("_fleet_job_log.html", context)
+        return render("fleet_job.html", context)
 
     @app.post("/clusters/{cluster}/fleet/{host}/shutdown", include_in_schema=False)
     def fleet_shutdown(request: Request, cluster: str, host: str,

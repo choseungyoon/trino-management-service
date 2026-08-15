@@ -393,6 +393,47 @@ def _check_password_auth(report: Report, settings) -> None:
                "참조하게 하라 (runbooks/upgrade-r2-r3.md §4-3). 키 전환이 목표다")
 
 
+def check_fleet_jobs(report: Report, config) -> None:
+    """FR-FL-04. The one thing a job must never be.
+
+    TMS runs the playbook and reads its exit code; it cannot know whether the
+    playbook drained anything first. A job pointed at the restart playbook is
+    therefore a button that restarts a cluster without stopping traffic - the
+    exact path CLAUDE.md rule 5 exists to close. It is not a hypothetical: the
+    two playbooks live in the same directory and the restart one is the obvious
+    thing to reach for when adding the first job.
+    """
+    jobs = getattr(config.fleet, "jobs", None) or {}
+    if not jobs:
+        report.add(OK, "fleet.jobs", "없음 — 실행 훅이 화면에 나타나지 않는다")
+        return
+
+    report.add(WARN, "fleet.jobs",
+               "{}개 — TMS 호스트의 SSH 접근으로 플레이북을 실행한다 (D-009 와 "
+               "같은 파급 범위)".format(len(jobs)))
+
+    restart_playbook = os.path.abspath(config.cluster_ops.ansible.playbook or "")
+    for key, entry in sorted(jobs.items()):
+        path = str((entry or {}).get("playbook") or "")
+        if restart_playbook and os.path.abspath(path) == restart_playbook:
+            report.add(
+                FAIL, "fleet.jobs.{}".format(key),
+                "재시작 플레이북을 가리키고 있다 — 이것은 트래픽을 멈추지 않고 "
+                "클러스터를 재시작하는 버튼이다. 절대규칙 5 가 막는 바로 그 "
+                "경로이므로 거부한다. 재시작은 안전 시퀀스로 한다.")
+        elif not os.path.isfile(path):
+            report.add(FAIL, "fleet.jobs.{}".format(key),
+                       "{} 가 없다 — 실행 시점에 실패한다".format(path))
+        else:
+            report.add(OK, "fleet.jobs.{}".format(key), path)
+
+    missing = [c for c in config.cluster_names if c not in config.fleet.inventories]
+    if missing:
+        report.add(WARN, "fleet.jobs 인벤토리",
+                   "{} 에 인벤토리가 없어 이 클러스터에서는 작업을 실행할 수 없다"
+                   .format(", ".join(missing)))
+
+
 def check_fleet(report: Report, config) -> None:
     """Node inventory (FR-FL-01). Parses the inventories so an empty fleet
     screen is diagnosed here rather than after a poll interval."""
@@ -449,9 +490,11 @@ _REQUIRED_OBJECTS = (
     ("009_node_shutdown_action.sql", "action", "NODE_SHUTDOWN"),
     ("010_resource_group_revision.sql", "table", "resource_group_revision"),
     ("010_resource_group_revision.sql", "action", "RESOURCE_GROUP_CHANGE"),
-    # 011 only grants; a privilege is not an object, so there is nothing here to
-    # look for. Missing it shows up as a permission error on the first write,
-    # which names itself clearly enough.
+    ("012_fleet_job.sql", "table", "fleet_job_run"),
+    ("012_fleet_job.sql", "action", "FLEET_JOB_RUN"),
+    # 011 and 013 only grant; a privilege is not an object, so there is nothing
+    # here to look for. Missing one shows up as a permission error on the first
+    # write, which names itself clearly enough.
 )
 
 _CONSTRAINT_FOR = {
@@ -572,6 +615,7 @@ def run(argv: Optional[List[str]] = None) -> int:
         lambda: check_gateway(report, config),
         lambda: check_cluster_ops(report, config),
         lambda: check_fleet(report, config),
+        lambda: check_fleet_jobs(report, config),
         lambda: check_deeplinks(report, config),
     ]
     for check in static_checks:

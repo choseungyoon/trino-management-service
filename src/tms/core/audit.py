@@ -50,6 +50,9 @@ ACTION_RESOURCE_GROUP_CHANGE = "RESOURCE_GROUP_CHANGE"
 # FR-WL-10. Its own type rather than a flag on CHANGE, so "how often are these
 # undone" stays an answerable question.
 ACTION_RESOURCE_GROUP_REVERT = "RESOURCE_GROUP_REVERT"
+# FR-FL-04. Running a configured playbook against a cluster. Not a restart -
+# see fleet/jobs.py for why the two must stay apart.
+ACTION_FLEET_JOB = "FLEET_JOB_RUN"
 
 ALLOWED_ACTION_TYPES = frozenset(
     [
@@ -62,6 +65,7 @@ ALLOWED_ACTION_TYPES = frozenset(
         ACTION_NODE_SHUTDOWN,
         ACTION_RESOURCE_GROUP_CHANGE,
         ACTION_RESOURCE_GROUP_REVERT,
+        ACTION_FLEET_JOB,
     ]
 )
 

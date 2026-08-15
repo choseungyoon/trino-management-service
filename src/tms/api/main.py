@@ -140,13 +140,51 @@ def build_fleet_service(config: Config, service: TmsService):
     from tms.clients.transport import HttpxTransport
     from tms.fleet.service import FleetService
 
+    runner, repository = build_fleet_jobs(config)
     return FleetService(
         config=config,
         snapshots=service.repository,
         audit_guard=service.audit,
         transport_factory=lambda: HttpxTransport(verify_tls=config.trino.verify_tls),
         stale_threshold=config.collector.stale_threshold_seconds,
+        job_runner=runner,
+        job_repository=repository,
     )
+
+
+def build_fleet_jobs(config: Config):
+    """The FR-FL-04 runner and its store, or (None, None).
+
+    None when `fleet.jobs` is empty, which is the default: this uses the TMS
+    host's SSH access to every node, so it appears only when an administrator
+    has declared what may be run (D-009's reasoning, applied again).
+    """
+    if not config.fleet.jobs:
+        return None, None
+    from tms.fleet.jobs import JobRunner, build_jobs
+    from tms.fleet.jobstore import PostgresJobRepository
+
+    try:
+        repository = PostgresJobRepository(config.database_url.reveal())
+    except Exception as exc:  # noqa: BLE001
+        log.error("cannot open the fleet job store, so jobs are off: %s", exc)
+        return None, None
+
+    # A row still saying RUNNING belongs to a subprocess that died with the
+    # previous process. Left alone it would block the cluster's unique index
+    # forever and tell an operator a playbook is still going.
+    orphans = repository.reconcile_orphans()
+    if orphans:
+        log.warning("marked %d fleet job(s) UNKNOWN: tms-api restarted while "
+                    "they were running", orphans)
+
+    runner = JobRunner(
+        jobs=build_jobs(config.fleet.jobs),
+        cluster_inventories=config.fleet.inventories,
+        binary=config.cluster_ops.ansible.binary,
+        state_dir=config.cluster_ops.ansible.state_dir,
+    )
+    return runner, repository
 
 
 def create_app(config: Optional[Config] = None, service: Optional[TmsService] = None,

@@ -213,7 +213,8 @@ class MigrationCoverageTest(unittest.TestCase):
         # 002 grants privileges and 005 extends them; neither creates an object
         # a client connection can observe, so they are legitimately unchecked.
         grants_only = {"002_grants.sql", "005_restart_sequence_grants.sql",
-                       "011_resource_group_grants.sql"}
+                       "011_resource_group_grants.sql",
+                       "013_fleet_job_grants.sql"}
         unchecked = on_disk - checked - grants_only
         self.assertEqual(
             set(), unchecked,

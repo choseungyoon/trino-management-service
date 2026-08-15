@@ -31,19 +31,144 @@ from tms.api.permissions import MANAGE_HEALTH, Principal
 from tms.clients.errors import TrinoClientError
 from tms.clients.node import NodeClient
 from tms.collector.snapshot import KIND_FLEET
-from tms.core.audit import ACTION_NODE_SHUTDOWN, TARGET_NODE, AuditGuard
+from tms.core.audit import (
+    ACTION_FLEET_JOB,
+    ACTION_NODE_SHUTDOWN,
+    TARGET_CLUSTER,
+    TARGET_NODE,
+    AuditGuard,
+)
 
 log = logging.getLogger(__name__)
 
 
 class FleetService:
     def __init__(self, config, snapshots, audit_guard: AuditGuard,
-                 transport_factory, stale_threshold: float = 120.0) -> None:
+                 transport_factory, stale_threshold: float = 120.0,
+                 job_runner=None, job_repository=None) -> None:
         self.config = config
         self.snapshots = snapshots
         self.audit = audit_guard
         self._transport_factory = transport_factory
         self._stale_threshold = stale_threshold
+        # Both None unless `fleet.jobs` declares something. The screen then
+        # shows no job panel at all rather than an empty one - a control that
+        # can only say "nothing configured" is noise.
+        self.job_runner = job_runner
+        self.job_repository = job_repository
+
+    def _require_view(self, principal: Principal) -> None:
+        from tms.api.permissions import VIEW_HEALTH
+        from tms.api.services import require
+
+        require(principal, VIEW_HEALTH)
+
+    # ------------------------------------------------------- FR-FL-04/05
+
+    @property
+    def jobs_enabled(self) -> bool:
+        return self.job_runner is not None and self.job_repository is not None
+
+    def list_jobs(self, principal: Principal, cluster: str) -> Dict[str, Any]:
+        """What can be run here, and what has been."""
+        self._require_view(principal)
+        self._cluster_or_404(cluster)
+        if not self.jobs_enabled:
+            return {"enabled": False, "definitions": [], "runs": [], "active": None}
+        definitions = [
+            {"key": job.key, "title": job.title, "description": job.description,
+             "parameters": [{"name": p.name, "label": p.label, "min": p.minimum,
+                             "max": p.maximum, "default": p.default}
+                            for p in job.parameters]}
+            for job in sorted(self.job_runner.jobs.values(), key=lambda j: j.key)
+        ]
+        active = self.job_repository.active(cluster=cluster)
+        return {
+            "enabled": True,
+            "definitions": definitions,
+            "runs": self.job_repository.recent(limit=20, cluster=cluster),
+            "active": active[0] if active else None,
+        }
+
+    def get_job_run(self, principal: Principal, run_id) -> Dict[str, Any]:
+        self._require_view(principal)
+        if not self.jobs_enabled:
+            raise NotFound("Fleet jobs are not configured.")
+        run = self.job_repository.get(run_id)
+        if run is None:
+            raise NotFound("No such job run: {}".format(run_id))
+        return run
+
+    def start_job(self, principal: Principal, cluster: str, key: str,
+                  parameters: Dict[str, Any], reason: str) -> Dict[str, Any]:
+        """Run a configured playbook against one cluster (FR-FL-04).
+
+        ⛔ This is not the safe restart sequence and cannot stand in for it.
+        TMS sees a path and an exit code; it has no idea whether the playbook
+        drains anything. Pointing a job at a restart would be a way around
+        CLAUDE.md rule 5, which is why `tms-config-check` refuses that case and
+        why the config comment says so twice.
+        """
+        from tms.fleet.jobs import JobError
+        from tms.fleet.jobstore import ActiveJobExists, JobStoreUnavailable
+
+        if not principal.can(MANAGE_HEALTH):
+            raise Forbidden("You do not have permission to run fleet jobs.")
+        self._cluster_or_404(cluster)
+        if not (reason or "").strip():
+            raise InvalidRequest("A reason is required to run a job.")
+        if not self.jobs_enabled:
+            raise InvalidRequest("Fleet jobs are not configured (fleet.jobs).")
+
+        try:
+            definition = self.job_runner.definition(key)
+            cleaned = definition.clean(parameters or {})
+        except JobError as exc:
+            raise InvalidRequest(str(exc))
+
+        with self.audit.action(
+            actor=principal.username, roles=principal.roles,
+            action_type=ACTION_FLEET_JOB, target_kind=TARGET_CLUSTER,
+            target_id="{}:{}".format(cluster, key), target_cluster=cluster,
+            reason=reason, actor_ip=principal.ip,
+        ):
+            try:
+                run = self.job_repository.create(
+                    cluster=cluster, job=key, actor=principal.username,
+                    roles=principal.roles, reason=reason, parameters=cleaned)
+            except ActiveJobExists:
+                raise InvalidRequest(
+                    "A job is already running on {}. Two playbooks writing the "
+                    "same inventory at once is not a conflict anyone can "
+                    "untangle afterwards.".format(cluster))
+            except JobStoreUnavailable as exc:
+                # Same rule as the restart sequence: a change TMS cannot record
+                # is a change nobody will be able to explain later.
+                raise UpstreamUnavailable(
+                    "Cannot record this job, so it will not be started: "
+                    "{}".format(exc))
+
+            run_id = run["id"]
+            store = self.job_repository
+
+            def on_line(line: str) -> None:
+                store.append_output(run_id, line)
+
+            def on_finish(result: Dict[str, Any]) -> None:
+                store.finish(run_id, result.get("state"),
+                             exit_code=result.get("exit_code"),
+                             error=result.get("error"))
+
+            try:
+                command = self.job_runner.start(
+                    key, cluster, cleaned, on_line, on_finish)
+            except JobError as exc:
+                store.finish(run_id, "FAILED", error=str(exc))
+                raise InvalidRequest(str(exc))
+
+        log.info("fleet job %s started on %s by %s", key, cluster, principal.username)
+        store.append_output(run_id, "Running {}".format(" ".join(command)), level="info")
+        return dict(run, id=run_id)
 
     # ------------------------------------------------------------------ read
 
