@@ -198,6 +198,56 @@ def build_fleet_jobs(config: Config):
     return runner, repository
 
 
+def build_benchmark_service(config: Config, service: TmsService, gateway_client=None):
+    """The FR-BM harness, or None when `benchmark.enabled` is false.
+
+    Off by default. A benchmark takes a cluster's capacity, and the guard that
+    makes that safe (FR-BM-04) needs the Gateway - so this appears only where
+    an administrator has declared query sets and meant it.
+    """
+    if not getattr(config, "benchmark", None) or not config.benchmark.enabled:
+        return None
+    from tms.bench.queryset import build_query_sets
+    from tms.bench.runner import BenchmarkRunner
+    from tms.bench.service import BenchmarkService
+    from tms.bench.store import PostgresBenchmarkRepository
+
+    try:
+        repository = PostgresBenchmarkRepository(config.database_url.reveal())
+    except Exception as exc:  # noqa: BLE001
+        log.error("cannot open the benchmark store, so benchmarks are off: %s", exc)
+        return None
+
+    # A row still saying RUNNING belongs to a worker thread that died with the
+    # previous process; left alone it blocks the cluster's unique index and
+    # tells an operator a run is still going.
+    orphans = repository.reconcile_orphans()
+    if orphans:
+        log.warning("marked %d benchmark run(s) UNKNOWN: tms-api restarted "
+                    "while they were in flight", orphans)
+
+    def sql_for(cluster: str):
+        # Its own timeout, much larger than the SQL client's default: a
+        # benchmark query that takes four minutes is the measurement, and
+        # timing it out at 30s would record the harness's impatience instead.
+        from tms.clients.sql import SqlClient
+
+        return SqlClient(service.trino_clients[cluster],
+                         timeout_seconds=config.benchmark.timeout_seconds)
+
+    return BenchmarkService(
+        config=config,
+        snapshots=service.repository,
+        audit_guard=service.audit,
+        repository=repository,
+        runner=BenchmarkRunner(sql_client_factory=sql_for, repository=repository,
+                               pause_seconds=config.benchmark.pause_seconds),
+        query_sets=build_query_sets(config.benchmark.query_sets),
+        gateway_client=gateway_client,
+        stale_threshold=config.collector.stale_threshold_seconds,
+    )
+
+
 def build_board_service(config: Config):
     """The FR-BOARD work board, or None.
 
@@ -218,7 +268,7 @@ def build_board_service(config: Config):
 
 def create_app(config: Optional[Config] = None, service: Optional[TmsService] = None,
                restarts: Optional[Any] = None, fleet: Optional[Any] = None,
-               board: Optional[Any] = None):
+               board: Optional[Any] = None, benchmark: Optional[Any] = None):
     from fastapi import Body, Depends, FastAPI, Query, Request, Response
     from fastapi.responses import JSONResponse
 
@@ -261,6 +311,14 @@ def create_app(config: Optional[Config] = None, service: Optional[TmsService] = 
         fleet = build_fleet_service(config, service)
     if board is None:
         board = build_board_service(config)
+    if benchmark is None:
+        from tms.clients.gateway import build_gateway_client
+
+        # Its own client rather than reaching into the restart service: the
+        # guard must be able to ask the Gateway even on a deployment where
+        # restarts are not configured.
+        benchmark = build_benchmark_service(config, service,
+                                            gateway_client=build_gateway_client(config))
 
     app = FastAPI(title="TMS", version="0.1.0", docs_url=None, redoc_url=None)
 
@@ -549,7 +607,8 @@ def create_app(config: Optional[Config] = None, service: Optional[TmsService] = 
         from tms.web.routes import register as register_web
 
         register_web(app, service, config, authenticator, codec, SESSION_COOKIE,
-                     restarts=restarts, fleet=fleet, board=board)
+                     restarts=restarts, fleet=fleet, board=board,
+                     benchmark=benchmark)
 
     return app
 

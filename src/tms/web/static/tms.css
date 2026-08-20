@@ -929,3 +929,19 @@ dialog::backdrop { background: rgba(4, 6, 10, .55); backdrop-filter: blur(1px); 
 /* A comment keeps the line breaks it was written with. Collapsing them turns
    a short list of reasons into one run-on sentence. */
 .wi-log__body.wrap, .panel__note.wrap { white-space: pre-wrap; }
+
+/* ── Benchmark (FR-BM) ──────────────────────────────────────────────── */
+
+/* One refusal per line. The guard usually has more than one thing wrong at
+   once, and a run-on sentence hides the second one. */
+.bench-refusal { margin-top: 4px; line-height: 1.55; }
+.bench-refusal + .bench-refusal { padding-top: 4px; border-top: 1px solid var(--line); }
+
+/* The comparison table's verdict column. Colour carries the direction, but
+   never alone - every cell also states it in words, because "is red good
+   here" is exactly the question a reader should not have to ask. */
+.delta { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.delta--bad { color: var(--bad); }
+.delta--good { color: var(--good); }
+.delta--unknown { color: var(--tx-2); }
+.delta--concerning { color: var(--warn); }

@@ -4,15 +4,15 @@
 > 상태의 주인은 TMS 의 보드이고, **근거의 주인은 각 항목이 가리키는 문서**다.
 > 둘이 어긋나면 문서가 이긴다.
 
-> 생성 시각: 2026-08-20 17:52 UTC
+> 생성 시각: 2026-08-20 23:11 UTC
 
 | 상태 | 건수 |
 |---|---|
 | Needs a decision | 1 |
 | Blocked | 13 |
-| In progress | 2 |
-| Planned | 3 |
-| Done | 15 |
+| In progress | 1 |
+| Planned | 1 |
+| Done | 18 |
 | Dropped | 0 |
 
 ---
@@ -45,26 +45,23 @@
 | `W-3` | 워커 OPA 배포 | task | R3 | 타 팀 · V-5(graceful shutdown 실증) 선행 | `docs/NEXT_STEPS.md` |
 | `W-6` | Prometheus + Grafana / 로그 수집 | task | R2 | 타 팀 · FR-BM-02 와 FR-LOG-DEEPLINK 의 선행 | `docs/NEXT_STEPS.md` |
 
-## In progress (2)
+## In progress (1)
 
 > Being built now.
 
 | 키 | 제목 | 종류 | 릴리스 | 막는 것 | 근거 문서 |
 |---|---|---|---|---|---|
-| `FR-BM-04` | 벤치마크 프로덕션 보호 — 라우팅 그룹 제외 강제 | requirement | R2 | — | `docs/REQUIREMENTS.md` |
 | `W-5` | Gateway DB 를 VM1 에서 분리 + HA | task | — | 인프라 — 사용자가 처리 중 | `docs/NEXT_STEPS.md` |
 
-## Planned (3)
+## Planned (1)
 
 > Agreed and unblocked, not started.
 
 | 키 | 제목 | 종류 | 릴리스 | 막는 것 | 근거 문서 |
 |---|---|---|---|---|---|
-| `FR-BM-01` | 표준 쿼리 세트 실행 | requirement | R2 | — | `docs/REQUIREMENTS.md` |
-| `FR-BM-03` | 벤치마크 실행 간 비교 | requirement | R2 | — | `docs/REQUIREMENTS.md` |
 | `W-1` | NFR-PERF-03 프로덕션 실측 (피크 시간대) | task | R1 | 사람이 돌려야 한다 — R1 DoD 마지막 항목 | `docs/NEXT_STEPS.md` |
 
-## Done (15)
+## Done (18)
 
 > Built and in the repository.
 
@@ -77,6 +74,9 @@
 | `D-011` | UI 는 서버 렌더. SPA 프레임워크 도입 안 함 | decision | — | — | `docs/DECISIONS.md` |
 | `D-012` | tms-svc 에 ExecuteQuery 부여. A1 강제를 코드로 이동 | decision | R3 | — | `docs/DECISIONS.md` |
 | `D-013` | 작업 보드. 상태는 보드가, 근거는 문서가 갖는다 | decision | R2 | — | `docs/DECISIONS.md` |
+| `FR-BM-01` | 표준 쿼리 세트 실행 | requirement | R2 | — | `docs/REQUIREMENTS.md` |
+| `FR-BM-03` | 벤치마크 실행 간 비교 | requirement | R2 | — | `docs/REQUIREMENTS.md` |
+| `FR-BM-04` | 벤치마크 프로덕션 보호 — 라우팅 그룹 제외 강제 | requirement | R2 | — | `docs/REQUIREMENTS.md` |
 | `FR-BOARD` | 작업 보드 — 상태·요청·댓글 + 저장소 내보내기 | requirement | R2 | — | `docs/REQUIREMENTS.md` |
 | `FR-FL-02` | 미조인 워커 식별 | requirement | R3 | — | `docs/REQUIREMENTS.md` |
 | `FR-FL-04` | 증설 플레이북 실행 훅 | requirement | R3 | — | `docs/REQUIREMENTS.md` |
@@ -94,4 +94,4 @@ _없음._
 
 ---
 
-**열린 항목 19건.** 착수 전에 이 파일을 읽는다 — 특히 "Needs a decision" 은 사람이 답하기 전까지 아무것도 움직이지 않는 항목이다.
+**열린 항목 16건.** 착수 전에 이 파일을 읽는다 — 특히 "Needs a decision" 은 사람이 답하기 전까지 아무것도 움직이지 않는 항목이다.

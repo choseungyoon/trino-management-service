@@ -425,6 +425,31 @@ DB 를 정지시킨 채 코디네이터를 그대로 두고 측정했다.
 
 ---
 
+### T1-5-1. 클라이언트 프로토콜 응답의 `stats` — **실측 2026-08-21 (로컬 Trino 477)**
+
+FR-BM-01 이 기록하는 숫자의 출처다. `POST /v1/statement` 후 `nextUri` 를 끝까지 따라갔을 때, **마지막 응답의 `stats`** 가 최종값이다.
+
+**⛔ 첫 응답의 `stats` 를 읽으면 안 된다.** 실측한 첫 응답은 `state: QUEUED` 에 전 필드가 0 이었다. 거기서 읽으면 **모든 쿼리가 0ms 로 기록된다** — 벤치마크로서는 조용히 전부 틀린 값이다.
+
+최종 응답에서 실제로 온 필드 (전량 실측):
+
+| 필드 | 예시 | 비고 |
+|---|---|---|
+| `id` | `20260820_150544_00006_ym5f6` | **실패한 쿼리에도 온다.** 나중에 히스토리에서 찾을 유일한 열쇠 |
+| `stats.state` | `FINISHED` | |
+| `stats.elapsedTimeMillis` | 464 | |
+| `stats.cpuTimeMillis` | 259 | |
+| `stats.queuedTimeMillis` / `planningTimeMillis` / `analysisTimeMillis` | 7 / 128 / 1 | |
+| `stats.processedRows` / `processedBytes` | 18050 / 352 | ⚠️ 아래 |
+| `stats.peakMemoryBytes` | 1360 | |
+| `stats.rootStage.*` | 스테이지별 동일 지표 | |
+
+⚠️ **`processedRows` 는 사소한 쿼리에서 0 으로 온다.** `SELECT 1` 은 최상위 `processedRows: 0` 인데 `rootStage.processedRows` 는 1 이었다. 행 수를 정확히 세야 하는 용도로 쓰지 않는다 — TMS 는 참고 표시로만 쓴다.
+
+**실패 시**: `error` 를 담은 응답이 오고 `stats` 는 없다. TMS 는 이때 **자기 벽시계 시간**을 기록한다 — "40초 만에 실패" 와 "즉시 실패" 는 다른 발견이고, Trino 측 숫자가 없다고 실패를 안 남기면 그 구분이 사라진다.
+
+> **여기서 실제 버그가 하나 나왔다.** `clients/sql.py` 가 `response.text` (속성) 를 읽고 있었다. `HttpResponse.text` 는 **메서드**이고, 바운드 메서드는 truthy 라 `or "{}"` 도 걸리지 않아 `json.loads` 가 `TypeError` 로 죽는다. 단위 테스트의 가짜 응답이 `.text` 를 문자열로 갖고 있어서 **작성 시점부터 테스트가 버그에 동의하고 있었다.** 실 Trino 에 처음 붙인 순간 드러났다. 가짜는 이제 실제 `HttpResponse` 를 쓴다.
+
 ### T1-6. `catalog.management` / `catalog.store` / ALTER CATALOG — **확인**
 
 문서: `/docs/477/admin/properties-catalog.html`, `/docs/477/sql/create-catalog.html`, `/docs/477/sql/drop-catalog.html`

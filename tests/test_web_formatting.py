@@ -165,8 +165,18 @@ class StatusClassTest(unittest.TestCase):
 
     def test_unrecognised_state_is_unknown_never_good(self):
         """A state we do not know must never render green."""
-        for value in ("FINISHED", "FAILED", "", None, 42, "nonsense"):
+        for value in ("FINISHED", "", None, 42, "nonsense"):
             self.assertEqual("unknown", status_class(value), repr(value))
+
+    def test_a_failure_is_never_green_whatever_produced_it(self):
+        """FAILED is shared between Trino queries and TMS's own runs.
+
+        It moved out of the unrecognised set when the benchmark harness needed
+        it (016), so what is asserted here is the invariant the old test was
+        really protecting: nothing that failed renders as good.
+        """
+        for value in ("FAILED", "failed", "ABORTED"):
+            self.assertNotEqual("good", status_class(value), repr(value))
 
 
 class TruncateTest(unittest.TestCase):

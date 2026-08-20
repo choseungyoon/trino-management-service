@@ -133,6 +133,7 @@ TMS가 완전히 다운되어도 모든 쿼리는 정상 실행되어야 한다.
 | `docs/runbooks/local-account-setup.md` | 로컬 계정 (AD 연동 전까지) |
 | `docs/runbooks/gateway-config-request.md` | 운영팀 협의 시. **로컬 19 실측 기반** — `monitorType` 은 `METRICS` (UI_API 는 401) |
 | `docs/runbooks/resource-groups-db.md` | 리소스 그룹 file → db 전환 (D-010) + 메모리 재설정. **한 번에 한 클러스터씩** |
+| `docs/runbooks/benchmark.md` | 벤치마크 하네스(FR-BM) 사용. **TMS 는 클러스터를 라우팅에서 빼 주지 않는다** — 확인하고 거부만 한다 |
 | `docs/runbooks/executequery-grant.md` | `tms-svc` 에 `ExecuteQuery` 부여 (D-012). **부여 전 OPA 카탈로그 규칙 확인이 조건** |
 | `docs/templates/` | 채워 넣는 파일 (클러스터 인벤토리 등) |
 

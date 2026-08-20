@@ -53,6 +53,11 @@ ACTION_RESOURCE_GROUP_REVERT = "RESOURCE_GROUP_REVERT"
 # FR-FL-04. Running a configured playbook against a cluster. Not a restart -
 # see fleet/jobs.py for why the two must stay apart.
 ACTION_FLEET_JOB = "FLEET_JOB_RUN"
+# FR-BM-01. Running a declared query set against a cluster. Audited because it
+# is a write in the sense rule 3 means: it consumes a real cluster's capacity
+# on somebody's say-so, and the reason is what explains why that cluster was
+# out of rotation at the time.
+ACTION_BENCHMARK_RUN = "BENCHMARK_RUN"
 
 ALLOWED_ACTION_TYPES = frozenset(
     [
@@ -66,6 +71,7 @@ ALLOWED_ACTION_TYPES = frozenset(
         ACTION_RESOURCE_GROUP_CHANGE,
         ACTION_RESOURCE_GROUP_REVERT,
         ACTION_FLEET_JOB,
+        ACTION_BENCHMARK_RUN,
     ]
 )
 

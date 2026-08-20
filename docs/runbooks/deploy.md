@@ -104,7 +104,7 @@ ls -l /etc/trino-management-service/venv/bin/tms-api /etc/trino-management-servi
 | 3-5 | `psql -U tms_owner -d tms -v ON_ERROR_STOP=1 -f migrations/002_grants.sql` |
 | 3-5b | `psql -U tms_owner -d tms -v ON_ERROR_STOP=1 -f migrations/003_snapshot_kinds.sql` — **R2 이상 필수** |
 | 3-5c | `004_restart_sequence.sql` + `005_restart_sequence_grants.sql` — **안전 시퀀스(FR-CO-02) 사용 시 필수** |
-| 3-5d | `006` ~ `015` 를 번호순으로 전량. 목록과 근거는 `upgrade-r2-r3.md` §3 |
+| 3-5d | `006` ~ `017` 를 번호순으로 전량. 목록과 근거는 `upgrade-r2-r3.md` §3 |
 | 3-5e | 작업 보드 초기 적재 — `tms-work-export --seed` (한 번만. 재실행해도 상태를 되돌리지 않는다) |
 | 3-6 | **append-only 검증** (db-setup.md §4) — 건너뛰지 말 것 |
 

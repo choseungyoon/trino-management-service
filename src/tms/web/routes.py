@@ -50,13 +50,14 @@ def build_templates():
 
 
 def register(app, service, config, authenticator, codec, session_cookie: str,
-             restarts=None, fleet=None, board=None) -> None:
+             restarts=None, fleet=None, board=None, benchmark=None) -> None:
     """Mount the UI on an existing FastAPI app.
 
-    `restarts` is the FR-CO-02 sequence service, `fleet` the FR-FLEET one and
-    `board` the FR-BOARD work board. Any may be None when it cannot run (no
-    Gateway, no inventory, no database). None is a real state the screens
-    handle, not an error - the console still shows everything else.
+    `restarts` is the FR-CO-02 sequence service, `fleet` the FR-FLEET one,
+    `board` the FR-BOARD work board and `benchmark` the FR-BM harness. Any may
+    be None when it cannot run (no Gateway, no inventory, no database, not
+    enabled). None is a real state the screens handle, not an error - the
+    console still shows everything else.
     """
     from fastapi import Form, Request
     from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
@@ -126,6 +127,11 @@ def register(app, service, config, authenticator, codec, session_cookie: str,
         # seconds would throw away the operator's place in a progress log that
         # is still being written to.
         #
+        # "benchmark" is absent for a third reason: the overview page holds a
+        # form with a reason field in it, and a timed reload would throw away
+        # what the operator was typing. The run page sets its own refresh, and
+        # only while the run is actually going.
+        #
         # "resource-groups" is absent too, for the opposite reason: it shows
         # configuration, which changes when a person changes it rather than on
         # a timer. Polling it would put a query per interval on the database
@@ -154,6 +160,7 @@ def register(app, service, config, authenticator, codec, session_cookie: str,
             "fleet_enabled": fleet is not None,
             "resource_groups_enabled": config.resource_groups.enabled,
             "board_enabled": board is not None,
+            "benchmark_enabled": benchmark is not None,
             # A cluster held out of rotation is invisible on every other
             # screen: the remaining clusters are green, so the console looks
             # healthy while traffic is being refused. The banner follows the
@@ -1274,6 +1281,125 @@ def register(app, service, config, authenticator, codec, session_cookie: str,
             media_type="text/csv",
             headers={"Content-Disposition": 'attachment; filename="tms-audit.csv"'},
         )
+
+    # ── benchmark (FR-BM-01/03/04) ─────────────────────────────────────
+    #
+    # ⛔ There is no route here that deactivates a backend, and there must
+    # never be one. The screen shows what is missing and names who can fix it;
+    # taking a cluster out of rotation is step 1 of the safe restart sequence
+    # and nothing else (CLAUDE.md rule 5).
+
+    def _benchmark_or_error(request: Request, principal: Principal):
+        if benchmark is None:
+            return _error_page(request, principal, NotFound(
+                "The benchmark harness is off. Set benchmark.enabled and "
+                "declare benchmark.query_sets."))
+        return None
+
+    @app.get("/clusters/{cluster}/benchmark", response_class=HTMLResponse,
+             include_in_schema=False)
+    def benchmark_page(request: Request, cluster: str, error: Optional[str] = None):
+        principal, claims = principal_or_redirect(request)
+        if claims is None:
+            return principal
+        unavailable = _benchmark_or_error(request, principal)
+        if unavailable is not None:
+            return unavailable
+        try:
+            data = benchmark.overview(principal, cluster)
+        except ApiError as exc:
+            return _error_page(request, principal, exc)
+
+        context = base_context(request, principal, "benchmark")
+        context.update({
+            "cluster": cluster,
+            "bench": data,
+            "runs": views.benchmark_rows(data["runs"]),
+            "default_repetitions": config.benchmark.default_repetitions,
+            "error": error,
+            "envelope": None,
+        })
+        return render("benchmark.html", context)
+
+    @app.post("/clusters/{cluster}/benchmark", include_in_schema=False)
+    def benchmark_start(request: Request, cluster: str, query_set: str = Form(""),
+                        reason: str = Form(""), repetitions: str = Form("1"),
+                        label: str = Form("")):
+        principal, claims = principal_or_redirect(request)
+        if claims is None:
+            return principal
+        unavailable = _benchmark_or_error(request, principal)
+        if unavailable is not None:
+            return unavailable
+        try:
+            run = benchmark.start(principal, cluster, query_set=query_set,
+                                  reason=reason,
+                                  repetitions=_int_or_none(repetitions) or 0,
+                                  label=label)
+        except ApiError as exc:
+            # Back to the page with the refusal on it. The refusal is usually
+            # the guard, and the guard is the thing the operator has to go and
+            # fix somewhere else.
+            return RedirectResponse(
+                "/clusters/{}/benchmark?error={}".format(
+                    _quote(cluster), _quote(exc.message)), status_code=303)
+
+        response = RedirectResponse("/benchmarks/{}".format(run["id"]), status_code=303)
+        _flash(response, "good", "Benchmark #{} started.".format(run["id"]))
+        return response
+
+    @app.get("/benchmarks/{run_id}", response_class=HTMLResponse,
+             include_in_schema=False)
+    def benchmark_run_page(request: Request, run_id: str,
+                           against: Optional[str] = None):
+        principal, claims = principal_or_redirect(request)
+        if claims is None:
+            return principal
+        unavailable = _benchmark_or_error(request, principal)
+        if unavailable is not None:
+            return unavailable
+        try:
+            run = benchmark.run(principal, run_id)
+            others = benchmark.comparable_runs(principal, run)
+            comparison = (benchmark.compare(principal, against, run["id"])
+                          if against else None)
+        except ApiError as exc:
+            return _error_page(request, principal, exc)
+
+        context = base_context(request, principal, "benchmark")
+        context.update({
+            "run": views.benchmark_run(run),
+            "queries": views.benchmark_query_rows(run),
+            "others": views.benchmark_rows(others),
+            "comparison": views.comparison_rows(comparison) if comparison else None,
+            "against": against,
+            "can_start": principal.can(MANAGE_HEALTH),
+            "envelope": None,
+            # Only this page, and only while it is running. The overview page
+            # is deliberately not in `refresh_by_page`: a reload every few
+            # seconds there would wipe the reason someone is halfway through
+            # typing into the start form.
+            "refresh_seconds": 5 if run["state"] == "RUNNING" else 0,
+        })
+        return render("benchmark_run.html", context)
+
+    @app.post("/benchmarks/{run_id}/abort", include_in_schema=False)
+    def benchmark_abort(request: Request, run_id: str):
+        principal, claims = principal_or_redirect(request)
+        if claims is None:
+            return principal
+        unavailable = _benchmark_or_error(request, principal)
+        if unavailable is not None:
+            return unavailable
+        response = RedirectResponse("/benchmarks/" + _quote(run_id), status_code=303)
+        try:
+            benchmark.abort(principal, run_id)
+        except ApiError as exc:
+            _flash(response, "bad", exc.message)
+        else:
+            _flash(response, "good",
+                   "Stopping after the query in flight.")
+        return response
 
     # ── work board (FR-BOARD) ──────────────────────────────────────────
     #

@@ -18,10 +18,15 @@ from tms.clients.errors import TrinoClientError  # noqa: E402
 from tms.clients.sql import QueryFailed, SqlClient, _path_of  # noqa: E402
 
 
-class Response:
-    def __init__(self, text):
-        self.text = text
-        self.status_code = 200
+# The real one, deliberately. A hand-rolled stand-in is what let `.text` vs
+# `.text()` diverge from the transport for as long as it did: the fake had a
+# string attribute, the transport has a method, and every test agreed with the
+# fake. Anything the transport changes about a response now shows up here.
+from tms.clients.transport import HttpResponse  # noqa: E402
+
+
+def Response(text):
+    return HttpResponse(status=200, body=text.encode("utf-8"))
 
 
 class StubTrino:

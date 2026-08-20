@@ -1,0 +1,249 @@
+"""Storage for benchmark runs and their measurements (FR-BM-01/03).
+
+Append-only where it matters, the same grade as the audit log: a measurement
+someone can edit afterwards is not a measurement, and the entire value of
+keeping these is comparing today's numbers against numbers taken before
+somebody changed something.
+
+There is no delete. A run that should not have happened still happened, and
+`benchmark_run.guard` records the state of the cluster that made it valid or
+worthless.
+
+Python 3.9 compatible.
+"""
+
+import json
+import logging
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
+
+from tms.bench.runner import RUNNING, TERMINAL, UNKNOWN
+
+log = logging.getLogger(__name__)
+
+_RUN_COLUMNS = ("id", "cluster", "query_set", "label", "state", "reason", "actor",
+                "repetitions", "guard", "started_at", "finished_at", "error")
+
+_RESULT_COLUMNS = ("query_name", "iteration", "trino_query_id", "state", "elapsed_ms",
+                   "trino_elapsed_ms", "trino_cpu_ms", "trino_queued_ms",
+                   "trino_planning_ms", "processed_rows", "processed_bytes",
+                   "peak_memory_bytes", "error", "occurred_at")
+
+
+class BenchmarkStoreUnavailable(Exception):
+    """Storage is not reachable.
+
+    Blocking, unlike the work board's. A benchmark TMS cannot record is a
+    cluster taken out of rotation for nothing.
+    """
+
+
+class ActiveRunExists(Exception):
+    """This cluster already has a benchmark running."""
+
+
+class InMemoryBenchmarkRepository:
+    """For tests and the demo. Same interface, no durability."""
+
+    def __init__(self):
+        self.runs: List[Dict[str, Any]] = []
+        self.results: Dict[Any, List[Dict[str, Any]]] = {}
+        self._next = 1
+
+    @staticmethod
+    def _now():
+        return datetime.now(timezone.utc)
+
+    def create(self, cluster, query_set, actor, roles, reason, repetitions,
+               guard, label=None):
+        if any(r["state"] == RUNNING and r["cluster"] == cluster for r in self.runs):
+            raise ActiveRunExists(cluster)
+        run = {"id": self._next, "cluster": cluster, "query_set": query_set,
+               "label": label, "state": RUNNING, "reason": reason, "actor": actor,
+               "actor_roles": list(roles or []), "repetitions": int(repetitions),
+               "guard": dict(guard or {}), "started_at": self._now(),
+               "finished_at": None, "error": None}
+        self._next += 1
+        self.runs.append(run)
+        self.results[run["id"]] = []
+        return dict(run)
+
+    def add_result(self, run_id, outcome):
+        row = dict(outcome, occurred_at=self._now())
+        self.results.setdefault(run_id, []).append(row)
+        return row
+
+    def finish(self, run_id, state, error=None):
+        for run in self.runs:
+            if run["id"] == run_id:
+                run.update(state=state, error=error,
+                           finished_at=(None if state == UNKNOWN else self._now()))
+
+    def get(self, run_id):
+        for run in self.runs:
+            if str(run["id"]) == str(run_id):
+                return dict(run, results=list(self.results.get(run["id"], [])),
+                            is_terminal=run["state"] in TERMINAL)
+        return None
+
+    def recent(self, limit=20, cluster=None, query_set=None):
+        rows = [r for r in self.runs
+                if (cluster is None or r["cluster"] == cluster)
+                and (query_set is None or r["query_set"] == query_set)]
+        return [dict(r) for r in sorted(rows, key=lambda r: r["id"], reverse=True)[:limit]]
+
+    def active(self, cluster=None):
+        return [dict(r) for r in self.runs
+                if r["state"] == RUNNING and (cluster is None or r["cluster"] == cluster)]
+
+    def reconcile_orphans(self):
+        return 0
+
+
+class PostgresBenchmarkRepository:
+    """The real one."""
+
+    def __init__(self, dsn: str) -> None:
+        try:
+            import psycopg
+        except ImportError as exc:  # pragma: no cover - environment dependent
+            raise RuntimeError(
+                "psycopg is required for PostgresBenchmarkRepository") from exc
+        self._psycopg = psycopg
+        self._dsn = dsn
+        self._connection = psycopg.connect(dsn, autocommit=True)
+
+    def _cursor(self):
+        try:
+            return self._connection.cursor()
+        except Exception as exc:  # noqa: BLE001
+            raise BenchmarkStoreUnavailable(str(exc))
+
+    def create(self, cluster, query_set, actor, roles, reason, repetitions,
+               guard, label=None):
+        try:
+            with self._cursor() as cursor:
+                cursor.execute(
+                    "INSERT INTO benchmark_run"
+                    " (cluster, query_set, label, state, reason, actor,"
+                    "  actor_roles, repetitions, guard)"
+                    " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)"
+                    " RETURNING id, started_at",
+                    (cluster, query_set, label, RUNNING, reason, actor,
+                     list(roles or []), int(repetitions), json.dumps(guard or {})))
+                row = cursor.fetchone()
+        except self._psycopg.errors.UniqueViolation:
+            # The partial unique index. Two runs on one cluster measure each
+            # other, and neither number means anything afterwards.
+            raise ActiveRunExists(cluster)
+        except BenchmarkStoreUnavailable:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise BenchmarkStoreUnavailable(str(exc))
+        return {"id": row[0], "cluster": cluster, "query_set": query_set,
+                "label": label, "state": RUNNING, "reason": reason, "actor": actor,
+                "repetitions": int(repetitions), "guard": dict(guard or {}),
+                "started_at": row[1], "finished_at": None, "error": None}
+
+    def add_result(self, run_id, outcome):
+        """One row per query execution. Failures are logged, never raised.
+
+        This runs on the worker thread mid-run. Killing it because the database
+        blinked would abandon the rest of the set on a cluster somebody took
+        out of rotation to measure.
+        """
+        columns = ("run_id", "query_name", "iteration", "trino_query_id", "state",
+                   "elapsed_ms", "trino_elapsed_ms", "trino_cpu_ms",
+                   "trino_queued_ms", "trino_planning_ms", "processed_rows",
+                   "processed_bytes", "peak_memory_bytes", "error")
+        values = [run_id] + [outcome.get(c) for c in columns[1:]]
+        try:
+            with self._cursor() as cursor:
+                cursor.execute(
+                    "INSERT INTO benchmark_result ({}) VALUES ({})".format(
+                        ", ".join(columns), ", ".join(["%s"] * len(columns))),
+                    values)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("dropping benchmark result for run %s: %s", run_id, exc)
+        return outcome
+
+    def finish(self, run_id, state, error=None):
+        finished = "NULL" if state == UNKNOWN else "now()"
+        try:
+            with self._cursor() as cursor:
+                cursor.execute(
+                    "UPDATE benchmark_run"
+                    "   SET state = %s, error = %s, updated_at = now(),"
+                    "       finished_at = {}"
+                    " WHERE id = %s".format(finished), (state, error, run_id))
+        except Exception as exc:  # noqa: BLE001
+            log.error("could not record the outcome of benchmark %s: %s", run_id, exc)
+
+    def get(self, run_id) -> Optional[Dict[str, Any]]:
+        with self._cursor() as cursor:
+            cursor.execute(
+                "SELECT {} FROM benchmark_run WHERE id = %s".format(
+                    ", ".join(_RUN_COLUMNS)), (run_id,))
+            row = cursor.fetchone()
+            if row is None:
+                return None
+            run = _run(row)
+            cursor.execute(
+                "SELECT {} FROM benchmark_result WHERE run_id = %s"
+                " ORDER BY id".format(", ".join(_RESULT_COLUMNS)), (run["id"],))
+            run["results"] = [dict(zip(_RESULT_COLUMNS, r))
+                              for r in cursor.fetchall() or []]
+        return run
+
+    def recent(self, limit=20, cluster=None, query_set=None) -> List[Dict[str, Any]]:
+        sql = "SELECT {} FROM benchmark_run".format(", ".join(_RUN_COLUMNS))
+        where, params = [], []
+        if cluster:
+            where.append("cluster = %s")
+            params.append(cluster)
+        if query_set:
+            where.append("query_set = %s")
+            params.append(query_set)
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY started_at DESC, id DESC LIMIT %s"
+        params.append(int(limit))
+        with self._cursor() as cursor:
+            cursor.execute(sql, params)
+            return [_run(r) for r in cursor.fetchall() or []]
+
+    def active(self, cluster=None) -> List[Dict[str, Any]]:
+        return [r for r in self.recent(limit=50, cluster=cluster)
+                if r["state"] == RUNNING]
+
+    def reconcile_orphans(self) -> int:
+        """Mark runs left RUNNING by a previous process as UNKNOWN.
+
+        Called once at startup. A row still saying RUNNING after tms-api has
+        restarted describes a worker thread that no longer exists; left alone
+        it blocks the cluster's unique index forever and tells an operator a
+        benchmark is still going.
+
+        UNKNOWN rather than FAILED: the measurements already written are real.
+        What is not known is whether the rest of the set ever ran.
+        """
+        try:
+            with self._cursor() as cursor:
+                cursor.execute(
+                    "UPDATE benchmark_run SET state = %s, updated_at = now(),"
+                    "       error = COALESCE(error,"
+                    "         'tms-api restarted while this run was in flight,"
+                    " so the set may be incomplete. Compare with care.')"
+                    " WHERE state = %s", (UNKNOWN, RUNNING))
+                return cursor.rowcount or 0
+        except Exception as exc:  # noqa: BLE001
+            log.warning("could not reconcile orphaned benchmark runs: %s", exc)
+            return 0
+
+
+def _run(row) -> Dict[str, Any]:
+    run = dict(zip(_RUN_COLUMNS, row))
+    guard = run.get("guard")
+    run["guard"] = guard if isinstance(guard, dict) else json.loads(guard or "{}")
+    run["is_terminal"] = run["state"] in TERMINAL
+    return run

@@ -1,0 +1,193 @@
+{% extends "base.html" %}
+{% import "_icons.html" as ui %}
+{% block title %}Benchmark #{{ run.id }}{% endblock %}
+{% block heading %}Benchmark <span class="mono">#{{ run.id }}</span> <span class="dim">{{ run.cluster }}</span>{% endblock %}
+
+{% block topbar_extra %}
+<span class="spacer"></span>
+<a class="btn btn--sm" href="/clusters/{{ run.cluster }}/benchmark">{{ ui.icon('clock', 12) }}이 클러스터의 실행</a>
+{% endblock %}
+
+{% block content %}
+{% if not run.guard_ok %}
+{#
+  Loud, and on every visit. These numbers were taken while TMS could not
+  confirm the cluster was out of rotation — they measure whatever else was
+  happening. Kept rather than deleted, because deleting evidence is worse.
+#}
+<div class="banner banner--bad" role="alert">
+  {{ ui.icon('bad', 15) }}
+  <div>
+    <strong>이 실행은 보호 조건이 확인되지 않은 상태에서 기록됐다.</strong>
+    {% for advice in run.guard_advice %}<div class="bench-refusal">{{ advice }}</div>{% endfor %}
+    <div class="dim" style="margin-top:6px">숫자를 비교에 쓰기 전에 이 점을 먼저 본다.</div>
+  </div>
+</div>
+{% endif %}
+
+<section class="panel">
+  <div class="facts">
+    <div class="fact">
+      <div class="fact__value"><span class="status status--{{ run.state | status_class }}">{{ run.state }}</span></div>
+      <div class="fact__key">상태</div>
+    </div>
+    <div class="fact">
+      <div class="fact__value mono">{{ run.query_set }}</div>
+      <div class="fact__key">쿼리 세트{% if run.label %} · {{ run.label }}{% endif %}</div>
+    </div>
+    <div class="fact">
+      <div class="fact__value num">{{ run.repetitions | integer }}</div>
+      <div class="fact__key">반복</div>
+    </div>
+    <div class="fact">
+      <div class="fact__value num">{{ run.executed | integer }}{% if run.failures %} <span class="dim">({{ run.failures | integer }} 실패)</span>{% endif %}</div>
+      <div class="fact__key">실행된 쿼리</div>
+    </div>
+    <div class="fact">
+      <div class="fact__value">{{ run.actor }}</div>
+      <div class="fact__key">{{ run.started_at | clock }}</div>
+    </div>
+  </div>
+  <p class="panel__note wrap"><span class="strong">사유</span> — {{ run.reason }}
+    {% if run.error %}<br><span class="strong">종료</span> — {{ run.error }}{% endif %}
+  </p>
+</section>
+
+{% if run.state == 'RUNNING' and can_start %}
+<section class="panel" style="margin-top:14px">
+  <div class="panel__head">
+    <div class="panel__title">진행 중</div>
+    <div class="panel__sub">화면은 5초마다 갱신된다</div>
+  </div>
+  <form method="post" action="/benchmarks/{{ run.id }}/abort" class="wi-form">
+    <p class="dim" style="margin:0">
+      중지하면 <strong>지금 실행 중인 쿼리가 끝난 뒤</strong> 멈춘다. TMS 는 자기 쿼리를 죽이지 않는다 —
+      취소된 쿼리는 코디네이터에 흔적만 남기고 아무도 그 결과를 기록하지 못한다.
+    </p>
+    <div class="row-actions">
+      <button class="btn btn--danger" type="submit">중지</button>
+    </div>
+  </form>
+</section>
+{% endif %}
+
+<section class="panel" style="margin-top:14px">
+  <div class="panel__head">
+    <div class="panel__title">쿼리별 결과</div>
+    <div class="panel__sub">반복 실행은 <strong>중앙값</strong>으로 접었다 — 첫 실행은 나머지와 같지 않다</div>
+  </div>
+  {% if queries %}
+  <div class="table-scroll">
+    <table class="table">
+      <thead>
+        <tr>
+          <th scope="col">쿼리</th><th scope="col">실행</th><th scope="col">중앙값</th>
+          <th scope="col">최소</th><th scope="col">CPU 중앙값</th><th scope="col">처리 행</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for q in queries %}
+        <tr>
+          <td class="mono">{{ q.name }}</td>
+          <td class="num">{{ q.runs | integer }}{% if q.failures %} <span class="status status--bad">{{ q.failures | integer }} 실패</span>{% endif %}</td>
+          {% if q.all_failed %}
+          <td colspan="4" class="wrap">{{ q.error or '모든 실행이 실패했다.' }}</td>
+          {% else %}
+          <td class="num">{{ q.median_ms | duration }}</td>
+          <td class="num dim">{{ q.fastest_ms | duration }}</td>
+          <td class="num dim">{{ q.median_cpu_ms | duration }}</td>
+          <td class="num dim">{{ q.rows_processed | integer }}</td>
+          {% endif %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty">
+    {{ ui.icon('clock', 20, 1.6) }}
+    <div class="empty__title">아직 결과가 없다</div>
+    <div class="empty__desc">첫 쿼리가 끝나면 여기에 나타난다.</div>
+  </div>
+  {% endif %}
+</section>
+
+{% if others %}
+<section class="panel" style="margin-top:14px">
+  <div class="panel__head">
+    <div class="panel__title">비교</div>
+    <div class="panel__sub">같은 쿼리 세트(<span class="mono">{{ run.query_set }}</span>)의 실행만 고를 수 있다</div>
+  </div>
+  <form method="get" action="/benchmarks/{{ run.id }}" class="wi-form">
+    <label class="field">기준으로 삼을 실행
+      <select class="input" name="against">
+        {% for other in others %}
+        <option value="{{ other.id }}" {% if against and against|string == other.id|string %}selected{% endif %}>
+          #{{ other.id }} · {{ other.cluster }} · {{ other.started_at | clock }}{% if other.label %} · {{ other.label }}{% endif %}
+        </option>
+        {% endfor %}
+      </select>
+    </label>
+    <div class="row-actions">
+      <button class="btn" type="submit">비교</button>
+    </div>
+  </form>
+
+  {% if comparison %}
+  {% for warning in comparison.warnings %}
+  <div class="banner banner--concerning" role="alert" style="margin:0 16px 10px">
+    {{ ui.icon('concerning', 15) }}<div>{{ warning }}</div>
+  </div>
+  {% endfor %}
+
+  <p class="panel__note">
+    기준 <span class="mono">#{{ comparison.baseline.id }}</span> ({{ comparison.baseline.cluster }})
+    → 이번 <span class="mono">#{{ comparison.candidate.id }}</span> ({{ comparison.candidate.cluster }}) ·
+    느려짐 {{ comparison.summary.slower | integer }} · 빨라짐 {{ comparison.summary.faster | integer }} ·
+    차이 없음 {{ comparison.summary.same | integer }}{% if comparison.summary.unmatched %} · 한쪽에만 {{ comparison.summary.unmatched | integer }}{% endif %}
+  </p>
+
+  <div class="table-scroll">
+    <table class="table">
+      <thead>
+        <tr>
+          <th scope="col">쿼리</th>
+          <th scope="col">#{{ comparison.baseline.id }}</th>
+          <th scope="col">#{{ comparison.candidate.id }}</th>
+          <th scope="col">차이</th>
+          <th scope="col">판정</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in comparison.rows %}
+        <tr>
+          <td class="mono">{{ row.name }}</td>
+          <td class="num">{% if row.baseline %}{{ row.baseline.median_ms | duration }}{% else %}—{% endif %}</td>
+          <td class="num">{% if row.candidate %}{{ row.candidate.median_ms | duration }}{% else %}—{% endif %}</td>
+          <td class="num delta delta--{{ row.verdict_class }}">
+            {% if row.delta_percent is not none %}
+            {{ '+' if row.delta_ms > 0 else '' }}{{ row.delta_ms | duration }} ({{ row.delta_percent | round(1) }}%)
+            {% else %}—{% endif %}
+          </td>
+          {# The word, not just the colour. "Is red good here" is a question
+             nobody should have to ask of a comparison table. #}
+          <td>
+            {% if row.verdict == 'slower' %}느려짐
+            {% elif row.verdict == 'faster' %}빨라짐
+            {% elif row.verdict == 'same' %}<span class="dim">차이 없음</span>
+            {% elif row.verdict == 'only_baseline' %}<span class="dim">이번 실행에 없음</span>
+            {% else %}<span class="dim">기준 실행에 없음</span>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="panel__note">
+    ±{{ 5 }}% 미만은 "차이 없음"으로 본다. 판정은 각 쿼리 중앙값의 차이이며,
+    합계가 아니다 — 합계는 가장 긴 쿼리 하나가 지배한다.
+  </p>
+  {% endif %}
+</section>
+{% endif %}
+{% endblock %}

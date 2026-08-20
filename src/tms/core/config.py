@@ -250,6 +250,30 @@ class ResourceGroupStoreConfig:
 
 
 @dataclass(frozen=True)
+class BenchmarkConfig:
+    """Declared query sets and their limits (FR-BM-01).
+
+    Off by default and with no sets, and both defaults are deliberate. A set
+    has to name catalogs, and which catalogs exist is a fact about the
+    deployment - a shipped default would fail on first use and teach the
+    operator that the feature is broken.
+
+    `timeout_seconds` is per statement and much larger than the SQL client's
+    30s: a benchmark query that takes four minutes is the finding, not a
+    failure.
+    """
+
+    enabled: bool = False
+    query_sets: Dict[str, Any] = field(default_factory=dict)
+    default_repetitions: int = 3
+    max_repetitions: int = 20
+    timeout_seconds: float = 600.0
+    # A gap between statements so the cluster is not measured while it is
+    # still finishing the previous one.
+    pause_seconds: float = 1.0
+
+
+@dataclass(frozen=True)
 class HealthConfig:
     stabilization_polls: int = 3
     long_running_query_seconds: float = 300.0
@@ -296,6 +320,7 @@ class Config:
     cluster_ops: ClusterOpsConfig
     fleet: FleetConfig
     resource_groups: ResourceGroupStoreConfig
+    benchmark: BenchmarkConfig
     health: HealthConfig
     deeplinks: DeeplinkConfig
     portal: PortalConfig
@@ -486,6 +511,47 @@ def _build_fleet(raw: Dict[str, Any]) -> FleetConfig:
                        jobs=dict(jobs), shutdown_timeout_seconds=timeout)
 
 
+def _build_benchmark(raw: Dict[str, Any]) -> BenchmarkConfig:
+    from tms.bench.queryset import MAX_REPETITIONS, QuerySetError, build_query_sets
+
+    enabled = bool(raw.get("enabled", False))
+    sets = raw.get("query_sets") or {}
+
+    # Validated at load, so a malformed statement is a startup error rather
+    # than something found by the person who has already taken a cluster out
+    # of rotation to run it.
+    try:
+        build_query_sets(sets)
+    except QuerySetError as exc:
+        raise ConfigError("benchmark.query_sets: {}".format(exc))
+
+    default_reps = int(raw.get("default_repetitions", 3))
+    max_reps = int(raw.get("max_repetitions", MAX_REPETITIONS))
+    timeout = float(raw.get("timeout_seconds", 600))
+    pause = float(raw.get("pause_seconds", 1))
+
+    if enabled and not sets:
+        raise ConfigError(
+            "benchmark.enabled is true but benchmark.query_sets is empty")
+    if not 1 <= max_reps <= MAX_REPETITIONS:
+        raise ConfigError(
+            "benchmark.max_repetitions must be between 1 and {}".format(
+                MAX_REPETITIONS))
+    if not 1 <= default_reps <= max_reps:
+        raise ConfigError(
+            "benchmark.default_repetitions must be between 1 and "
+            "benchmark.max_repetitions ({})".format(max_reps))
+    if timeout <= 0:
+        raise ConfigError("benchmark.timeout_seconds must be positive")
+    if pause < 0:
+        raise ConfigError("benchmark.pause_seconds cannot be negative")
+
+    return BenchmarkConfig(enabled=enabled, query_sets=dict(sets),
+                           default_repetitions=default_reps,
+                           max_repetitions=max_reps, timeout_seconds=timeout,
+                           pause_seconds=pause)
+
+
 def _build_cluster_ops(raw: Dict[str, Any], whole: Dict[str, Any]) -> ClusterOpsConfig:
     """Validate the restart-execution settings, refusing half-configured ones.
 
@@ -644,6 +710,7 @@ def build_config(raw: Dict[str, Any], where: str = "config.secret.yaml") -> Conf
         cluster_ops=cluster_ops,
         fleet=fleet,
         resource_groups=resource_groups,
+        benchmark=_build_benchmark(raw.get("benchmark") or {}),
         health=HealthConfig(
             stabilization_polls=int(health_raw.get("stabilization_polls", 3)),
             long_running_query_seconds=float(health_raw.get("long_running_query_seconds", 300)),

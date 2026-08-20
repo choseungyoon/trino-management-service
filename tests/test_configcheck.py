@@ -215,7 +215,8 @@ class MigrationCoverageTest(unittest.TestCase):
         grants_only = {"002_grants.sql", "005_restart_sequence_grants.sql",
                        "011_resource_group_grants.sql",
                        "013_fleet_job_grants.sql",
-                       "015_work_board_grants.sql"}
+                       "015_work_board_grants.sql",
+                       "017_benchmark_grants.sql"}
         unchecked = on_disk - checked - grants_only
         self.assertEqual(
             set(), unchecked,

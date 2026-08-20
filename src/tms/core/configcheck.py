@@ -494,7 +494,10 @@ _REQUIRED_OBJECTS = (
     ("012_fleet_job.sql", "action", "FLEET_JOB_RUN"),
     ("014_work_board.sql", "table", "work_item"),
     ("014_work_board.sql", "table", "work_item_comment"),
-    # 011, 013 and 015 only grant; a privilege is not an object, so there is
+    ("016_benchmark.sql", "table", "benchmark_run"),
+    ("016_benchmark.sql", "table", "benchmark_result"),
+    ("016_benchmark.sql", "action", "BENCHMARK_RUN"),
+    # 011, 013, 015 and 017 only grant; a privilege is not an object, so there is
     # nothing here to look for. Missing one shows up as a permission error on
     # the first write, which names itself clearly enough.
 )

@@ -455,3 +455,76 @@ def work_timeline(item: Dict[str, Any]) -> List[Dict[str, Any]]:
     # in-memory repository always sets a time, but a row written by an older
     # migration might not.
     return sorted(entries, key=lambda e: (e["at"] is None, e["at"]))
+
+
+# ── benchmark (FR-BM-01/03) ───────────────────────────────────────────
+
+
+def benchmark_run(run: Dict[str, Any]) -> Dict[str, Any]:
+    row = dict(run or {})
+    guard = row.get("guard") or {}
+    row["guard_ok"] = bool(guard.get("ok"))
+    row["guard_advice"] = [a.get("text") for a in guard.get("advice") or []]
+    row["guard_backends"] = guard.get("backends") or []
+    row["guard_running_queries"] = guard.get("running_queries")
+    results = row.get("results") or []
+    row["executed"] = len(results)
+    row["failures"] = sum(1 for r in results if r.get("state") == "FAILED")
+    return row
+
+
+def benchmark_rows(runs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return [benchmark_run(r) for r in runs or []]
+
+
+def benchmark_query_rows(run: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """One row per query name, with its repetitions folded in.
+
+    A table with one row per execution is unreadable at five repetitions and
+    useless at twenty; what an operator wants is "how long does this query
+    take here", which is the median of its executions.
+    """
+    from tms.bench.compare import summarise_run
+
+    grouped = summarise_run(run or {})
+    rows = []
+    for name in sorted(grouped):
+        entry = grouped[name]
+        rows.append({
+            "name": name,
+            "runs": entry["runs"],
+            "failures": entry["failures"],
+            "median_ms": entry["median_ms"],
+            "fastest_ms": entry["fastest_ms"],
+            "median_cpu_ms": entry["median_cpu_ms"],
+            "rows_processed": entry["rows"],
+            # Every execution failed. Rendered differently from "slow", which
+            # is what a blank timing column would otherwise imply.
+            "all_failed": entry["failures"] == entry["runs"],
+            "error": _first_error(run, name),
+        })
+    return rows
+
+
+def _first_error(run: Dict[str, Any], name: str) -> Optional[str]:
+    for result in (run or {}).get("results") or []:
+        if result.get("query_name") == name and result.get("error"):
+            return result["error"]
+    return None
+
+
+def comparison_rows(comparison: Dict[str, Any]) -> Dict[str, Any]:
+    """The comparison, with each row's verdict turned into a CSS class.
+
+    `slower` is bad and `faster` is good only because the candidate is on the
+    right; the sign is meaningless without that, so the template never derives
+    it from the number itself.
+    """
+    classes = {"slower": "bad", "faster": "good", "same": "unknown",
+               "only_baseline": "concerning", "only_candidate": "concerning"}
+    shaped = dict(comparison or {})
+    shaped["rows"] = [
+        dict(row, verdict_class=classes.get(row.get("verdict"), "unknown"))
+        for row in (comparison or {}).get("rows") or []
+    ]
+    return shaped

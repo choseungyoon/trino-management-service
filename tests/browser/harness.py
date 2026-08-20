@@ -38,6 +38,8 @@ sys.path.insert(
 from tms.api.main import create_app  # noqa: E402
 from tms.api.services import TmsService  # noqa: E402
 from tms.collector.snapshot import (  # noqa: E402
+    GATEWAY_SCOPE,
+    KIND_GATEWAY,
     KIND_HEALTH,
     KIND_FLEET,
     KIND_QUERIES,
@@ -82,7 +84,7 @@ def _query(qid, user, source, elapsed_ms, long_running=False, state="RUNNING"):
 
 def build_app(workload_enabled=False, seed=None, gateway=None,
               resource_groups=False, password=None, session_secret=None,
-              fleet_jobs=False):
+              fleet_jobs=False, benchmark=False):
     repository = InMemorySnapshotRepository()
     now = utcnow()
 
@@ -145,6 +147,32 @@ def build_app(workload_enabled=False, seed=None, gateway=None,
         "workload": {"enabled": workload_enabled},
         "gateway": gateway or {},
         "resource_groups": {"enabled": bool(resource_groups)},
+        "benchmark": {
+            "enabled": bool(benchmark),
+            "default_repetitions": 3,
+            "query_sets": {
+                # Named for what they measure, not for TPC-H table names: the
+                # point of the demo is that a set is something a person wrote
+                # for their own cluster.
+                "adhoc": {
+                    "title": "Ad-hoc profile",
+                    "description": "Superset 대시보드가 실제로 던지는 모양의 쿼리 4건",
+                    "queries": [
+                        {"name": "scan_narrow", "sql": "SELECT count(*) FROM tpch.tiny.orders"},
+                        {"name": "join_three", "sql": (
+                            "SELECT n.name, count(*) FROM tpch.tiny.orders o "
+                            "JOIN tpch.tiny.customer c ON c.custkey = o.custkey "
+                            "JOIN tpch.tiny.nation n ON n.nationkey = c.nationkey "
+                            "GROUP BY n.name")},
+                        {"name": "window_rank", "sql": (
+                            "SELECT custkey, rank() OVER (ORDER BY total DESC) "
+                            "FROM (SELECT custkey, sum(totalprice) AS total "
+                            "FROM tpch.tiny.orders GROUP BY custkey)")},
+                        {"name": "wide_scan", "sql": "SELECT * FROM tpch.tiny.lineitem"},
+                    ],
+                },
+            } if benchmark else {},
+        },
         "portal": {
             # Overridable so a hosted demo does not run on a password that is
             # sitting in a public repository. Local runs keep the fixed pair -
@@ -229,6 +257,93 @@ def build_app(workload_enabled=False, seed=None, gateway=None,
                                  runner=demo_runner),
             job_repository=job_repository)
 
+    bench_service = None
+    if benchmark:
+        from tms.bench.queryset import build_query_sets
+        from tms.bench.service import BenchmarkService
+        from tms.bench.store import InMemoryBenchmarkRepository
+
+        bench_repository = InMemoryBenchmarkRepository()
+
+        class DemoGateway:
+            """prod-a is out of rotation, prod-b is not.
+
+            Both states on one deployment, so the screenshots show the guard
+            passing *and* refusing without editing anything between shots.
+            """
+
+            @staticmethod
+            def list_backends(active_only=False):
+                return [{"name": "trino-prod-a-1", "active": False},
+                        {"name": "trino-prod-b-1", "active": True}]
+
+        class DemoRunner:
+            def start(self, run, query_set, repetitions):
+                return None
+
+            def abort(self, run_id):
+                return None
+
+        # prod-b needs a mapped backend and a query view, otherwise its refusal
+        # is "TMS cannot tell" rather than the one that actually matters:
+        # "this cluster is still taking production traffic".
+        repository.save(Snapshot(GATEWAY_SCOPE, KIND_GATEWAY, now, payload={
+            "backends": [
+                {"name": "trino-prod-a-1", "cluster": "prod-a", "active": False,
+                 "routing_group": "adhoc"},
+                {"name": "trino-prod-b-1", "cluster": "prod-b", "active": True,
+                 "routing_group": "adhoc"},
+            ],
+            "summary": {"backends": 2, "active": 1},
+            "inactive_backends": ["trino-prod-a-1"],
+        }))
+        repository.save(Snapshot("prod-b", KIND_QUERIES, now, payload={
+            "summary": {"running": 7, "queued": 2, "long_running": 0, "total": 9},
+            "queries": []}))
+
+        # Two finished runs of the same set on the two clusters, which is the
+        # comparison FR-BENCHMARK exists for: "why is A slower than B".
+        for cluster, base_ms, label in (("prod-a", 1, "heap 250G"),
+                                        ("prod-b", 2, "heap 400G")):
+            past = bench_repository.create(
+                cluster=cluster, query_set="adhoc", actor="sre.kim",
+                roles=["admin"], reason="클러스터 간 성능 편차 규명", repetitions=3,
+                guard={"ok": True, "advice": [], "running_queries": 0,
+                       "checked_gateway_live": True,
+                       "backends": [{"name": "trino-{}-1".format(cluster),
+                                     "active": False}]},
+                label=label)
+            # Not a flat multiplier. The finding in a real comparison is
+            # almost never "everything is 2x" - it is one query that fell off a
+            # cliff while the rest are within noise, and a demo that shows a
+            # uniform doubling teaches the reader to skim the table.
+            timings = {"scan_narrow": 310, "join_three": 940,
+                       "window_rank": 1580, "wide_scan": 4200}
+            skew = {"scan_narrow": 1.02, "join_three": 1.04,
+                    "window_rank": 2.7, "wide_scan": 0.98}
+            for iteration in (1, 2, 3):
+                for name, base in timings.items():
+                    factor = 1.0 if base_ms == 1 else skew[name]
+                    elapsed = int(base * factor + (40 if iteration == 1 else 0))
+                    bench_repository.add_result(past["id"], {
+                        "query_name": name, "iteration": iteration,
+                        "state": "SUCCEEDED",
+                        "trino_query_id": "20260821_0000{}_0000{}_ab".format(
+                            iteration, len(name)),
+                        "elapsed_ms": elapsed,
+                        "trino_elapsed_ms": int(elapsed * 0.9),
+                        "trino_cpu_ms": int(elapsed * 0.7),
+                        "trino_queued_ms": 4, "trino_planning_ms": 30,
+                        "processed_rows": 15000, "processed_bytes": 1048576,
+                        "peak_memory_bytes": 33554432, "error": None})
+            bench_repository.finish(past["id"], "SUCCEEDED")
+
+        bench_service = BenchmarkService(
+            config=config, snapshots=repository, audit_guard=AuditGuard(audit),
+            repository=bench_repository, runner=DemoRunner(),
+            query_sets=build_query_sets(config.benchmark.query_sets),
+            gateway_client=DemoGateway())
+
     # The work board, seeded from the documents and given the kind of activity
     # a real board has after a week - a comment thread and one item that moved.
     from tms.work.items import IN_PROGRESS
@@ -251,7 +366,8 @@ def build_app(workload_enabled=False, seed=None, gateway=None,
     board_repository.update("FR-BM-04", "syhcho", status=IN_PROGRESS)
 
     return create_app(config=config, service=service, fleet=fleet,
-                      board=BoardService(board_repository)), trino
+                      board=BoardService(board_repository),
+                      benchmark=bench_service), trino
 
 
 def _make_cert(directory):
@@ -275,13 +391,14 @@ def _free_port():
 
 @contextlib.contextmanager
 def serve(workload_enabled=False, seed=None, gateway=None,
-          resource_groups=False, fleet_jobs=False):
+          resource_groups=False, fleet_jobs=False, benchmark=False):
     """Run the console on a free port. Yields (base_url, stub_trino)."""
     import uvicorn
 
     app, trino = build_app(workload_enabled=workload_enabled, seed=seed,
                            resource_groups=resource_groups,
-                           fleet_jobs=fleet_jobs, gateway=gateway)
+                           fleet_jobs=fleet_jobs, gateway=gateway,
+                           benchmark=benchmark)
     port = _free_port()
     with tempfile.TemporaryDirectory() as tmp:
         key, crt = _make_cert(tmp)

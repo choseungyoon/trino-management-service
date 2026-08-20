@@ -154,6 +154,12 @@ def status_class(state: Any) -> str:
         "PLANNING": "queued",
         "STARTING": "queued",
         "DISPATCHING": "queued",
+        # Job and benchmark run outcomes. FAILED is shared with Trino's query
+        # states and means the same thing in both places; SUCCEEDED and
+        # ABORTED belong only to things TMS runs.
+        "SUCCEEDED": "good",
+        "FAILED": "bad",
+        "ABORTED": "concerning",
     }.get(str(state).upper(), "unknown")
 
 

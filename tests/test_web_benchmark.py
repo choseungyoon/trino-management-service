@@ -1,0 +1,301 @@
+"""The benchmark screens and the service in front of them (FR-BM-01/03/04).
+
+The guard has its own tests. What is checked here is that the refusal actually
+reaches the request: a guard that returns "no" and a service that starts anyway
+would pass every test in test_benchmark.py.
+"""
+
+import os
+import sys
+import unittest
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(os.path.dirname(_HERE), "src"))
+sys.path.insert(0, _HERE)
+
+try:
+    import httpx
+    from fastapi import FastAPI  # noqa: F401
+    from jinja2 import Environment  # noqa: F401
+    import multipart  # noqa: F401
+
+    WEB_DEPS = True
+except ImportError:  # pragma: no cover - environment dependent
+    WEB_DEPS = False
+
+from tms.api.errors import Forbidden, InvalidRequest, NotFound  # noqa: E402
+from tms.api.main import create_app  # noqa: E402
+from tms.api.permissions import Principal  # noqa: E402
+from tms.bench.queryset import build_query_sets  # noqa: E402
+from tms.bench.service import BenchmarkService  # noqa: E402
+from tms.bench.store import InMemoryBenchmarkRepository  # noqa: E402
+from tms.collector.snapshot import (  # noqa: E402
+    GATEWAY_SCOPE,
+    KIND_GATEWAY,
+    KIND_QUERIES,
+    Snapshot,
+    utcnow,
+)
+from tms.core.audit import ACTION_BENCHMARK_RUN  # noqa: E402
+
+from test_web_routes import PASSWORD, build_service, client_for, sign_in  # noqa: E402
+
+ADMIN = Principal("admin1", ["admin"])
+VIEWER = Principal("viewer1", ["viewer"])
+
+SETS = {"smoke": {"title": "Smoke", "queries": [{"name": "a", "sql": "SELECT 1"}]}}
+
+
+class Gateway:
+    def __init__(self, active=False):
+        self.active = active
+        self.set_active_calls = []
+
+    def list_backends(self, active_only=False):
+        return [{"name": "trino-prod-a-1", "active": self.active}]
+
+    def set_active(self, name, active):  # pragma: no cover - must never be called
+        self.set_active_calls.append((name, active))
+
+
+class RecordingRunner:
+    def __init__(self):
+        self.started = []
+        self.aborted = []
+
+    def start(self, run, query_set, repetitions):
+        self.started.append((run["id"], query_set.key, repetitions))
+
+    def abort(self, run_id):
+        self.aborted.append(run_id)
+
+
+def wire(roles=("admin",), gateway_active=False, running=0):
+    config, service, _trino = build_service(roles=roles)
+    now = utcnow()
+    service.repository.save(Snapshot(GATEWAY_SCOPE, KIND_GATEWAY, now, payload={
+        "backends": [{"name": "trino-prod-a-1", "cluster": "prod-a",
+                      "active": gateway_active}]}))
+    service.repository.save(Snapshot("prod-a", KIND_QUERIES, now, payload={
+        "summary": {"running": running, "queued": 0, "total": running},
+        "queries": []}))
+    repository = InMemoryBenchmarkRepository()
+    runner = RecordingRunner()
+    benchmark = BenchmarkService(
+        config=config, snapshots=service.repository, audit_guard=service.audit,
+        repository=repository, runner=runner,
+        query_sets=build_query_sets(SETS), gateway_client=Gateway(gateway_active))
+    return config, service, benchmark, repository, runner
+
+
+class BenchmarkServiceTest(unittest.TestCase):
+    def test_a_run_starts_when_the_cluster_is_excluded_and_idle(self):
+        _c, service, benchmark, repository, runner = wire()
+        run = benchmark.start(ADMIN, "prod-a", query_set="smoke",
+                              reason="comparing heap settings", repetitions=2)
+        self.assertEqual("RUNNING", run["state"])
+        self.assertEqual([(run["id"], "smoke", 2)], runner.started)
+        # The guard's findings are stored with the run: six months from now
+        # that column is the only way to tell this number is comparable.
+        self.assertTrue(run["guard"]["ok"])
+
+    def test_the_run_is_audited_with_its_reason(self):
+        _c, service, benchmark, _r, _runner = wire()
+        benchmark.start(ADMIN, "prod-a", query_set="smoke", reason="why not")
+        records = service.audit.repository.search(limit=10)
+        self.assertEqual(ACTION_BENCHMARK_RUN, records[0].action_type)
+        self.assertEqual("why not", records[0].reason)
+        self.assertEqual("prod-a", records[0].target_cluster)
+
+    def test_a_run_without_a_reason_is_refused(self):
+        from tms.api.errors import ReasonRequiredError
+
+        _c, _s, benchmark, repository, runner = wire()
+        with self.assertRaises(ReasonRequiredError):
+            benchmark.start(ADMIN, "prod-a", query_set="smoke", reason="  ")
+        self.assertEqual([], runner.started)
+
+    # ── FR-BM-04, through the service ────────────────────────────────
+
+    def test_a_cluster_still_in_rotation_is_refused(self):
+        _c, _s, benchmark, repository, runner = wire(gateway_active=True)
+        with self.assertRaises(InvalidRequest) as caught:
+            benchmark.start(ADMIN, "prod-a", query_set="smoke", reason="please")
+        self.assertIn("still in rotation", str(caught.exception))
+        self.assertEqual([], runner.started)
+
+    def test_a_refused_run_is_not_written_down_as_having_happened(self):
+        """The guard runs before the audit record, on purpose."""
+        _c, service, benchmark, repository, _runner = wire(gateway_active=True)
+        with self.assertRaises(InvalidRequest):
+            benchmark.start(ADMIN, "prod-a", query_set="smoke", reason="please")
+        self.assertEqual([], repository.runs)
+        self.assertEqual([], service.audit.repository.search(limit=10))
+
+    def test_a_busy_cluster_is_refused(self):
+        _c, _s, benchmark, _r, runner = wire(running=4)
+        with self.assertRaises(InvalidRequest):
+            benchmark.start(ADMIN, "prod-a", query_set="smoke", reason="please")
+        self.assertEqual([], runner.started)
+
+    def test_the_service_never_deactivates_a_backend(self):
+        """⛔ CLAUDE.md rule 5. There is no path from here to set_active."""
+        import inspect
+
+        from tms.bench import service as module
+
+        self.assertNotIn("set_active", inspect.getsource(module))
+
+    # ── permissions and arguments ────────────────────────────────────
+
+    def test_a_viewer_cannot_start_a_run(self):
+        _c, _s, benchmark, _r, runner = wire(roles=("viewer",))
+        with self.assertRaises(Forbidden):
+            benchmark.start(VIEWER, "prod-a", query_set="smoke", reason="please")
+        self.assertEqual([], runner.started)
+
+    def test_an_undeclared_query_set_is_a_404(self):
+        _c, _s, benchmark, _r, _runner = wire()
+        with self.assertRaises(NotFound):
+            benchmark.start(ADMIN, "prod-a", query_set="whatever", reason="please")
+
+    def test_repetitions_outside_the_range_are_refused(self):
+        _c, _s, benchmark, _r, _runner = wire()
+        for value in (0, -1, 999, "many"):
+            with self.assertRaises(InvalidRequest, msg=repr(value)):
+                benchmark.start(ADMIN, "prod-a", query_set="smoke",
+                                reason="please", repetitions=value)
+
+    def test_only_runs_of_the_same_set_are_offered_for_comparison(self):
+        _c, _s, benchmark, repository, _runner = wire()
+        mine = repository.create(cluster="prod-a", query_set="smoke", actor="a",
+                                 roles=["admin"], reason="r", repetitions=1,
+                                 guard={"ok": True})
+        repository.finish(mine["id"], "SUCCEEDED")
+        other = repository.create(cluster="prod-a", query_set="other", actor="a",
+                                  roles=["admin"], reason="r", repetitions=1,
+                                  guard={"ok": True})
+        repository.finish(other["id"], "SUCCEEDED")
+        same = repository.create(cluster="prod-b", query_set="smoke", actor="a",
+                                 roles=["admin"], reason="r", repetitions=1,
+                                 guard={"ok": True})
+        repository.finish(same["id"], "SUCCEEDED")
+
+        offered = benchmark.comparable_runs(ADMIN, repository.get(mine["id"]))
+        self.assertEqual([same["id"]], [r["id"] for r in offered])
+
+
+@unittest.skipUnless(WEB_DEPS, "fastapi/httpx/jinja2/python-multipart not installed")
+class BenchmarkScreenTest(unittest.IsolatedAsyncioTestCase):
+    def build(self, **kwargs):
+        config, service, benchmark, repository, runner = wire(**kwargs)
+        self.repository = repository
+        self.runner = runner
+        return create_app(config=config, service=service, benchmark=benchmark)
+
+    def client(self, app):
+        return client_for(app)
+
+    async def test_the_page_says_the_cluster_is_ready_when_it_is(self):
+        async with self.client(self.build()) as c:
+            await sign_in(c)
+            response = await c.get("/clusters/prod-a/benchmark")
+        self.assertEqual(200, response.status_code)
+        self.assertIn("라우팅에서 빠져 있고", response.text)
+
+    async def test_the_page_says_what_is_missing_when_it_is_not(self):
+        async with self.client(self.build(gateway_active=True)) as c:
+            await sign_in(c)
+            response = await c.get("/clusters/prod-a/benchmark")
+        self.assertEqual(200, response.status_code)
+        self.assertIn("지금은 실행할 수 없다", response.text)
+        # And it names the way to fix it, which is somewhere else entirely.
+        self.assertIn("안전 시퀀스", response.text)
+
+    async def test_the_start_form_is_refused_by_the_server_not_only_the_button(self):
+        """The disabled attribute is a courtesy; the check is on the server."""
+        app = self.build(gateway_active=True)
+        async with self.client(app) as c:
+            await sign_in(c)
+            response = await c.post("/clusters/prod-a/benchmark", data={
+                "query_set": "smoke", "reason": "trying anyway", "repetitions": "1"})
+        self.assertEqual(303, response.status_code)
+        self.assertIn("error=", response.headers["location"])
+        self.assertEqual([], self.repository.runs)
+
+    async def test_a_started_run_redirects_to_its_page(self):
+        app = self.build()
+        async with self.client(app) as c:
+            await sign_in(c)
+            response = await c.post("/clusters/prod-a/benchmark", data={
+                "query_set": "smoke", "reason": "measuring", "repetitions": "2"})
+            self.assertEqual(303, response.status_code)
+            page = await c.get(response.headers["location"])
+        self.assertEqual(200, page.status_code)
+        self.assertIn("measuring", page.text)
+
+    async def test_an_unguarded_run_says_so_on_its_own_page(self):
+        app = self.build()
+        run = self.repository.create(
+            cluster="prod-a", query_set="smoke", actor="a", roles=["admin"],
+            reason="taken during traffic", repetitions=1,
+            guard={"ok": False, "advice": [{"code": "still_routed",
+                                            "text": "This cluster was in rotation."}]})
+        self.repository.finish(run["id"], "SUCCEEDED")
+        async with self.client(app) as c:
+            await sign_in(c)
+            response = await c.get("/benchmarks/{}".format(run["id"]))
+        self.assertIn("보호 조건이 확인되지 않은", response.text)
+        self.assertIn("This cluster was in rotation.", response.text)
+
+    async def test_a_comparison_renders_with_its_direction_in_words(self):
+        app = self.build()
+        ids = []
+        for cluster, timing in (("prod-a", 100), ("prod-b", 250)):
+            run = self.repository.create(
+                cluster=cluster, query_set="smoke", actor="a", roles=["admin"],
+                reason="r", repetitions=1, guard={"ok": True})
+            self.repository.add_result(run["id"], {
+                "query_name": "a", "iteration": 1, "state": "SUCCEEDED",
+                "trino_query_id": "q", "elapsed_ms": timing,
+                "trino_elapsed_ms": timing, "trino_cpu_ms": timing,
+                "trino_queued_ms": 0, "trino_planning_ms": 0,
+                "processed_rows": 1, "processed_bytes": 1,
+                "peak_memory_bytes": 1, "error": None})
+            self.repository.finish(run["id"], "SUCCEEDED")
+            ids.append(run["id"])
+
+        async with self.client(app) as c:
+            await sign_in(c)
+            response = await c.get("/benchmarks/{}?against={}".format(ids[1], ids[0]))
+        self.assertEqual(200, response.status_code)
+        # Colour alone would leave "is red good here" to the reader.
+        self.assertIn("느려짐", response.text)
+
+    async def test_an_unknown_run_is_a_404_page(self):
+        async with self.client(self.build()) as c:
+            await sign_in(c)
+            response = await c.get("/benchmarks/999")
+        self.assertEqual(404, response.status_code)
+
+    async def test_aborting_asks_the_runner_to_stop(self):
+        app = self.build()
+        run = self.repository.create(
+            cluster="prod-a", query_set="smoke", actor="a", roles=["admin"],
+            reason="r", repetitions=1, guard={"ok": True})
+        async with self.client(app) as c:
+            await sign_in(c)
+            response = await c.post("/benchmarks/{}/abort".format(run["id"]))
+        self.assertEqual(303, response.status_code)
+        self.assertEqual([run["id"]], self.runner.aborted)
+
+    async def test_the_benchmark_pages_do_not_auto_refresh_the_start_form(self):
+        """A timed reload would throw away the reason someone is typing."""
+        async with self.client(self.build()) as c:
+            await sign_in(c)
+            response = await c.get("/clusters/prod-a/benchmark")
+        self.assertNotIn("data-refresh", response.text)
+
+
+if __name__ == "__main__":
+    unittest.main()

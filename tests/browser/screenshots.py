@@ -35,6 +35,10 @@ SHOTS = (
     ("12-work-item", "/work/REQ-1", None),
     ("13-work-decision", "/work/D-2", None),
     ("14-work-board-dark", "/work", "toggle_theme"),
+    ("15-benchmark-ready", "/clusters/prod-a/benchmark", None),
+    ("16-benchmark-refused", "/clusters/prod-b/benchmark", None),
+    ("17-benchmark-run", "/benchmarks/1", None),
+    ("18-benchmark-compare", "/benchmarks/2?against=1", None),
 )
 
 
@@ -87,7 +91,7 @@ def main(out_dir):
     written = []
 
     with serve(workload_enabled=True, resource_groups=True,
-               fleet_jobs=True) as (base_url, _trino):
+               fleet_jobs=True, benchmark=True) as (base_url, _trino):
         with sync_playwright() as pw:
             browser = pw.chromium.launch()
             for name, path, action in SHOTS:

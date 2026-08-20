@@ -120,6 +120,56 @@ resource_groups:
   # never matches anything. Left false, the editor warns whenever one is used.
   group_provider_configured: false
 
+benchmark:
+  # FR-BM-01/03/04 — the performance harness.
+  #
+  # ⛔ FR-BM-04 is non-negotiable, and it shapes how this feature behaves more
+  # than any setting here: TMS refuses to run against a cluster that is still
+  # in rotation, and it will NOT take the cluster out of rotation for you.
+  # Excluding a cluster is step 1 of the safe restart sequence and nothing
+  # else - a "run benchmark" button that could deactivate a backend would be a
+  # way around CLAUDE.md rule 5 with a different label on it.
+  #
+  # That means the guard needs the Gateway integration. With `gateway.enabled`
+  # false, every run is refused, because TMS cannot tell whether the cluster is
+  # taking production traffic and an unknown routing state is not an excluded
+  # one.
+  enabled: false
+
+  # How many times each query runs. The first execution of a query is not like
+  # the rest, and the comparison uses the median - one repetition means the
+  # median is the cold start.
+  default_repetitions: 3
+  max_repetitions: 20
+
+  # Per statement. Much larger than the SQL client's 30s default on purpose: a
+  # benchmark query that takes four minutes is the finding, not a failure.
+  timeout_seconds: 600
+  # A gap between statements, so the cluster is not measured while it is still
+  # finishing the previous one.
+  pause_seconds: 1
+
+  # ⛔ Nothing ships here, and that is deliberate. A default set would have to
+  # name a catalog, and which catalogs exist is a fact about this deployment -
+  # `tpch` is present on a stock Trino and absent on plenty of real ones. A
+  # shipped set that fails on first use teaches the operator the feature is
+  # broken.
+  #
+  # Statements must be READ-ONLY (SELECT / WITH / SHOW / EXPLAIN / DESCRIBE /
+  # VALUES / TABLE) and a single statement each. Not because a write benchmark
+  # is illegitimate, but because these run N times unattended against a cluster
+  # whose defining property at that moment is that nobody is watching it.
+  # Anything else is refused at startup, not mid-run.
+  query_sets: {}
+  #   adhoc:
+  #     title: "Ad-hoc profile"
+  #     description: "Superset 대시보드가 실제로 던지는 모양의 쿼리"
+  #     queries:
+  #       - name: scan_narrow
+  #         sql: "SELECT count(*) FROM hive.reporting.events WHERE dt = DATE '2026-08-01'"
+  #       - name: join_three
+  #         sql: "SELECT ... FROM ... JOIN ... JOIN ..."
+
 fleet:
   # FR-FL-01 / FR-FL-03 — node inventory and graceful shutdown.
   #

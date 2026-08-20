@@ -544,6 +544,9 @@ class EveryScreenTest(unittest.IsolatedAsyncioTestCase):
         "body": "route sweep",
         "status": "planned",
         "note": "route sweep",
+        # The benchmark start form. `reason` above is already in the body.
+        "query_set": "smoke",
+        "repetitions": "1",
     }
 
     def _app(self):
@@ -616,6 +619,45 @@ class EveryScreenTest(unittest.IsolatedAsyncioTestCase):
             job_repository=job_repository,
             config=config, snapshots=service.repository, audit_guard=service.audit,
             transport_factory=lambda: None)
+        # The benchmark harness with one finished run, so /clusters/{c}/benchmark
+        # and /benchmarks/{id} draw a table rather than the empty state. The
+        # Gateway stub reports the backend deactivated, which is the only state
+        # in which the guard lets the start form be usable at all (FR-BM-04).
+        from tms.bench.queryset import build_query_sets
+        from tms.bench.runner import BenchmarkRunner
+        from tms.bench.service import BenchmarkService
+        from tms.bench.store import InMemoryBenchmarkRepository
+
+        bench_repository = InMemoryBenchmarkRepository()
+        seeded_run = bench_repository.create(
+            cluster="prod-a", query_set="smoke", actor="syhcho", roles=["admin"],
+            reason="rendering test", repetitions=2, guard={"ok": True},
+            label="baseline")
+        for iteration in (1, 2):
+            bench_repository.add_result(seeded_run["id"], {
+                "query_name": "scan", "iteration": iteration, "state": "SUCCEEDED",
+                "trino_query_id": "20260821_000000_0000{}_abcde".format(iteration),
+                "elapsed_ms": 1200 + iteration, "trino_elapsed_ms": 1100,
+                "trino_cpu_ms": 900, "trino_queued_ms": 3, "trino_planning_ms": 40,
+                "processed_rows": 15000, "processed_bytes": 4096,
+                "peak_memory_bytes": 8192, "error": None})
+        bench_repository.finish(seeded_run["id"], "SUCCEEDED")
+
+        class DeactivatedGateway:
+            @staticmethod
+            def list_backends(active_only=False):
+                return [{"name": "trino-prod-a-1", "active": False}]
+
+        benchmark = BenchmarkService(
+            config=config, snapshots=service.repository, audit_guard=service.audit,
+            repository=bench_repository,
+            runner=BenchmarkRunner(sql_client_factory=lambda c: None,
+                                   repository=bench_repository),
+            query_sets=build_query_sets({
+                "smoke": {"title": "Smoke",
+                          "queries": [{"name": "scan", "sql": "SELECT 1"}]}}),
+            gateway_client=DeactivatedGateway())
+
         # A seeded board, so /work and /work/{key} draw real columns and a real
         # timeline instead of the empty state.
         from tms.work.seed import seed as seed_board
@@ -627,7 +669,8 @@ class EveryScreenTest(unittest.IsolatedAsyncioTestCase):
         board_repository.add_comment("W-1", "syhcho", "rendering test")
 
         return create_app(config=config, service=service, restarts=restarts,
-                          fleet=fleet, board=BoardService(board_repository)), config
+                          fleet=fleet, board=BoardService(board_repository),
+                          benchmark=benchmark), config
 
     async def test_every_ui_screen_renders_with_the_integrations_on(self):
         app, _config = self._app()

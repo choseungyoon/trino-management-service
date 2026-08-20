@@ -53,7 +53,8 @@ for f in 003_snapshot_kinds \
          008_snapshot_kind_fleet 009_node_shutdown_action \
          010_resource_group_revision 011_resource_group_grants \
          012_fleet_job 013_fleet_job_grants \
-         014_work_board 015_work_board_grants; do
+         014_work_board 015_work_board_grants \
+         016_benchmark 017_benchmark_grants; do
   echo "── $f"
   psql -h <db-host> -U tms_owner -d tms -v ON_ERROR_STOP=1 -f migrations/$f.sql
 done
