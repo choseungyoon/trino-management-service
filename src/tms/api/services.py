@@ -640,6 +640,22 @@ class TmsService:
         store, environment = self._rg_store_or_503(cluster)
         request_id = str(uuid.uuid4())
 
+        # ⛔ The guard raises its own exception types, and they are not
+        # ApiError - so without this they leave the route as a 500. A blank
+        # reason answering "internal server error" tells the operator TMS is
+        # broken when the correct answer is "type a reason". Found by the
+        # browser tests, after passing every Python test.
+        try:
+            return self._rg_audited(
+                principal, cluster, reason, target_id, operation, action_type,
+                store, environment, request_id)
+        except ReasonRequired as exc:
+            raise ReasonRequiredError(str(exc))
+        except AuditUnavailable as exc:
+            raise AuditUnavailableError(str(exc))
+
+    def _rg_audited(self, principal, cluster, reason, target_id, operation,
+                    action_type, store, environment, request_id):
         with self.audit.action(
             actor=principal.username, roles=principal.roles,
             action_type=action_type or ACTION_RESOURCE_GROUP_CHANGE,

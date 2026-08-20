@@ -233,3 +233,32 @@ class WritePathTest(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(WEB_DEPS, "web dependencies not installed")
+class AuditFailureTest(unittest.IsolatedAsyncioTestCase):
+    """The audit guard's own exceptions are not ApiError.
+
+    Unconverted they leave a write route as a 500, so a blank reason answered
+    "internal server error" — telling the operator TMS is broken when the
+    correct answer was "type a reason". Found by the browser tests after every
+    Python test passed, which is why the check lives here now too.
+    """
+
+    def setUp(self):
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from tests.browser.rgstore import InMemoryResourceGroupStore
+
+        self.app = build(InMemoryResourceGroupStore())
+
+    async def test_a_blank_reason_is_a_400_not_a_500(self):
+        async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=self.app),
+                base_url="https://tms.test", follow_redirects=False) as c:
+            await c.post("/login", data={"username": USER, "password": PASSWORD,
+                                         "next": "/"})
+            response = await c.post("/clusters/prod-a/resource-groups/2", data={
+                "name": "${USER}", "hard_concurrency_limit": "12",
+                "max_queued": "100", "scheduling_policy": "fair", "reason": "   "})
+        self.assertLess(response.status_code, 500, response.text[:400])
+        self.assertIn("reason", response.text.lower())

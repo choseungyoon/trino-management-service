@@ -20,6 +20,8 @@
 | 신선도 라벨이 **계속 세는가** | 멈추면 오래된 나이가 그대로 굳는다 |
 | 테마 토글이 **첫 클릭에** 동작하는가 | 서버/클라이언트 기본값 불일치가 여기서 드러났다 |
 | 어느 화면에서도 콘솔 에러가 없는가 | 에러 하나가 이후 모든 리스너를 멈춘다 |
+| **htmx 조각이 제자리에 갈아끼워지는가** (`rg_editing.py`) | 속성으로 쓰인 동작은 파이썬 커버리지에 안 잡힌다 |
+| **거부됐을 때 입력한 값이 남는가** | 저장소에서 다시 그리면 조용히 사라진다. 실제로 그랬다 |
 
 ---
 
@@ -29,10 +31,14 @@
 <venv>/bin/pip install playwright
 <venv>/bin/playwright install chromium
 
-<venv>/bin/python -m unittest tests.browser.ui_behaviour -v
+<venv>/bin/python -m unittest tests.browser.ui_behaviour -v   # 약 25초
+<venv>/bin/python -m unittest tests.browser.rg_editing -v     # 약 11초
 ```
 
-약 25초. 파일명이 `test_` 로 시작하지 않으므로 **`unittest discover` 는 건너뛴다** (`tests/integration/` 과 같은 규약). 기본 스위트를 느리게 만들지 않기 위해서다.
+`rg_editing.py` 는 리소스 그룹 편집 화면 전용이다. 이 화면만 동작이 htmx
+속성에 들어 있어서, 파이썬 테스트가 전부 초록이어도 화면이 죽어 있을 수 있다.
+**실제로 그렇게 500 을 하나 잡았다** — 빈 사유가 400 이 아니라 500 을 내고
+있었고, 감사 가드의 예외가 ApiError 가 아니라서였다. 파일명이 `test_` 로 시작하지 않으므로 **`unittest discover` 는 건너뛴다** (`tests/integration/` 과 같은 규약). 기본 스위트를 느리게 만들지 않기 위해서다.
 
 ---
 

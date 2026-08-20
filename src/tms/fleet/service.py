@@ -147,6 +147,8 @@ class FleetService:
         CLAUDE.md rule 5, which is why `tms-config-check` refuses that case and
         why the config comment says so twice.
         """
+        from tms.api.errors import AuditUnavailableError
+        from tms.core.audit import AuditUnavailable
         from tms.fleet.jobs import JobError
         from tms.fleet.jobstore import ActiveJobExists, JobStoreUnavailable
 
@@ -163,6 +165,20 @@ class FleetService:
             cleaned = definition.clean(parameters or {})
         except JobError as exc:
             raise InvalidRequest(str(exc))
+
+        # ⛔ AuditUnavailable is not an ApiError, so an unconverted one leaves
+        # the route as a 500 - "internal server error" where the truth is "the
+        # audit store is down, so nothing was started". Same fix as
+        # api/services.py._rg_write.
+        try:
+            return self._start_job_audited(principal, cluster, key, cleaned, reason)
+        except AuditUnavailable as exc:
+            raise AuditUnavailableError(str(exc))
+
+    def _start_job_audited(self, principal, cluster, key, cleaned, reason):
+        from tms.api.errors import InvalidRequest
+        from tms.fleet.jobs import JobError
+        from tms.fleet.jobstore import ActiveJobExists, JobStoreUnavailable
 
         with self.audit.action(
             actor=principal.username, roles=principal.roles,
