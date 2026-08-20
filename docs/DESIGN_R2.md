@@ -261,7 +261,19 @@ W1~W3 은 B-1 회신 없이 착수 가능하다. W4 부터 Gateway 계정이 필
 | FR-PROVISION · FR-UPGRADE | R4 | R5 (위 이동의 연쇄) |
 | 그 외 전부 | — | 일치 |
 
-**권고: 부록 B 를 기준으로 삼고 `BACKLOG.md` 를 맞춘다.** 부록 B 가 나중 문서(v0.2)이고 변경 이유("클러스터 간 성능 편차 규명이 시급")까지 적어 두었다. 다만 이건 사람 결정이므로 승인 전에는 어느 쪽으로도 문서를 고치지 않는다.
+~~**권고: 부록 B 를 기준으로 삼고 `BACKLOG.md` 를 맞춘다.**~~
+
+**✅ 2026-08-21 승인 — 부록 B 기준으로 확정. `BACKLOG.md` 를 맞췄다.**
+
+근거는 "나중 문서라서" 가 아니다. **세 건 모두 부록 B 의 배치가 실제로 만들 수 있고 안전한 것과 일치한다:**
+
+| 기능 | 확정 | 왜 |
+|---|---|---|
+| FR-BENCHMARK | **R2** | 클러스터 간 성능 편차 규명이 시급하고, D-012 로 `ExecuteQuery` 가 열려 BM-01 이 가능해졌다. **단 BM-01·03·04 로 범위 한정** |
+| FR-ROUTING-SVC | **R4** | TMS 가 쿼리 경로에 들어가는 유일한 기능이고, 분기 근거가 될 워크로드 데이터가 없다 |
+| FR-CATALOG | **R4** | `catalog.management=dynamic` 이 experimental, Hive/Iceberg 는 무중단 제거 불가, `catalog.store` 미결 |
+
+연쇄로 FR-PROVISION·FR-UPGRADE 는 R5 다.
 
 **⛔ 어느 쪽으로 정하든 FR-BENCHMARK 는 지금 완성할 수 없다.**
 

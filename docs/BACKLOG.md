@@ -147,15 +147,28 @@
 | FR-AUDIT-ACTION | 운영 액션 감사 (사유 필수) | 기존 |
 | FR-LOG-DEEPLINK | 로그 시스템 컨텍스트 딥링크 | **사용자 7-1 (축소)** |
 
+> **⚠️ 2026-08-21 — 아래 배치는 `REQUIREMENTS.md` 부록 B 로 맞춰졌다 (D-3 해소).**
+> 세 건이 어긋나 있었고, 부록 B 가 나중 문서라서가 아니라 **세 건 모두 부록 B 의 배치가 실제로 만들 수 있고 안전한 것과 일치**해서 그쪽을 택했다. 대조표와 근거는 `DESIGN_R2.md` §7-1.
+
 ### R2 — 워크로드 및 라우팅 제어
 
 | ID | 기능 | 출처 |
 |---|---|---|
 | FR-WORKLOAD | 리소스 그룹 관리 뷰 (**데이터 소스 = Trino.** Gateway 19가 리소스 그룹 기능을 제거함) | 기존 |
 | FR-ROUTING-VIEW | 라우팅 규칙/그룹 조회 | **사용자 1-1** |
-| FR-ROUTING-SVC | External Routing Service (사용량·복잡도) | **사용자 1-1c/1-1d** |
 | FR-GATEWAY | Gateway/Routing Group 콘솔 | 기존 |
 | FR-SLO | SLO / Error Budget | 기존 |
+| **FR-BENCHMARK** | 성능 테스트 하네스 — ⚠️ **BM-01·03·04 로 범위 한정** (아래) | **사용자 4-1** · R3→R2 |
+
+> **⛔ FR-BENCHMARK 를 R2 로 옮기되 범위를 못 박는다.** 다섯 개 AC 중 둘이 이 릴리스에서 불가능하다. 모르고 "R2 에 넣는다" 고 두면 절반짜리 기능이 하나 는다.
+>
+> | AC | 상태 |
+> |---|---|
+> | BM-01 표준 쿼리 세트 실행 | ✅ 착수 가능 — `ExecuteQuery` 부여됨 (D-012) |
+> | BM-03 실행 간 비교 | ✅ 착수 가능 |
+> | BM-04 프로덕션 보호 (라우팅 그룹 제외) | ✅ 착수 가능 — Gateway deactivate 재사용. **타협 불가** |
+> | BM-02 CPU/Net/Disk 시계열 | ⏸ Prometheus 미구축 (`NEXT_STEPS.md` W-6) |
+> | BM-05 프로덕션 쿼리 샘플 | ⏸ 히스토리 프로젝트 통합 (D-001) |
 
 ### R3 — 운영 액션
 
@@ -164,19 +177,29 @@
 | FR-FLEET | Fleet 인벤토리 + graceful shutdown | 기존 + **사용자 6-3** |
 | FR-CLUSTER-OPS | 설정 변경·재시작 (안전 시퀀스 강제) | **사용자 6-1/6-2** |
 | FR-FLEET-DRIFT | Config drift 추적 | 기존 |
-| FR-CATALOG | 카탈로그 등록/제거 | **사용자 5-1** |
-| FR-BENCHMARK | 성능 테스트 하네스 | **사용자 4-1** |
 
-### R4 — 프로비저닝 및 확장
+### R4 — 세밀한 제어
 
 | ID | 기능 | 출처 |
 |---|---|---|
-| FR-PROVISION | 클러스터 단위 셋업 자동화 | **사용자 3-1** |
-| FR-UPGRADE | Blue/Green 버전 업그레이드 | **사용자 3-2** |
 | FR-OPA | OPA 정책 상태 가시성 | 기존 |
 | FR-LOGLEVEL | 런타임 로그 레벨 (**축소 존치** — JMX MBean 경유, 재시작 후 미유지) | 기존 |
+| **FR-CATALOG** | 카탈로그 등록/제거 | **사용자 5-1** · R3→R4 |
+| **FR-ROUTING-SVC** | External Routing Service (사용량·복잡도) | **사용자 1-1c/1-1d** · R2→R4 |
 
-### R5+ — AIOps (별도 문서 `AIOPS.md` 참조)
+> **FR-ROUTING-SVC 가 R2 에서 내려온 이유는 순서 정리가 아니다.** 이것은 **TMS 가 쿼리 경로에 들어가는 유일한 기능**이다 — Gateway 가 쿼리마다 TMS 에 라우팅 그룹을 묻는다. 절대규칙 2 는 폴백(`defaultRoutingGroup`)을 조건으로 허용하지만, 지금 TMS 는 죽어도 쿼리가 도는 구조이고 그 성질을 잃는 것은 R2 에서 할 일이 아니다.
+> 그리고 근거 데이터가 없다: `FR-RS-02`(사용량 기반 분기)는 사용자별 최근 소비량을 요구하는데 `WORKLOAD_PROFILE.md` 는 미수집이다.
+
+> **FR-CATALOG 도 마찬가지로 미룬 것이 아니라 못 하는 것이다.** `catalog.management=dynamic` 이 experimental 이고 보안 영향이 있으며, **Hive·Iceberg 는 DROP 해도 리소스가 해제되지 않아 재시작이 필요하다** — 주력이 그 둘이므로 "무중단 카탈로그 제거 불가" 가 확정이다. `catalog.store` 선택도 `[NEEDS-HUMAN-DECISION]` 으로 남아 있다.
+
+### R5 — 클러스터를 찍어낸다
+
+| ID | 기능 | 출처 |
+|---|---|---|
+| FR-PROVISION | 클러스터 단위 셋업 자동화 | **사용자 3-1** · R4→R5 |
+| FR-UPGRADE | Blue/Green 버전 업그레이드 | **사용자 3-2** · R4→R5 |
+
+### R6+ — AIOps (별도 문서 `AIOPS.md` 참조)
 
 ---
 
