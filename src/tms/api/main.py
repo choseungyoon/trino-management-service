@@ -141,6 +141,16 @@ def build_fleet_service(config: Config, service: TmsService):
     from tms.fleet.service import FleetService
 
     runner, repository = build_fleet_jobs(config)
+
+    def sql_for(cluster: str):
+        # ⛔ Built per call, from the same TrinoClient the rest of TMS uses, so
+        # auth, TLS and the circuit breaker are not duplicated. Handed in as a
+        # factory rather than a client so FleetService never holds an open
+        # SQL path it did not ask for.
+        from tms.clients.sql import SqlClient
+
+        return SqlClient(service.trino_clients[cluster])
+
     return FleetService(
         config=config,
         snapshots=service.repository,
@@ -149,6 +159,7 @@ def build_fleet_service(config: Config, service: TmsService):
         stale_threshold=config.collector.stale_threshold_seconds,
         job_runner=runner,
         job_repository=repository,
+        sql_client_factory=sql_for,
     )
 
 

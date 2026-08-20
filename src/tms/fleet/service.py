@@ -45,7 +45,7 @@ log = logging.getLogger(__name__)
 class FleetService:
     def __init__(self, config, snapshots, audit_guard: AuditGuard,
                  transport_factory, stale_threshold: float = 120.0,
-                 job_runner=None, job_repository=None) -> None:
+                 job_runner=None, job_repository=None, sql_client_factory=None) -> None:
         self.config = config
         self.snapshots = snapshots
         self.audit = audit_guard
@@ -56,12 +56,50 @@ class FleetService:
         # can only say "nothing configured" is noise.
         self.job_runner = job_runner
         self.job_repository = job_repository
+        # FR-FL-02. None until the ExecuteQuery grant is in place (D-012); the
+        # screen then says the answer is unavailable rather than offering a
+        # button that cannot work.
+        self._sql_client_factory = sql_client_factory
 
     def _require_view(self, principal: Principal) -> None:
         from tms.api.permissions import VIEW_HEALTH
         from tms.api.services import require
 
         require(principal, VIEW_HEALTH)
+
+    # ----------------------------------------------------------- FR-FL-02
+
+    @property
+    def discovery_lookup_available(self) -> bool:
+        return self._sql_client_factory is not None
+
+    def identify_unjoined(self, principal: Principal, cluster: str) -> Dict[str, Any]:
+        """Which inventory node is not in the coordinator's node list.
+
+        ⛔ On demand only. This is the exception principle A1 was narrowed to
+        allow (D-012), and the narrowing holds only while these queries stay
+        rare - so nothing calls it on a timer, and the screen offers it only
+        when the counts already disagree.
+
+        A read, so no `reason` and no audit row: rule 3 governs writes. It is
+        logged, because "why did TMS run a query" is a question worth being
+        able to answer even when the answer is boring.
+        """
+        from tms.fleet.discovery import identify
+
+        self._require_view(principal)
+        self._cluster_or_404(cluster)
+        if not self.discovery_lookup_available:
+            raise InvalidRequest(
+                "TMS cannot query the coordinator's node list. This needs the "
+                "ExecuteQuery permission on the TMS account (D-012).")
+
+        snapshot = self.snapshots.load(cluster, KIND_FLEET)
+        inventory = ((snapshot.payload if snapshot else None) or {}).get("nodes") or []
+        log.info("discovery lookup on %s requested by %s", cluster, principal.username)
+        result = identify(self._sql_client_factory(cluster), inventory)
+        result["cluster"] = cluster
+        return result
 
     # ------------------------------------------------------- FR-FL-04/05
 

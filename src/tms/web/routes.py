@@ -24,6 +24,7 @@ from tms.api.permissions import (
     VIEW_AUDIT,
     Principal,
 )
+from tms.fleet.discovery import host_of
 from tms.ops.sequence import checklist as sequence_checklist
 from tms.web import views
 from tms.web.formatting import FILTERS
@@ -926,11 +927,55 @@ def register(app, service, config, authenticator, codec, session_cookie: str,
             "jobs": jobs,
             "selected_cluster": cluster,
             "can_manage": principal.can(MANAGE_HEALTH),
+            # FR-FL-02. Only when the counts already disagree: a button that
+            # spends a query slot to confirm what the screen already shows is
+            # a button people press out of habit.
+            "can_identify": (fleet.discovery_lookup_available
+                             and _counts_disagree(data)),
             # Set when the confirm form is open for one node.
             "confirm_host": host,
             "error": error,
         })
         return render("fleet.html", context)
+
+    @app.post("/clusters/{cluster}/fleet/identify", include_in_schema=False)
+    def fleet_identify(request: Request, cluster: str):
+        """FR-FL-02. Runs one query against the coordinator, on request.
+
+        A POST although it reads nothing of TMS's own: it costs the cluster a
+        query slot, and a GET that does that would be followed by every crawler
+        and every browser prefetch.
+        """
+        principal, claims = principal_or_redirect(request)
+        if claims is None:
+            return principal
+        if fleet is None:
+            return _error_page(request, principal, NotFound("Fleet is not configured."))
+        try:
+            result = fleet.identify_unjoined(principal, cluster)
+        except ApiError as exc:
+            return RedirectResponse(
+                "/clusters/{}/fleet?error={}".format(
+                    _quote(cluster), _quote(exc.message)), status_code=303)
+
+        response = RedirectResponse(
+            "/clusters/" + _quote(cluster) + "/fleet", status_code=303)
+        if not result.get("available"):
+            _flash(response, "bad", result.get("advice") or result.get("error") or
+                   "The coordinator's node list could not be read.")
+        elif result["unjoined"]:
+            _flash(response, "bad", "Not joined to discovery: {}".format(
+                ", ".join(n.get("host") or n.get("address") or "?"
+                          for n in result["unjoined"])))
+        elif result["unexpected"]:
+            _flash(response, "bad",
+                   "Serving queries but not in the inventory: {}".format(
+                       ", ".join(host_of(r.get("http_uri"))
+                                 for r in result["unexpected"])))
+        else:
+            _flash(response, "good",
+                   "Every node in the inventory is joined to discovery.")
+        return response
 
     # ── fleet jobs (FR-FL-04/05) ───────────────────────────────────────
     #
@@ -1247,6 +1292,23 @@ def _quote(value: str) -> str:
     from urllib.parse import quote
 
     return quote(value, safe="")
+
+
+def _counts_disagree(fleet_data: Dict[str, Any]) -> bool:
+    """Does the coordinator see fewer nodes than the inventory lists?
+
+    `ActiveNodeCount` includes the coordinator (TRINO_VERIFIED T1-7-1), and so
+    does the inventory, so the two are directly comparable.
+    """
+    counts = fleet_data.get("node_counts") or {}
+    active = counts.get("ActiveNodeCount")
+    listed = fleet_data.get("inventory_size")
+    if active is None or not listed:
+        return False
+    try:
+        return int(active) < int(listed)
+    except (TypeError, ValueError):
+        return False
 
 
 def _int_or_none(value) -> Optional[int]:

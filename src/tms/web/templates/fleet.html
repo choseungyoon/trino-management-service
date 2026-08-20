@@ -152,6 +152,23 @@
     {% for limit in fleet.limits or [] %}
     <p class="seq__act-why">{{ limit }}</p>
     {% endfor %}
+    {% if can_identify %}
+    {# FR-FL-02. Offered, not automatic: this costs the coordinator a query
+       slot, and D-012 only holds while these stay rare. So it appears where
+       the count already disagrees and someone is looking at it. #}
+    <form method="post"
+          action="/clusters/{{ selected_cluster | urlencode }}/fleet/identify">
+      <button class="btn btn--sm" type="submit" data-busy="Asking…">
+        Ask the coordinator which node is missing
+      </button>
+      <p class="seq__act-why">
+        Runs one <code class="mono">SELECT</code> against
+        <code class="mono">system.runtime.nodes</code>. TMS does not poll this —
+        the count above comes from JMX, and this is the only way to turn a
+        count into a name.
+      </p>
+    </form>
+    {% endif %}
     {% if fleet.node_counts %}
     <div class="kv">
       {% for key, value in (fleet.node_counts | dictsort) %}
