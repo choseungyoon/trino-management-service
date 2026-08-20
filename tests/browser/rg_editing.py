@@ -81,7 +81,11 @@ class ResourceGroupEditingTest(unittest.TestCase):
 
     def start_editing(self, row=LEAF):
         self.page.click("{} button:has-text('Edit')".format(row))
-        self.page.wait_for_selector("{} input[name=name]".format(row))
+        # Waits for exactly what the assertions then look at. Waiting on the
+        # input instead was flaky: the input is attached a beat before htmx has
+        # finished settling the swapped row, so a `count()` immediately after
+        # could still see the old one.
+        self.page.wait_for_selector("tr{}.row-editing input[name=name]".format(row))
 
     def save(self, row=LEAF, **fields):
         for name, value in fields.items():
