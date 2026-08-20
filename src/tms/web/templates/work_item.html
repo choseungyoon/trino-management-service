@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% import "_icons.html" as ui %}
+{% block title %}{{ item.key }}{% endblock %}
+{% block heading %}<span class="mono">{{ item.key }}</span> · {{ item.title }}{% endblock %}
+
+{% block topbar_extra %}
+<span class="spacer"></span>
+<a class="btn btn--sm" href="/work">{{ ui.icon('board', 12) }}Board</a>
+{% endblock %}
+
+{% block content %}
+{% if item.blocked_by %}
+<div class="banner banner--concerning" role="status">
+  {{ ui.icon('lock', 15) }}
+  <div><strong>막고 있는 것</strong> — {{ item.blocked_by }}</div>
+</div>
+{% endif %}
+
+{% if item.source_doc %}
+{#
+  A path, not a link. TMS does not serve the repository, and a link that 404s
+  is worse than a path someone can paste into their editor.
+#}
+<div class="banner" role="note">
+  {{ ui.icon('info', 15) }}
+  <div><strong>근거는 문서에 있다</strong> — <span class="mono">{{ item.source_doc }}</span>.
+    이 화면이 문서와 다르면 문서가 맞다.</div>
+</div>
+{% endif %}
+
+<section class="panel">
+  <div class="facts">
+    <div class="fact">
+      <div class="fact__value">
+        <span class="board__mark board__mark--{{ item.status }}" aria-hidden="true"></span>{{ item.status_label }}
+      </div>
+      <div class="fact__key">상태</div>
+    </div>
+    <div class="fact">
+      <div class="fact__value">{{ item.kind_label }}</div>
+      <div class="fact__key">종류</div>
+    </div>
+    <div class="fact">
+      <div class="fact__value mono">{{ item.release or '—' }}</div>
+      <div class="fact__key">릴리스</div>
+    </div>
+    <div class="fact">
+      <div class="fact__value">{{ item.created_by }}</div>
+      <div class="fact__key">등록 · {{ item.created_at | clock }}</div>
+    </div>
+  </div>
+  {% if item.body %}
+  <p class="panel__note wrap">{{ item.body }}</p>
+  {% endif %}
+</section>
+
+{% if can_write %}
+<section class="panel" style="margin-top:14px">
+  <div class="panel__head">
+    <div class="panel__title">상태 변경</div>
+    <div class="panel__sub">한 줄 설명은 댓글로 남는다</div>
+  </div>
+  <form method="post" action="/work/{{ item.key }}/status" class="wi-form">
+    <label class="field">상태
+      <select class="input" name="status">
+        {% for choice in statuses %}
+        <option value="{{ choice.value }}" {% if choice.selected %}selected{% endif %}>{{ choice.label }} — {{ choice.meaning }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="field">한 줄 설명 (선택)
+      <input class="input" name="note" maxlength="500" placeholder="왜 옮기는가">
+    </label>
+    <div class="row-actions">
+      <button class="btn btn--primary" type="submit">변경</button>
+    </div>
+  </form>
+</section>
+{% endif %}
+
+<section class="panel" style="margin-top:14px">
+  <div class="panel__head">
+    <div class="panel__title">기록</div>
+    <div class="panel__sub">댓글과 상태 변경이 한 줄기로 흐른다</div>
+  </div>
+  {% if timeline %}
+  <ol class="wi-log">
+    {% for entry in timeline %}
+    <li class="wi-log__item wi-log__item--{{ entry.kind }}">
+      <div class="wi-log__meta">
+        <span class="wi-log__who">{{ entry.actor }}</span>
+        <span class="wi-log__at">{{ entry.at | clock }}</span>
+      </div>
+      {% if entry.kind == 'status' %}
+      <div class="wi-log__body">{{ entry.from_label }} → <strong>{{ entry.to_label }}</strong></div>
+      {% else %}
+      <div class="wi-log__body wrap">{{ entry.body }}</div>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ol>
+  {% else %}
+  <p class="panel__note">아직 아무 기록도 없다.</p>
+  {% endif %}
+
+  {% if can_write %}
+  <form method="post" action="/work/{{ item.key }}/comment" class="wi-form">
+    <label class="field"><span class="sr-only">댓글</span>
+      <textarea class="input" name="body" rows="3" required placeholder="댓글"></textarea>
+    </label>
+    <div class="row-actions">
+      <button class="btn" type="submit">댓글 달기</button>
+    </div>
+  </form>
+  {% endif %}
+</section>
+{% endblock %}

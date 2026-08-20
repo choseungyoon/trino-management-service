@@ -229,7 +229,29 @@ def build_app(workload_enabled=False, seed=None, gateway=None,
                                  runner=demo_runner),
             job_repository=job_repository)
 
-    return create_app(config=config, service=service, fleet=fleet), trino
+    # The work board, seeded from the documents and given the kind of activity
+    # a real board has after a week - a comment thread and one item that moved.
+    from tms.work.items import IN_PROGRESS
+    from tms.work.seed import seed as seed_board
+    from tms.work.service import BoardService
+    from tms.work.store import InMemoryBoardRepository
+
+    board_repository = InMemoryBoardRepository()
+    seed_board(board_repository)
+    board_repository.create(key="REQ-1", kind="request",
+                            title="쿼리를 id 말고 사용자로도 죽일 수 있으면 좋겠다",
+                            status="planned", created_by="sre.kim",
+                            body="지금은 사용자 한 명의 쿼리 여덟 개를 하나씩 죽여야 한다.")
+    board_repository.add_comment(
+        "REQ-1", "syhcho",
+        "여러 건을 한 번에 죽이는 것은 절대규칙 3 의 확인 절차와 맞물린다.\n"
+        "reason 을 한 번 받고 여덟 건을 죽이는 게 맞는지부터 정해야 한다.")
+    board_repository.add_comment("D-2", "sre.kim",
+                                 "SSH 범위 때문에 아직 결정 못 했다.")
+    board_repository.update("FR-BM-04", "syhcho", status=IN_PROGRESS)
+
+    return create_app(config=config, service=service, fleet=fleet,
+                      board=BoardService(board_repository)), trino
 
 
 def _make_cert(directory):

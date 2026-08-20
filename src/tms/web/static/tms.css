@@ -837,3 +837,95 @@ dialog::backdrop { background: rgba(4, 6, 10, .55); backdrop-filter: blur(1px); 
 @media (prefers-reduced-motion: reduce) {
   * { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+
+/* ── Work board (FR-BOARD) ──────────────────────────────────────────── */
+
+/* Columns, not a table: the eye is meant to land on the leftmost non-empty
+   one — "needs a decision" — and a table sorted by status would bury that
+   under a header row. Scrolls sideways on a narrow window rather than
+   reflowing to one column per row, which would lose the ordering entirely. */
+.board {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(230px, 1fr);
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+.board__col {
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: 10px; padding: 12px; min-width: 0;
+}
+.board__head { margin-bottom: 10px; }
+.board__title {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 12.5px; font-weight: 700; margin: 0;
+}
+.board__meaning {
+  margin: 5px 0 0; font-size: 11px; line-height: 1.5; color: var(--tx-3);
+}
+.board__none { font-size: 11.5px; color: var(--tx-3); margin: 0; padding: 6px 0; }
+
+/* The status vocabulary, mapped onto the existing semantic hues rather than
+   given new ones: `needs_decision` is the accent because it is the only state
+   that is waiting on the person reading the screen. */
+.board__mark {
+  /* inline-block, not inline: a bare span takes no width and the dot vanishes
+     everywhere it is not already a flex child. */
+  display: inline-block; vertical-align: middle;
+  width: 7px; height: 7px; border-radius: 50%; flex: none;
+  margin-right: 7px; background: var(--unk);
+}
+.board__title .board__mark { margin-right: 0; }
+.board__mark--needs_decision { background: var(--ac); }
+.board__mark--blocked        { background: var(--bad); }
+.board__mark--in_progress    { background: var(--warn); }
+.board__mark--planned        { background: var(--tx-3); }
+.board__mark--done           { background: var(--good); }
+.board__mark--dropped        { background: var(--unk); }
+
+/* Capped so the board is one screen. Without this the tallest column - which
+   is "Blocked", and it will stay "Blocked" - sets the page height, and the
+   request form ends up four scrolls below the fold. */
+.board__list {
+  list-style: none; margin: 0; padding: 0; display: grid; gap: 8px;
+  max-height: 62vh; overflow-y: auto;
+}
+
+.wi {
+  background: var(--panel-2); border: 1px solid var(--line);
+  border-radius: var(--r); padding: 9px 10px;
+}
+.wi:hover { border-color: var(--line-2); }
+.wi__link { display: block; text-decoration: none; color: inherit; }
+.wi__key { display: block; font-size: 10.5px; color: var(--tx-3); letter-spacing: .02em; }
+.wi__title { display: block; font-size: 12.5px; line-height: 1.45; margin-top: 2px; }
+.wi__link:hover .wi__title { color: var(--ac); }
+.wi__meta {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  margin-top: 7px; font-size: 10.5px; color: var(--tx-3);
+}
+.wi__blocked {
+  display: flex; align-items: flex-start; gap: 5px;
+  margin-top: 7px; padding-top: 7px; border-top: 1px solid var(--line);
+  font-size: 11px; line-height: 1.45; color: var(--bad);
+}
+.wi__blocked svg { flex: none; margin-top: 2px; }
+
+.wi-form { display: grid; gap: 10px; padding: 14px 16px; }
+.wi-form textarea.input { resize: vertical; font: inherit; line-height: 1.55; }
+
+/* Comments and status moves in one stream: to the person reading, "moved to
+   blocked" and the sentence saying what blocked it are the same event. */
+.wi-log { list-style: none; margin: 0; padding: 4px 16px 0; display: grid; gap: 2px; }
+.wi-log__item {
+  border-left: 2px solid var(--line-2); padding: 8px 0 8px 12px;
+}
+.wi-log__item--status { border-left-color: var(--ac-ring); }
+.wi-log__meta { display: flex; gap: 8px; align-items: baseline; font-size: 11px; }
+.wi-log__who { font-weight: 600; }
+.wi-log__at { color: var(--tx-3); font-variant-numeric: tabular-nums; }
+.wi-log__body { font-size: 12.5px; line-height: 1.6; margin-top: 3px; }
+/* A comment keeps the line breaks it was written with. Collapsing them turns
+   a short list of reasons into one run-on sentence. */
+.wi-log__body.wrap, .panel__note.wrap { white-space: pre-wrap; }

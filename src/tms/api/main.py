@@ -198,8 +198,27 @@ def build_fleet_jobs(config: Config):
     return runner, repository
 
 
+def build_board_service(config: Config):
+    """The FR-BOARD work board, or None.
+
+    None when the database will not open. The board is a planning surface, not
+    part of any query path, so it disappears from the nav rather than taking
+    the console down with it.
+    """
+    from tms.work.service import BoardService
+    from tms.work.store import PostgresBoardRepository
+
+    try:
+        repository = PostgresBoardRepository(config.database_url.reveal())
+    except Exception as exc:  # noqa: BLE001
+        log.error("cannot open the work board store, so the board is off: %s", exc)
+        return None
+    return BoardService(repository)
+
+
 def create_app(config: Optional[Config] = None, service: Optional[TmsService] = None,
-               restarts: Optional[Any] = None, fleet: Optional[Any] = None):
+               restarts: Optional[Any] = None, fleet: Optional[Any] = None,
+               board: Optional[Any] = None):
     from fastapi import Body, Depends, FastAPI, Query, Request, Response
     from fastapi.responses import JSONResponse
 
@@ -240,6 +259,8 @@ def create_app(config: Optional[Config] = None, service: Optional[TmsService] = 
         restarts = build_restart_service(config, service, config_store=config_store)
     if fleet is None:
         fleet = build_fleet_service(config, service)
+    if board is None:
+        board = build_board_service(config)
 
     app = FastAPI(title="TMS", version="0.1.0", docs_url=None, redoc_url=None)
 
@@ -528,7 +549,7 @@ def create_app(config: Optional[Config] = None, service: Optional[TmsService] = 
         from tms.web.routes import register as register_web
 
         register_web(app, service, config, authenticator, codec, SESSION_COOKIE,
-                     restarts=restarts, fleet=fleet)
+                     restarts=restarts, fleet=fleet, board=board)
 
     return app
 

@@ -367,3 +367,91 @@ def order_groups(tree, groups, sort=None, descending=True):
     known.sort(key=lambda g: g[sort], reverse=bool(descending))
     return known + unknown, True
 
+
+
+# ── work board (FR-BOARD) ─────────────────────────────────────────────
+
+
+def status_label(status: Optional[str]) -> str:
+    from tms.work.items import STATUS_LABELS
+
+    return STATUS_LABELS.get(status or "", status or "—")
+
+
+def status_choices(current: Optional[str]) -> List[Dict[str, Any]]:
+    """Every status, with the current one marked.
+
+    All of them, including the one it is already on: a select that silently
+    omits the current value shows the wrong thing selected on first paint.
+    """
+    from tms.work.items import STATUS_LABELS, STATUS_MEANINGS, STATUS_ORDER
+
+    return [
+        {"value": status, "label": STATUS_LABELS[status],
+         "meaning": STATUS_MEANINGS[status], "selected": status == current}
+        for status in STATUS_ORDER
+    ]
+
+
+def kind_chips(kind_filter: Optional[str], columns: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Filter chips with live counts, taken from the columns already rendered.
+
+    Counted from what is on screen rather than with a second query: two numbers
+    fetched separately can disagree, and a chip saying "Requests 3" above two
+    request cards is a bug report waiting to happen.
+    """
+    from tms.work.items import KIND_LABELS
+
+    counts: Dict[str, int] = {}
+    total = 0
+    for column in columns or []:
+        for item in column.get("cards") or []:
+            counts[item.get("kind")] = counts.get(item.get("kind"), 0) + 1
+            total += 1
+
+    def href(kind: Optional[str]) -> str:
+        return "/work" + ("?" + urlencode({"kind": kind}) if kind else "")
+
+    chips = [{"label": "All", "count": total, "href": href(None),
+              "active": not kind_filter}]
+    for kind, label in KIND_LABELS.items():
+        chips.append({"label": label, "count": counts.get(kind, 0),
+                      "href": href(kind), "active": kind_filter == kind})
+    return chips
+
+
+def work_item_row(item: Dict[str, Any]) -> Dict[str, Any]:
+    from tms.work.items import KIND_LABELS
+
+    row = dict(item or {})
+    row["status_label"] = status_label(row.get("status"))
+    row["kind_label"] = KIND_LABELS.get(row.get("kind") or "", row.get("kind") or "—")
+    # A document-backed item links back to what it points at. The link is a
+    # repository path, not a URL: TMS cannot serve the docs and pretending
+    # otherwise would give the reader a 404 instead of a place to look.
+    row["source_doc"] = (row.get("source_doc") or "").strip() or None
+    return row
+
+
+def work_timeline(item: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Comments and status changes, interleaved, oldest first.
+
+    One stream rather than two panels: "moved to blocked" and the comment
+    saying what blocked it are the same event to the person reading, and
+    separating them makes the reader reconstruct the order from timestamps.
+    """
+    entries: List[Dict[str, Any]] = []
+    for comment in item.get("comments") or []:
+        entries.append({"kind": "comment", "at": comment.get("created_at"),
+                        "actor": comment.get("author"), "body": comment.get("body")})
+    for event in item.get("events") or []:
+        entries.append({
+            "kind": "status", "at": event.get("occurred_at"),
+            "actor": event.get("actor"),
+            "from_label": status_label(event.get("from_status")),
+            "to_label": status_label(event.get("to_status")),
+        })
+    # Undated entries sort last rather than crashing the comparison: the
+    # in-memory repository always sets a time, but a row written by an older
+    # migration might not.
+    return sorted(entries, key=lambda e: (e["at"] is None, e["at"]))

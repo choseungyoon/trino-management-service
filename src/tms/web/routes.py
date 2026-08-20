@@ -50,13 +50,13 @@ def build_templates():
 
 
 def register(app, service, config, authenticator, codec, session_cookie: str,
-             restarts=None, fleet=None) -> None:
+             restarts=None, fleet=None, board=None) -> None:
     """Mount the UI on an existing FastAPI app.
 
-    `restarts` is the FR-CO-02 sequence service and `fleet` the FR-FLEET one.
-    Either may be None when it cannot run (no Gateway, no inventory). None is a
-    real state the screens handle, not an error - the console still shows
-    everything else.
+    `restarts` is the FR-CO-02 sequence service, `fleet` the FR-FLEET one and
+    `board` the FR-BOARD work board. Any may be None when it cannot run (no
+    Gateway, no inventory, no database). None is a real state the screens
+    handle, not an error - the console still shows everything else.
     """
     from fastapi import Form, Request
     from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
@@ -153,6 +153,7 @@ def register(app, service, config, authenticator, codec, session_cookie: str,
             "restarts_enabled": restarts is not None,
             "fleet_enabled": fleet is not None,
             "resource_groups_enabled": config.resource_groups.enabled,
+            "board_enabled": board is not None,
             # A cluster held out of rotation is invisible on every other
             # screen: the remaining clusters are green, so the console looks
             # healthy while traffic is being refused. The banner follows the
@@ -1273,6 +1274,169 @@ def register(app, service, config, authenticator, codec, session_cookie: str,
             media_type="text/csv",
             headers={"Content-Disposition": 'attachment; filename="tms-audit.csv"'},
         )
+
+    # ── work board (FR-BOARD) ──────────────────────────────────────────
+    #
+    # Read by anyone signed in, written by administrators. The board owns
+    # status; the document each item points at owns the reasoning, and the
+    # screens say so rather than repeating the document badly.
+
+    def _board_or_error(request: Request, principal: Principal):
+        if board is None:
+            return _error_page(request, principal, NotFound(
+                "The work board needs the TMS database, which is not configured."))
+        return None
+
+    @app.get("/work", response_class=HTMLResponse, include_in_schema=False)
+    def work_board(request: Request, kind: Optional[str] = None):
+        principal, claims = principal_or_redirect(request)
+        if claims is None:
+            return principal
+        unavailable = _board_or_error(request, principal)
+        if unavailable is not None:
+            return unavailable
+        try:
+            data = board.board(principal, kind=kind)
+        except ApiError as exc:
+            return _error_page(request, principal, exc)
+
+        context = base_context(request, principal, "work")
+        context.update({
+            "board": data,
+            "kind_filter": kind,
+            "kind_chips": views.kind_chips(kind, data.get("columns") or []),
+            "can_write": principal.can(MANAGE_HEALTH),
+            "error": None,
+            "draft": {},
+            "envelope": None,
+        })
+        return render("work.html", context)
+
+    @app.post("/work", include_in_schema=False)
+    def work_raise(request: Request, title: str = Form(""), body: str = Form("")):
+        """An administrator asks for something.
+
+        Re-renders the board with the typed text still in the box when the
+        request is refused. Losing what someone wrote because the title was
+        empty teaches them to write it somewhere else first.
+        """
+        principal, claims = principal_or_redirect(request)
+        if claims is None:
+            return principal
+        unavailable = _board_or_error(request, principal)
+        if unavailable is not None:
+            return unavailable
+        try:
+            item = board.raise_request(principal, title=title, body=body)
+        except ApiError as exc:
+            context = base_context(request, principal, "work")
+            try:
+                data = board.board(principal)
+            except ApiError:
+                data = {"available": False, "error": exc.message,
+                        "columns": [], "summary": {}}
+            context.update({
+                "board": data, "kind_filter": None,
+                "kind_chips": views.kind_chips(None, data.get("columns") or []),
+                "can_write": principal.can(MANAGE_HEALTH),
+                "error": exc.message,
+                "draft": {"title": title, "body": body},
+                "envelope": None,
+            })
+            return render("work.html", context, status_code=exc.status)
+
+        response = RedirectResponse("/work/" + _quote(item["key"]), status_code=303)
+        _flash(response, "good", "{} raised.".format(item["key"]))
+        return response
+
+    @app.get("/work/{key}", response_class=HTMLResponse, include_in_schema=False)
+    def work_item(request: Request, key: str):
+        principal, claims = principal_or_redirect(request)
+        if claims is None:
+            return principal
+        unavailable = _board_or_error(request, principal)
+        if unavailable is not None:
+            return unavailable
+        try:
+            item = board.item(principal, key)
+        except ApiError as exc:
+            return _error_page(request, principal, exc)
+
+        context = base_context(request, principal, "work")
+        context.update({
+            "item": views.work_item_row(item),
+            "timeline": views.work_timeline(item),
+            "statuses": views.status_choices(item.get("status")),
+            "can_write": principal.can(MANAGE_HEALTH),
+            "error": None,
+            "envelope": None,
+        })
+        return render("work_item.html", context)
+
+    @app.post("/work/{key}/comment", include_in_schema=False)
+    def work_comment(request: Request, key: str, body: str = Form("")):
+        principal, claims = principal_or_redirect(request)
+        if claims is None:
+            return principal
+        unavailable = _board_or_error(request, principal)
+        if unavailable is not None:
+            return unavailable
+        response = RedirectResponse("/work/" + _quote(key), status_code=303)
+        try:
+            board.comment(principal, key, body)
+        except ApiError as exc:
+            _flash(response, "bad", exc.message)
+        return response
+
+    @app.post("/work/{key}/status", include_in_schema=False)
+    def work_status(request: Request, key: str, status: str = Form(""),
+                    note: str = Form("")):
+        """Move an item, optionally saying why in the same submission.
+
+        The note is a comment, not a `reason` field: see the module docstring
+        of `tms/work/service.py` for why rule 3 is read that way here. It is
+        written first, so a status that moved always has its explanation next
+        to it even if the move itself then fails.
+        """
+        principal, claims = principal_or_redirect(request)
+        if claims is None:
+            return principal
+        unavailable = _board_or_error(request, principal)
+        if unavailable is not None:
+            return unavailable
+        response = RedirectResponse("/work/" + _quote(key), status_code=303)
+        try:
+            if (note or "").strip():
+                board.comment(principal, key, note)
+            item = board.set_status(principal, key, status)
+        except ApiError as exc:
+            _flash(response, "bad", exc.message)
+            return response
+        _flash(response, "good", "{} → {}".format(
+            item["key"], views.status_label(item["status"])))
+        return response
+
+    @app.get("/work.md", include_in_schema=False)
+    def work_markdown(request: Request):
+        """The board as the file that gets committed.
+
+        Same bytes `tms-work-export` writes. Available from the browser because
+        the person who needs it in the repository is usually not on the host
+        that can run the command.
+        """
+        principal, claims = principal_or_redirect(request)
+        if claims is None:
+            return principal
+        if board is None:
+            return _error_page(request, principal, NotFound(
+                "The work board needs the TMS database, which is not configured."))
+        try:
+            text = board.export_markdown(principal)
+        except ApiError as exc:
+            return _error_page(request, principal, exc)
+        return PlainTextResponse(
+            text, media_type="text/markdown; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="WORK_BOARD.md"'})
 
     # ── errors ─────────────────────────────────────────────────────────
 

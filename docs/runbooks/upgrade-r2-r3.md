@@ -50,7 +50,10 @@ cd /etc/trino-management-service
 for f in 003_snapshot_kinds \
          004_restart_sequence 005_restart_sequence_grants \
          006_cluster_restart_action 007_restart_event_output_level \
-         008_snapshot_kind_fleet 009_node_shutdown_action; do
+         008_snapshot_kind_fleet 009_node_shutdown_action \
+         010_resource_group_revision 011_resource_group_grants \
+         012_fleet_job 013_fleet_job_grants \
+         014_work_board 015_work_board_grants; do
   echo "── $f"
   psql -h <db-host> -U tms_owner -d tms -v ON_ERROR_STOP=1 -f migrations/$f.sql
 done
@@ -58,9 +61,25 @@ done
 
 전부 재실행 안전하다. 이미 적용된 것은 건너뛴다.
 
+**빠짐없이 적용됐는지는 사람이 세지 않는다** — `tms-config-check` 가 `_REQUIRED_OBJECTS` 로 대조한다. 새 마이그레이션을 그 목록에 넣지 않으면 config-check 는 **모르는 것을 통과시킨다**; 그걸 막는 테스트가 `tests/test_configcheck.py::MigrationCoverageTest` 다.
+
 > **⚠️ 왜 이걸 이렇게 강조하는가**
 > 새 스냅샷 종류나 감사 액션이 DB 제약에 없으면 **collector 가 거부당하고, 로그만 남기고 계속 돈다**(저장 실패가 폴링을 멈추면 안 되므로). 증상은 오류가 아니라 **영원히 비어 있는 화면**이다.
 > 개발 중 이 함정에 **두 번** 빠졌다. 그래서 코드-DB 대조 테스트를 붙였지만, 그건 코드 쪽 실수만 막는다. **적용은 사람이 해야 한다.**
+
+### 3-0. 작업 보드 초기 적재 (014 이후, 한 번만)
+
+보드는 비어 있으면 아무 말도 하지 않는다. 문서에 이미 있는 항목을 한 번 넣어 준다.
+
+```bash
+sudo -u tms /etc/trino-management-service/venv/bin/tms-work-export --seed --output docs/WORK_BOARD.md
+```
+
+`--seed` 는 **이미 있는 키를 건드리지 않는다.** 두 번 돌려도 상태가 되돌아가지 않는다 — 그게 이 명령의 유일한 위험이었고, 그래서 키 기준으로 건너뛴다.
+
+이후에는 `--seed` 없이 돌려 파일만 갱신한다. 보드를 사외에서 읽을 방법은 이 파일뿐이므로, **커밋해서 저장소에 올린다.**
+
+---
 
 ### 3-1. append-only 권한 확인 (005 검증)
 

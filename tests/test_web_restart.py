@@ -495,6 +495,9 @@ class EveryScreenTest(unittest.IsolatedAsyncioTestCase):
         "selector_id": "1",
         "revision_id": "1",
         "run_id": "1",
+        # A work item that the seeded board actually has, so the detail page
+        # renders its timeline rather than a 404 the sweep would accept.
+        "key": "W-1",
     }
 
     #: Routes that legitimately answer with something other than 200.
@@ -535,6 +538,12 @@ class EveryScreenTest(unittest.IsolatedAsyncioTestCase):
         "state": "on",
         "value": "1",
         "theme": "light",
+        # The work board's own fields. `body` doubles as the comment text and
+        # `status` as the board move; both are ignored by every other route.
+        "title": "route sweep",
+        "body": "route sweep",
+        "status": "planned",
+        "note": "route sweep",
     }
 
     def _app(self):
@@ -607,8 +616,18 @@ class EveryScreenTest(unittest.IsolatedAsyncioTestCase):
             job_repository=job_repository,
             config=config, snapshots=service.repository, audit_guard=service.audit,
             transport_factory=lambda: None)
+        # A seeded board, so /work and /work/{key} draw real columns and a real
+        # timeline instead of the empty state.
+        from tms.work.seed import seed as seed_board
+        from tms.work.service import BoardService
+        from tms.work.store import InMemoryBoardRepository
+
+        board_repository = InMemoryBoardRepository()
+        seed_board(board_repository)
+        board_repository.add_comment("W-1", "syhcho", "rendering test")
+
         return create_app(config=config, service=service, restarts=restarts,
-                          fleet=fleet), config
+                          fleet=fleet, board=BoardService(board_repository)), config
 
     async def test_every_ui_screen_renders_with_the_integrations_on(self):
         app, _config = self._app()

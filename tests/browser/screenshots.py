@@ -31,6 +31,10 @@ SHOTS = (
     ("08-dark-theme", "/clusters/prod-a/resource-groups", "toggle_theme"),
     ("09-fleet-jobs", "/clusters/prod-a/fleet", None),
     ("10-job-log", "/fleet/jobs/1", None),
+    ("11-work-board", "/work", None),
+    ("12-work-item", "/work/REQ-1", None),
+    ("13-work-decision", "/work/D-2", None),
+    ("14-work-board-dark", "/work", "toggle_theme"),
 )
 
 

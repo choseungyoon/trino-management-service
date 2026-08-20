@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% import "_icons.html" as ui %}
+{% block title %}Work Board{% endblock %}
+{% block heading %}Work Board{% endblock %}
+
+{% block topbar_extra %}
+<span class="spacer"></span>
+<a class="btn btn--sm" href="/work.md">{{ ui.icon('download', 12) }}WORK_BOARD.md</a>
+{% endblock %}
+
+{% block content %}
+{#
+  Said once, at the top, because everything below is a status — and a status
+  read without this line invites someone to "fix" the board when it disagrees
+  with a document, which is exactly backwards.
+#}
+<div class="banner" role="note">
+  {{ ui.icon('info', 15) }}
+  <div>
+    <strong>상태는 이 보드가, 근거는 문서가 갖는다.</strong>
+    항목이 가리키는 문서와 어긋나면 <strong>문서가 이긴다</strong>.
+    여기서 새로 올릴 수 있는 것은 <span class="mono">request</span> 뿐이다 —
+    결정과 요구사항은 각자의 문서에서 시작한다.
+  </div>
+</div>
+
+{% if error %}
+<div class="banner banner--bad" role="alert">
+  {{ ui.icon('bad', 15) }}<div>{{ error }}</div>
+</div>
+{% endif %}
+
+{% if not board.available %}
+<section class="panel">
+  <div class="empty">
+    {{ ui.icon('bad', 20, 1.6) }}
+    <div class="empty__title">보드를 읽을 수 없다</div>
+    <div class="empty__desc">{{ board.error or 'The TMS database did not answer.' }}</div>
+  </div>
+</section>
+{% else %}
+
+<div class="filters">
+  {% for chip in kind_chips %}
+  <a class="chip{% if chip.active %} chip--on{% endif %}" href="{{ chip.href }}"
+     aria-pressed="{{ 'true' if chip.active else 'false' }}">
+    {{ chip.label }} <span class="chip__n">{{ chip.count | integer }}</span>
+  </a>
+  {% endfor %}
+</div>
+
+<div class="board">
+  {% for column in board.columns %}
+  <section class="board__col" aria-labelledby="col-{{ column.status }}">
+    <div class="board__head">
+      <h2 class="board__title" id="col-{{ column.status }}">
+        <span class="board__mark board__mark--{{ column.status }}" aria-hidden="true"></span>
+        {{ column.label }}
+        <span class="chip__n">{{ column.cards | length }}</span>
+      </h2>
+      <p class="board__meaning">{{ column.meaning }}</p>
+    </div>
+
+    {% if column.cards %}
+    <ul class="board__list">
+      {% for item in column.cards %}
+      <li class="wi">
+        <a class="wi__link" href="/work/{{ item.key }}">
+          <span class="wi__key mono">{{ item.key }}</span>
+          <span class="wi__title">{{ item.title }}</span>
+        </a>
+        <div class="wi__meta">
+          <span class="tag">{{ item.kind }}</span>
+          {% if item.release %}<span class="mono">{{ item.release }}</span>{% endif %}
+        </div>
+        {% if item.blocked_by %}
+        {# The blocker is the only reason this card is in this column, so it
+           belongs on the card rather than one click away. #}
+        <div class="wi__blocked">{{ ui.icon('lock', 11, 2) }}<span>{{ item.blocked_by }}</span></div>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="board__none">없음</p>
+    {% endif %}
+  </section>
+  {% endfor %}
+</div>
+
+{% if can_write %}
+<section class="panel" style="margin-top:14px">
+  <div class="panel__head">
+    <div class="panel__title">요청 올리기</div>
+    <div class="panel__sub">키는 <span class="mono">REQ-n</span> 으로 자동 부여된다</div>
+  </div>
+  <form method="post" action="/work" class="wi-form">
+    <label class="field">제목
+      <input class="input" name="title" value="{{ draft.title or '' }}" required
+             maxlength="200" placeholder="무엇이 필요한가 — 한 줄로">
+    </label>
+    <label class="field">내용 (선택)
+      <textarea class="input" name="body" rows="4"
+                placeholder="왜 필요한지, 지금은 어떻게 하고 있는지">{{ draft.body or '' }}</textarea>
+    </label>
+    <div class="row-actions">
+      <button class="btn btn--primary" type="submit">요청 올리기</button>
+    </div>
+  </form>
+</section>
+{% endif %}
+{% endif %}
+{% endblock %}

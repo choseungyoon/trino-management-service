@@ -492,9 +492,11 @@ _REQUIRED_OBJECTS = (
     ("010_resource_group_revision.sql", "action", "RESOURCE_GROUP_CHANGE"),
     ("012_fleet_job.sql", "table", "fleet_job_run"),
     ("012_fleet_job.sql", "action", "FLEET_JOB_RUN"),
-    # 011 and 013 only grant; a privilege is not an object, so there is nothing
-    # here to look for. Missing one shows up as a permission error on the first
-    # write, which names itself clearly enough.
+    ("014_work_board.sql", "table", "work_item"),
+    ("014_work_board.sql", "table", "work_item_comment"),
+    # 011, 013 and 015 only grant; a privilege is not an object, so there is
+    # nothing here to look for. Missing one shows up as a permission error on
+    # the first write, which names itself clearly enough.
 )
 
 _CONSTRAINT_FOR = {

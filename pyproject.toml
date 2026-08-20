@@ -33,6 +33,9 @@ tms-api = "tms.api.main:run"
 tms-collector = "tms.collector.main:run"
 # Validate a deployment before restarting it. See DECISIONS.md D-008.
 tms-config-check = "tms.core.configcheck:run"
+# Write the work board out as docs/WORK_BOARD.md so it can be committed and
+# read from outside the network the board lives in. See tms/work/export.py.
+tms-work-export = "tms.work.export:run"
 
 [tool.setuptools.packages.find]
 where = ["src"]
