@@ -127,6 +127,7 @@ TMS가 완전히 다운되어도 모든 쿼리는 정상 실행되어야 한다.
 
 | 파일 | 언제 읽나 |
 |---|---|
+| `docs/runbooks/onsite-checklist.md` | **사내에 들어가는 날 이걸 연다.** 배포→검증 순서와 게이트만. 명령 원본은 각 런북 |
 | `docs/runbooks/deploy.md` | 사내 실환경 최초 배포 (git pull → DB → 설정 → systemd → Trino 연결) |
 | `docs/runbooks/upgrade-r2-r3.md` | 운영 중 업데이트 배포 |
 | `docs/runbooks/db-setup.md` | PostgreSQL 초기 구축 |

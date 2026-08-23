@@ -136,6 +136,30 @@
 - [ ] **쿼리 실패 0건 확인** (FR-FL-03 의 AC)
 - [ ] 최소 `2 × shutdown.grace-period` + 실행 중 task 시간이 걸린다 — 기본값이면 4분 이상. **그 전에 "멈췄다"고 판단하지 말 것**
 
+### ⭐ V-7. 작업 보드 `[내일]`
+
+`runbooks/onsite-checklist.md` §5.
+
+- [ ] `/work` — 6개 칸이 빈 칸까지 보인다
+- [ ] 댓글 · 상태 변경 · 요청 올리기 (`REQ-1` 부여)
+- [ ] `/work.md` 가 `tms-work-export` 결과와 같다
+- [ ] 조회자 계정: 보드는 보이고 **요청 폼은 안 보인다**
+- [ ] `tms_app` 으로 `UPDATE work_item_comment` / `DELETE work_item_event` → **둘 다 실패**
+
+### V-8. 벤치마크 `[Gateway + ExecuteQuery 준비된 경우]`
+
+`runbooks/onsite-checklist.md` §6. **거부되는 것부터 확인한다** — 정상 동작을 먼저 보면
+보호 장치가 도는지 알 수 없다.
+
+- [ ] 운영 클러스터에서 거부되고, 이유가 문장으로 나온다
+- [ ] `curl` 로 폼을 직접 POST 해도 거부된다 (버튼 잠금은 보호 장치가 아니다)
+- [ ] 사람이 제외한 뒤 초록 → 실행 → 쿼리별 중앙값이 채워진다
+- [ ] 감사 로그에 `BENCHMARK_RUN` 이 사유와 함께 남는다
+- [ ] 다른 클러스터에서 같은 세트 실행 → 비교 화면에 쿼리별 차이
+- [ ] `tms_app` 으로 `UPDATE benchmark_result` / `DELETE` → **둘 다 실패**
+
+> **여기서 실행이 되면 즉시 멈춘다.** FR-BM-04 는 타협 불가 항목이다.
+
 ### V-6. 감사 로그 append-only 재확인
 
 - [ ] `tms_app` 으로 `UPDATE restart_sequence_event` / `DELETE` → **둘 다 실패해야 한다**

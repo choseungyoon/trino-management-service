@@ -100,6 +100,13 @@ SEED = (
      BLOCKED, "R4", "OPA 미배포 (NEXT_STEPS W-3)", "docs/REQUIREMENTS.md"),
 
     # -------------------------------------------------------------- tasks
+    ("W-8", TASK, "마이그레이션 014~017 적용 + 보드 초기 적재",
+     PLANNED, "R2", None, "docs/runbooks/onsite-checklist.md"),
+    ("V-7", TASK, "작업 보드 사내 검증 (화면 + append-only)",
+     PLANNED, "R2", None, "docs/runbooks/onsite-checklist.md"),
+    ("V-8", TASK, "벤치마크 사내 검증 — 거부 경로부터",
+     BLOCKED, "R2", "Gateway 연동 + ExecuteQuery 부여가 선행",
+     "docs/runbooks/onsite-checklist.md"),
     ("W-1", TASK, "NFR-PERF-03 프로덕션 실측 (피크 시간대)",
      PLANNED, "R1", "사람이 돌려야 한다 — R1 DoD 마지막 항목",
      "docs/NEXT_STEPS.md"),

@@ -1,0 +1,53 @@
+# flyctl launch added from .gitignore
+# Secrets — NFR-NO-SECRET. Never commit credentials.
+**/config.secret.yaml
+**/config.secret.yml
+**/*.secret.yaml
+**/*.secret.yml
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/*.keystore
+**/*.jks
+
+# Python (FastAPI backend, 3.9+)
+**/__pycache__
+**/*.py[cod]
+**/*.egg-info
+**/.venv
+**/venv
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/.coverage
+**/htmlcov
+
+# Node / frontend
+**/node_modules
+**/dist
+**/build
+
+# Editor / OS
+**/.DS_Store
+**/.idea
+**/*.swp
+
+# Local agent state (shared config under .claude/ is tracked)
+**/.claude/settings.local.json
+
+# Third-party design skills — reproducible, keep 7MB of vendored files out of
+# the repo. Reinstall: `npx skills add Leonxlnx/taste-skill` + `npx impeccable install`
+**/.claude/skills
+**/.agents
+**/.codex
+**/.impeccable
+**/PRODUCT.md.tmp
+
+# Disposable local verification rig (Trino/PostgreSQL/certs) — never commit
+**/scratchpad
+
+# flyctl launch added from .pytest_cache/.gitignore
+# Created by pytest automatically.
+.pytest_cache/**/*
+fly.toml

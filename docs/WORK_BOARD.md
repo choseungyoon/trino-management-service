@@ -4,14 +4,14 @@
 > 상태의 주인은 TMS 의 보드이고, **근거의 주인은 각 항목이 가리키는 문서**다.
 > 둘이 어긋나면 문서가 이긴다.
 
-> 생성 시각: 2026-08-20 23:11 UTC
+> 생성 시각: 2026-08-23 14:08 UTC
 
 | 상태 | 건수 |
 |---|---|
 | Needs a decision | 1 |
-| Blocked | 13 |
+| Blocked | 14 |
 | In progress | 1 |
-| Planned | 1 |
+| Planned | 3 |
 | Done | 18 |
 | Dropped | 0 |
 
@@ -25,7 +25,7 @@
 |---|---|---|---|---|---|
 | `D-2` | restart_mode 를 ansible 로 전환할 것인가 | decision | — | 사람 결정 — TMS 호스트가 전 노드 SSH 를 갖는다 | `docs/NEXT_STEPS.md` |
 
-## Blocked (13)
+## Blocked (14)
 
 > Waiting on something named — see what it is blocked by.
 
@@ -41,6 +41,7 @@
 | `FR-OPA` | OPA 정책 상태 가시성 | requirement | R4 | OPA 미배포 (NEXT_STEPS W-3) | `docs/REQUIREMENTS.md` |
 | `FR-ROUTING-SVC` | External Routing Service | requirement | R4 | TMS 가 쿼리 경로에 들어간다 · 분기 근거가 될 워크로드 데이터 없음 | `docs/BACKLOG.md` |
 | `FR-SLO` | SLO / Error Budget | requirement | R2 | 목표값(사람 결정) + 워크로드 데이터 미수집 | `docs/REQUIREMENTS.md` |
+| `V-8` | 벤치마크 사내 검증 — 거부 경로부터 | task | R2 | Gateway 연동 + ExecuteQuery 부여가 선행 | `docs/runbooks/onsite-checklist.md` |
 | `W-2` | Gateway API 역할 계정 발급 | task | R2 | 타 팀 | `docs/NEXT_STEPS.md` |
 | `W-3` | 워커 OPA 배포 | task | R3 | 타 팀 · V-5(graceful shutdown 실증) 선행 | `docs/NEXT_STEPS.md` |
 | `W-6` | Prometheus + Grafana / 로그 수집 | task | R2 | 타 팀 · FR-BM-02 와 FR-LOG-DEEPLINK 의 선행 | `docs/NEXT_STEPS.md` |
@@ -53,13 +54,15 @@
 |---|---|---|---|---|---|
 | `W-5` | Gateway DB 를 VM1 에서 분리 + HA | task | — | 인프라 — 사용자가 처리 중 | `docs/NEXT_STEPS.md` |
 
-## Planned (1)
+## Planned (3)
 
 > Agreed and unblocked, not started.
 
 | 키 | 제목 | 종류 | 릴리스 | 막는 것 | 근거 문서 |
 |---|---|---|---|---|---|
+| `V-7` | 작업 보드 사내 검증 (화면 + append-only) | task | R2 | — | `docs/runbooks/onsite-checklist.md` |
 | `W-1` | NFR-PERF-03 프로덕션 실측 (피크 시간대) | task | R1 | 사람이 돌려야 한다 — R1 DoD 마지막 항목 | `docs/NEXT_STEPS.md` |
+| `W-8` | 마이그레이션 014~017 적용 + 보드 초기 적재 | task | R2 | — | `docs/runbooks/onsite-checklist.md` |
 
 ## Done (18)
 
@@ -94,4 +97,4 @@ _없음._
 
 ---
 
-**열린 항목 16건.** 착수 전에 이 파일을 읽는다 — 특히 "Needs a decision" 은 사람이 답하기 전까지 아무것도 움직이지 않는 항목이다.
+**열린 항목 19건.** 착수 전에 이 파일을 읽는다 — 특히 "Needs a decision" 은 사람이 답하기 전까지 아무것도 움직이지 않는 항목이다.
