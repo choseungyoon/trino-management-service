@@ -66,7 +66,7 @@ def main(port=None):
             "this repository). Set it before hosting this anywhere.")
 
     app, _trino = build_app(workload_enabled=True, resource_groups=True,
-                            fleet_jobs=True,
+                            fleet_jobs=True, benchmark=True,
                             password=password, session_secret=secret)
 
     scheme = "https" if tls else "http"
@@ -77,6 +77,9 @@ def main(port=None):
     print("")
     print("  Resource Groups is at /clusters/prod-a/resource-groups")
     print("  Fleet jobs are at    /clusters/prod-a/fleet")
+    print("  Work Board is at     /work")
+    print("  Benchmark is at      /clusters/prod-a/benchmark  (prod-b is refused")
+    print("                       on purpose - it is still in rotation)")
     print("  prod-b deliberately has no rows loaded, so you can see that state.")
     print("")
     print("  Nothing is persisted; restarting resets the tree.")
