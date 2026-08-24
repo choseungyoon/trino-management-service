@@ -136,6 +136,18 @@
 - [ ] **쿼리 실패 0건 확인** (FR-FL-03 의 AC)
 - [ ] 최소 `2 × shutdown.grace-period` + 실행 중 task 시간이 걸린다 — 기본값이면 4분 이상. **그 전에 "멈췄다"고 판단하지 말 것**
 
+### ⭐ V-9. 리소스 그룹 편집 `[내일 · 마이그레이션 010/011 이 선행]`
+
+`runbooks/onsite-checklist.md` §6. **영향 없는 그룹 하나로 먼저 연습한다** — 이 화면의 쓰기는
+쿼리 수용 제어를 바꾸고, 10초 안에 반영되며, 재시작이라는 관문이 없다.
+
+- [ ] Trino 가 이미 `db` 매니저인지 먼저 확인 (아니면 고칠 대상이 없다)
+- [ ] `tms_app` 에 `trino_resource_groups` schema 권한 (3줄 GRANT)
+- [ ] 값 수정 → 10초 내 반영 · 잘못된 값 → 거부되고 입력이 사라지지 않는다
+- [ ] 리비전 · 되돌리기 · 감사 `RESOURCE_GROUP_CHANGE`/`REVERT`
+- [ ] `user_group_regex` 셀렉터 → **경고가 뜬다** (group provider 없음)
+- [ ] `tms_app` 으로 `UPDATE`/`DELETE resource_group_revision` → **둘 다 실패**
+
 ### ⭐ V-7. 작업 보드 `[내일]`
 
 `runbooks/onsite-checklist.md` §5.

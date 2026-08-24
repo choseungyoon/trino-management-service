@@ -17,22 +17,22 @@ GRANT USAGE, SELECT ON SEQUENCE resource_group_revision_id_seq TO :"app_role";
 COMMIT;
 
 -- ---------------------------------------------------------------------------
--- The other half of FR-WL-08 lives in a different schema, and deliberately in
--- a different role (DESIGN_WL07.md H-1).
+-- The other half of FR-WL-08 lives in a different schema: the tables Trino
+-- reads to decide whether to admit a query. Run this once, as the owner:
 --
--- Trino's coordinator reads `trino_resource_groups` with a read-only account.
--- TMS writes it with its own, so "who changed this group" is answerable at the
--- database session level and not only from the audit table. Run this once,
--- substituting your own password, and set it as
--- `resource_groups.write_url` (or TMS_RESOURCE_GROUP_WRITE_URL):
---
---   CREATE ROLE tms_rg_writer WITH LOGIN PASSWORD '<...>';
---   GRANT USAGE ON SCHEMA trino_resource_groups TO tms_rg_writer;
+--   GRANT USAGE ON SCHEMA trino_resource_groups TO tms_app;
 --   GRANT SELECT, INSERT, UPDATE, DELETE
---       ON ALL TABLES IN SCHEMA trino_resource_groups TO tms_rg_writer;
+--       ON ALL TABLES IN SCHEMA trino_resource_groups TO tms_app;
 --   GRANT USAGE, SELECT ON ALL SEQUENCES
---       IN SCHEMA trino_resource_groups TO tms_rg_writer;
+--       IN SCHEMA trino_resource_groups TO tms_app;
 --
--- ⛔ Do not grant this role anything in `public`. It exists to touch the tables
--- Trino reads to admit queries, and nothing else.
+-- ⛔ `tms_app`, not a separate writer role. The design called for one
+-- (DESIGN_WL07.md H-1) and implementation withdrew it: two accounts are two
+-- connections, and two connections cannot be one transaction. Sharing the
+-- connection is what makes the change and its revision snapshot commit or fail
+-- together - a change with no snapshot cannot happen. "Who changed this" is
+-- already answered by the audit table.
+--
+-- Full procedure, including the Trino-side file -> db transition:
+-- docs/runbooks/resource-groups-db.md
 -- ---------------------------------------------------------------------------

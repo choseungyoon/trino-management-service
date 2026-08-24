@@ -100,7 +100,9 @@ SEED = (
      BLOCKED, "R4", "OPA 미배포 (NEXT_STEPS W-3)", "docs/REQUIREMENTS.md"),
 
     # -------------------------------------------------------------- tasks
-    ("W-8", TASK, "마이그레이션 014~017 적용 + 보드 초기 적재",
+    ("W-8", TASK, "마이그레이션 010~017 적용 + 보드 초기 적재",
+     PLANNED, "R2", None, "docs/runbooks/onsite-checklist.md"),
+    ("V-9", TASK, "리소스 그룹 편집 사내 검증 (010/011 선행)",
      PLANNED, "R2", None, "docs/runbooks/onsite-checklist.md"),
     ("V-7", TASK, "작업 보드 사내 검증 (화면 + append-only)",
      PLANNED, "R2", None, "docs/runbooks/onsite-checklist.md"),
