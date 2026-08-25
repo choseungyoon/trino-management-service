@@ -88,6 +88,7 @@ def compare(baseline: Dict[str, Any], candidate: Dict[str, Any]) -> Dict[str, An
 
     left = summarise_run(baseline)
     right = summarise_run(candidate)
+    edited = _edited_between(baseline, candidate)
 
     rows: List[Dict[str, Any]] = []
     for name in sorted(set(left) | set(right)):
@@ -100,6 +101,10 @@ def compare(baseline: Dict[str, Any], candidate: Dict[str, Any]) -> Dict[str, An
             "delta_percent": None,
             "verdict": SAME,
         }
+        # ⛔ Same set, same name, different SQL. Since FR-BM-06 a set can be
+        # edited between two runs, and without this the table would show a
+        # confident percentage for two different statements.
+        row["statement_changed"] = name in edited
         if a is None:
             row["verdict"] = ONLY_CANDIDATE
         elif b is None:
@@ -141,6 +146,25 @@ def compare(baseline: Dict[str, Any], candidate: Dict[str, Any]) -> Dict[str, An
     }
 
 
+def _edited_between(baseline: Dict[str, Any], candidate: Dict[str, Any]) -> set:
+    """Query names whose SQL differs between the two runs' snapshots.
+
+    Empty when either run kept no snapshot - runs from before 018, whose
+    `queries` column defaulted to empty. "Cannot tell" and "did not change"
+    are different answers and only one of them is honest here.
+    """
+    left = _statements(baseline)
+    right = _statements(candidate)
+    if not left or not right:
+        return set()
+    return {name for name in set(left) & set(right) if left[name] != right[name]}
+
+
+def _statements(run: Dict[str, Any]) -> Dict[str, str]:
+    return {q.get("name"): q.get("sql") for q in (run.get("queries") or [])
+            if q.get("name")}
+
+
 def _side(run: Dict[str, Any]) -> Dict[str, Any]:
     return {"id": run.get("id"), "cluster": run.get("cluster"),
             "label": run.get("label"), "state": run.get("state"),
@@ -162,6 +186,12 @@ def _warnings(baseline: Dict[str, Any], candidate: Dict[str, Any]) -> List[str]:
             warnings.append(
                 "The {} run (#{}) ended {}, so its set may be "
                 "incomplete.".format(label, run.get("id"), run.get("state")))
+    edited = sorted(_edited_between(baseline, candidate))
+    if edited:
+        warnings.append(
+            "The statement changed between these two runs for: {}. Those rows "
+            "compare two different queries, not two runs of one.".format(
+                ", ".join(edited)))
     if baseline.get("repetitions") != candidate.get("repetitions"):
         warnings.append(
             "The two runs used different repetition counts ({} and {}). The "

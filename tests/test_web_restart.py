@@ -498,6 +498,12 @@ class EveryScreenTest(unittest.IsolatedAsyncioTestCase):
         # A work item that the seeded board actually has, so the detail page
         # renders its timeline rather than a 404 the sweep would accept.
         "key": "W-1",
+        # The benchmark query set the harness below seeds, and the query in it.
+        # `set_key` rather than `key` precisely so the two cannot collide: a
+        # board key is uppercase and a set key may not be, so one value could
+        # never render both screens.
+        "set_key": "smoke",
+        "name": "scan",
     }
 
     #: Routes that legitimately answer with something other than 200.
@@ -547,6 +553,11 @@ class EveryScreenTest(unittest.IsolatedAsyncioTestCase):
         # The benchmark start form. `reason` above is already in the body.
         "query_set": "smoke",
         "repetitions": "1",
+        # Query set editing (FR-BM-06). `name` above doubles as the query name.
+        "set_key": "smoke",
+        "statement": "SELECT 1",
+        "position": "0",
+        "original_name": "",
     }
 
     def _app(self):

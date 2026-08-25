@@ -149,26 +149,19 @@ benchmark:
   # finishing the previous one.
   pause_seconds: 1
 
-  # ⛔ Nothing ships here, and that is deliberate. A default set would have to
-  # name a catalog, and which catalogs exist is a fact about this deployment -
-  # `tpch` is present on a stock Trino and absent on plenty of real ones. A
-  # shipped set that fails on first use teaches the operator the feature is
-  # broken.
+  # ⛔ Query sets are NOT here. They were until FR-BM-06; they now live in the
+  # database and an administrator edits them at /benchmarks/sets, so a new
+  # query does not need a deploy. `benchmark.query_sets` in this file is
+  # REFUSED at startup rather than ignored - a set left behind here would be a
+  # second source for the same thing, and the console's copy would win
+  # silently. See DECISIONS.md D-014.
   #
-  # Statements must be READ-ONLY (SELECT / WITH / SHOW / EXPLAIN / DESCRIBE /
-  # VALUES / TABLE) and a single statement each. Not because a write benchmark
-  # is illegitimate, but because these run N times unattended against a cluster
-  # whose defining property at that moment is that nobody is watching it.
-  # Anything else is refused at startup, not mid-run.
-  query_sets: {}
-  #   adhoc:
-  #     title: "Ad-hoc profile"
-  #     description: "Superset 대시보드가 실제로 던지는 모양의 쿼리"
-  #     queries:
-  #       - name: scan_narrow
-  #         sql: "SELECT count(*) FROM hive.reporting.events WHERE dt = DATE '2026-08-01'"
-  #       - name: join_three
-  #         sql: "SELECT ... FROM ... JOIN ... JOIN ..."
+  # What did not change: statements must be READ-ONLY (SELECT / WITH / SHOW /
+  # EXPLAIN / DESCRIBE / VALUES / TABLE) and a single statement each. Not
+  # because a write benchmark is illegitimate, but because these run N times
+  # unattended against a cluster whose defining property at that moment is
+  # that nobody is watching it. Checked when the query is saved, and again
+  # immediately before each execution.
 
 fleet:
   # FR-FL-01 / FR-FL-03 — node inventory and graceful shutdown.

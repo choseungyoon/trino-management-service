@@ -1292,9 +1292,178 @@ def register(app, service, config, authenticator, codec, session_cookie: str,
     def _benchmark_or_error(request: Request, principal: Principal):
         if benchmark is None:
             return _error_page(request, principal, NotFound(
-                "The benchmark harness is off. Set benchmark.enabled and "
-                "declare benchmark.query_sets."))
+                "The benchmark harness is off. Set benchmark.enabled."))
         return None
+
+    # ── query sets (FR-BM-06) ──────────────────────────────────────────
+    #
+    # ⛔ Registered before `/benchmarks/{run_id}`. FastAPI matches in
+    # registration order, so the other way round `/benchmarks/sets` is a run
+    # whose id is the word "sets", and the 404 blames the set rather than the
+    # routing table.
+    #
+    # This is not a SQL editor (CLAUDE.md non-goal). Nothing below ever
+    # displays a result row - the only output of running one of these is a
+    # column of milliseconds.
+
+    def _sets_redirect(key: Optional[str] = None) -> str:
+        return ("/benchmarks/sets/" + _quote(key)) if key else "/benchmarks/sets"
+
+    @app.get("/benchmarks/sets", response_class=HTMLResponse,
+             include_in_schema=False)
+    def benchmark_sets_page(request: Request):
+        principal, claims = principal_or_redirect(request)
+        if claims is None:
+            return principal
+        unavailable = _benchmark_or_error(request, principal)
+        if unavailable is not None:
+            return unavailable
+        try:
+            data = benchmark.sets(principal)
+        except ApiError as exc:
+            return _error_page(request, principal, exc)
+        context = base_context(request, principal, "benchmark")
+        context.update({"sets": data["sets"], "can_edit": data["can_edit"],
+                        "max_queries": data["max_queries"], "envelope": None})
+        return render("benchmark_sets.html", context)
+
+    @app.post("/benchmarks/sets", include_in_schema=False)
+    def benchmark_set_save(request: Request, set_key: str = Form(""),
+                           title: str = Form(""), description: str = Form(""),
+                           reason: str = Form("")):
+        principal, claims = principal_or_redirect(request)
+        if claims is None:
+            return principal
+        unavailable = _benchmark_or_error(request, principal)
+        if unavailable is not None:
+            return unavailable
+        try:
+            saved = benchmark.save_set(principal, key=set_key.strip(), title=title,
+                                       description=description, reason=reason)
+        except ApiError as exc:
+            response = RedirectResponse(_sets_redirect(), status_code=303)
+            _flash(response, "bad", exc.message)
+            return response
+        response = RedirectResponse(_sets_redirect(saved["key"]), status_code=303)
+        _flash(response, "good", "Saved {}.".format(saved["key"]))
+        return response
+
+    @app.get("/benchmarks/sets/{set_key}", response_class=HTMLResponse,
+             include_in_schema=False)
+    def benchmark_set_page(request: Request, set_key: str,
+                           edit: Optional[str] = None):
+        principal, claims = principal_or_redirect(request)
+        if claims is None:
+            return principal
+        unavailable = _benchmark_or_error(request, principal)
+        if unavailable is not None:
+            return unavailable
+        try:
+            data = benchmark.query_set(principal, set_key)
+        except ApiError as exc:
+            return _error_page(request, principal, exc)
+        context = base_context(request, principal, "benchmark")
+        context.update({
+            "set": data["set"],
+            "runs": views.benchmark_rows(data["runs"]),
+            "can_edit": data["can_edit"],
+            "max_queries": data["max_queries"],
+            # Which row is open as a form. One at a time: two open editors on
+            # one set is two people about to overwrite each other.
+            "editing": edit,
+            "clusters": sorted(config.clusters),
+            "envelope": None,
+        })
+        return render("benchmark_set.html", context)
+
+    @app.post("/benchmarks/sets/{set_key}/delete", include_in_schema=False)
+    def benchmark_set_delete(request: Request, set_key: str, reason: str = Form("")):
+        principal, claims = principal_or_redirect(request)
+        if claims is None:
+            return principal
+        unavailable = _benchmark_or_error(request, principal)
+        if unavailable is not None:
+            return unavailable
+        try:
+            benchmark.delete_set(principal, set_key, reason=reason)
+        except ApiError as exc:
+            response = RedirectResponse(_sets_redirect(set_key), status_code=303)
+            _flash(response, "bad", exc.message)
+            return response
+        response = RedirectResponse(_sets_redirect(), status_code=303)
+        _flash(response, "good",
+               "Deleted {}. Past runs and their measurements are "
+               "untouched.".format(set_key))
+        return response
+
+    @app.post("/benchmarks/sets/{set_key}/queries", include_in_schema=False)
+    def benchmark_query_save(request: Request, set_key: str, name: str = Form(""),
+                             title: str = Form(""), statement: str = Form(""),
+                             position: str = Form("0"), reason: str = Form(""),
+                             original_name: str = Form("")):
+        principal, claims = principal_or_redirect(request)
+        if claims is None:
+            return principal
+        unavailable = _benchmark_or_error(request, principal)
+        if unavailable is not None:
+            return unavailable
+        try:
+            benchmark.save_query(
+                principal, set_key, name=name.strip(), title=title,
+                statement=statement, reason=reason,
+                position=_int_or_none(position) or 0,
+                original_name=(original_name.strip() or None))
+        except ApiError as exc:
+            response = RedirectResponse(_sets_redirect(set_key), status_code=303)
+            _flash(response, "bad", exc.message)
+            return response
+        response = RedirectResponse(_sets_redirect(set_key), status_code=303)
+        _flash(response, "good", "Saved {}.".format(name.strip()))
+        return response
+
+    @app.post("/benchmarks/sets/{set_key}/queries/{name}/delete",
+              include_in_schema=False)
+    def benchmark_query_delete(request: Request, set_key: str, name: str,
+                               reason: str = Form("")):
+        principal, claims = principal_or_redirect(request)
+        if claims is None:
+            return principal
+        unavailable = _benchmark_or_error(request, principal)
+        if unavailable is not None:
+            return unavailable
+        response = RedirectResponse(_sets_redirect(set_key), status_code=303)
+        try:
+            benchmark.delete_query(principal, set_key, name, reason=reason)
+        except ApiError as exc:
+            _flash(response, "bad", exc.message)
+        else:
+            _flash(response, "good",
+                   "Removed {}. Its past measurements are still on the run "
+                   "pages.".format(name))
+        return response
+
+    @app.get("/benchmarks/sets/{set_key}/queries/{name}/history",
+             response_class=HTMLResponse, include_in_schema=False)
+    def benchmark_query_history(request: Request, set_key: str, name: str):
+        principal, claims = principal_or_redirect(request)
+        if claims is None:
+            return principal
+        unavailable = _benchmark_or_error(request, principal)
+        if unavailable is not None:
+            return unavailable
+        try:
+            data = benchmark.query_history(principal, set_key, name)
+        except ApiError as exc:
+            return _error_page(request, principal, exc)
+        context = base_context(request, principal, "benchmark")
+        context.update({
+            "set": data["set"],
+            "query": data["query"],
+            "history": views.query_history_rows(data["history"]),
+            "changed": data["changed"],
+            "envelope": None,
+        })
+        return render("benchmark_query_history.html", context)
 
     @app.get("/clusters/{cluster}/benchmark", response_class=HTMLResponse,
              include_in_schema=False)

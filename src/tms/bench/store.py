@@ -22,7 +22,8 @@ from tms.bench.runner import RUNNING, TERMINAL, UNKNOWN
 log = logging.getLogger(__name__)
 
 _RUN_COLUMNS = ("id", "cluster", "query_set", "label", "state", "reason", "actor",
-                "repetitions", "guard", "started_at", "finished_at", "error")
+                "repetitions", "guard", "queries", "started_at", "finished_at",
+                "error")
 
 _RESULT_COLUMNS = ("query_name", "iteration", "trino_query_id", "state", "elapsed_ms",
                    "trino_elapsed_ms", "trino_cpu_ms", "trino_queued_ms",
@@ -55,14 +56,14 @@ class InMemoryBenchmarkRepository:
         return datetime.now(timezone.utc)
 
     def create(self, cluster, query_set, actor, roles, reason, repetitions,
-               guard, label=None):
+               guard, label=None, queries=None):
         if any(r["state"] == RUNNING and r["cluster"] == cluster for r in self.runs):
             raise ActiveRunExists(cluster)
         run = {"id": self._next, "cluster": cluster, "query_set": query_set,
                "label": label, "state": RUNNING, "reason": reason, "actor": actor,
                "actor_roles": list(roles or []), "repetitions": int(repetitions),
-               "guard": dict(guard or {}), "started_at": self._now(),
-               "finished_at": None, "error": None}
+               "guard": dict(guard or {}), "queries": list(queries or []),
+               "started_at": self._now(), "finished_at": None, "error": None}
         self._next += 1
         self.runs.append(run)
         self.results[run["id"]] = []
@@ -96,6 +97,22 @@ class InMemoryBenchmarkRepository:
         return [dict(r) for r in self.runs
                 if r["state"] == RUNNING and (cluster is None or r["cluster"] == cluster)]
 
+    def history_for_query(self, query_set, query_name, limit=100):
+        by_run = {r["id"]: r for r in self.runs}
+        rows = []
+        for run_id, results in self.results.items():
+            run = by_run.get(run_id)
+            if run is None or run["query_set"] != query_set:
+                continue
+            for result in results:
+                if result.get("query_name") != query_name:
+                    continue
+                rows.append(dict(result, run_id=run_id, cluster=run["cluster"],
+                                 label=run.get("label"),
+                                 run_started_at=run["started_at"]))
+        rows.sort(key=lambda r: (r["run_id"], r.get("iteration") or 0), reverse=True)
+        return rows[:limit]
+
     def reconcile_orphans(self):
         return 0
 
@@ -120,17 +137,18 @@ class PostgresBenchmarkRepository:
             raise BenchmarkStoreUnavailable(str(exc))
 
     def create(self, cluster, query_set, actor, roles, reason, repetitions,
-               guard, label=None):
+               guard, label=None, queries=None):
         try:
             with self._cursor() as cursor:
                 cursor.execute(
                     "INSERT INTO benchmark_run"
                     " (cluster, query_set, label, state, reason, actor,"
-                    "  actor_roles, repetitions, guard)"
-                    " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)"
+                    "  actor_roles, repetitions, guard, queries)"
+                    " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb)"
                     " RETURNING id, started_at",
                     (cluster, query_set, label, RUNNING, reason, actor,
-                     list(roles or []), int(repetitions), json.dumps(guard or {})))
+                     list(roles or []), int(repetitions), json.dumps(guard or {}),
+                     json.dumps(list(queries or []))))
                 row = cursor.fetchone()
         except self._psycopg.errors.UniqueViolation:
             # The partial unique index. Two runs on one cluster measure each
@@ -143,7 +161,8 @@ class PostgresBenchmarkRepository:
         return {"id": row[0], "cluster": cluster, "query_set": query_set,
                 "label": label, "state": RUNNING, "reason": reason, "actor": actor,
                 "repetitions": int(repetitions), "guard": dict(guard or {}),
-                "started_at": row[1], "finished_at": None, "error": None}
+                "queries": list(queries or []), "started_at": row[1],
+                "finished_at": None, "error": None}
 
     def add_result(self, run_id, outcome):
         """One row per query execution. Failures are logged, never raised.
@@ -216,6 +235,41 @@ class PostgresBenchmarkRepository:
         return [r for r in self.recent(limit=50, cluster=cluster)
                 if r["state"] == RUNNING]
 
+    def history_for_query(self, query_set, query_name,
+                          limit: int = 100) -> List[Dict[str, Any]]:
+        """Every execution of one named query, newest first (FR-BM-06).
+
+        Scoped to the set, not just the name: `q1` in `nightly` and `q1` in
+        `adhoc` are different statements, and a chart that mixed them would be
+        a chart of nothing.
+
+        The statement itself is deliberately not joined in. It is in
+        `benchmark_run.queries` per run, which is the only copy that is true
+        for that row - the editable one in `benchmark_query` is today's.
+        """
+        columns = ("run_id", "query_name", "iteration", "trino_query_id", "state",
+                   "elapsed_ms", "trino_elapsed_ms", "trino_cpu_ms",
+                   "trino_queued_ms", "processed_rows", "processed_bytes",
+                   "peak_memory_bytes", "error", "occurred_at")
+        try:
+            with self._cursor() as cursor:
+                cursor.execute(
+                    "SELECT {},"
+                    "       r.cluster, r.label, r.started_at"
+                    "  FROM benchmark_result b"
+                    "  JOIN benchmark_run r ON r.id = b.run_id"
+                    " WHERE r.query_set = %s AND b.query_name = %s"
+                    " ORDER BY b.run_id DESC, b.iteration DESC"
+                    " LIMIT %s".format(", ".join("b." + c for c in columns)),
+                    (query_set, query_name, int(limit)))
+                rows = cursor.fetchall() or []
+        except BenchmarkStoreUnavailable:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise BenchmarkStoreUnavailable(str(exc))
+        names = columns + ("cluster", "label", "run_started_at")
+        return [dict(zip(names, row)) for row in rows]
+
     def reconcile_orphans(self) -> int:
         """Mark runs left RUNNING by a previous process as UNKNOWN.
 
@@ -245,5 +299,7 @@ def _run(row) -> Dict[str, Any]:
     run = dict(zip(_RUN_COLUMNS, row))
     guard = run.get("guard")
     run["guard"] = guard if isinstance(guard, dict) else json.loads(guard or "{}")
+    queries = run.get("queries")
+    run["queries"] = queries if isinstance(queries, list) else json.loads(queries or "[]")
     run["is_terminal"] = run["state"] in TERMINAL
     return run

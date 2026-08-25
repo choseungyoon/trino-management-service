@@ -506,6 +506,21 @@ def benchmark_query_rows(run: Dict[str, Any]) -> List[Dict[str, Any]]:
     return rows
 
 
+def query_history_rows(history: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """One row per execution of a single query, newest first (FR-BM-06).
+
+    Not folded to a median, unlike `benchmark_query_rows`. That page answers
+    "how long does this take here"; this one answers "when did it change",
+    and a median hides exactly the outlier that question is about.
+    """
+    rows = []
+    for entry in history or []:
+        row = dict(entry)
+        row["failed"] = entry.get("state") == "FAILED"
+        rows.append(row)
+    return rows
+
+
 def _first_error(run: Dict[str, Any], name: str) -> Optional[str]:
     for result in (run or {}).get("results") or []:
         if result.get("query_name") == name and result.get("error"):

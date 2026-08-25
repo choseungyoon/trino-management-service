@@ -203,17 +203,22 @@ def build_benchmark_service(config: Config, service: TmsService, gateway_client=
 
     Off by default. A benchmark takes a cluster's capacity, and the guard that
     makes that safe (FR-BM-04) needs the Gateway - so this appears only where
-    an administrator has declared query sets and meant it.
+    an administrator switched it on and meant it.
+
+    Unlike before FR-BM-06, being on does not require any sets to exist. The
+    first thing an administrator does here is create one.
     """
     if not getattr(config, "benchmark", None) or not config.benchmark.enabled:
         return None
-    from tms.bench.queryset import build_query_sets
     from tms.bench.runner import BenchmarkRunner
     from tms.bench.service import BenchmarkService
+    from tms.bench.setstore import PostgresQuerySetRepository
     from tms.bench.store import PostgresBenchmarkRepository
 
     try:
-        repository = PostgresBenchmarkRepository(config.database_url.reveal())
+        dsn = config.database_url.reveal()
+        repository = PostgresBenchmarkRepository(dsn)
+        query_sets = PostgresQuerySetRepository(dsn)
     except Exception as exc:  # noqa: BLE001
         log.error("cannot open the benchmark store, so benchmarks are off: %s", exc)
         return None
@@ -242,7 +247,7 @@ def build_benchmark_service(config: Config, service: TmsService, gateway_client=
         repository=repository,
         runner=BenchmarkRunner(sql_client_factory=sql_for, repository=repository,
                                pause_seconds=config.benchmark.pause_seconds),
-        query_sets=build_query_sets(config.benchmark.query_sets),
+        query_sets=query_sets,
         gateway_client=gateway_client,
         stale_threshold=config.collector.stale_threshold_seconds,
     )

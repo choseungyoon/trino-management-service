@@ -147,8 +147,23 @@ class BenchmarkRunner:
             self._forget(run_id)
 
     def _one(self, client, query, iteration: int) -> Dict[str, Any]:
+        from tms.bench.queryset import refuse_statement
         from tms.clients.errors import TrinoClientError
         from tms.clients.sql import QueryFailed
+
+        # ⛔ The allowlist, checked again. The service already refused this
+        # text when it was written (FR-BM-06), so reaching here means the row
+        # was changed underneath - by psql, by a restore, by a migration
+        # somebody wrote. This is the last place before N executions on a
+        # cluster nobody is watching, and it costs a regex.
+        refusal = refuse_statement(query.sql)
+        if refusal is not None:
+            log.error("refusing to benchmark %r: %s", query.name, refusal)
+            outcome = {"query_name": query.name, "iteration": iteration,
+                       "state": FAILED, "trino_query_id": None, "elapsed_ms": 0,
+                       "error": "Refused before execution: {}.".format(refusal)}
+            outcome.update(measurements(None))
+            return outcome
 
         started = time.monotonic()
         try:

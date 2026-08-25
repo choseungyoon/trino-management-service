@@ -497,6 +497,9 @@ _REQUIRED_OBJECTS = (
     ("016_benchmark.sql", "table", "benchmark_run"),
     ("016_benchmark.sql", "table", "benchmark_result"),
     ("016_benchmark.sql", "action", "BENCHMARK_RUN"),
+    ("018_benchmark_query_sets.sql", "table", "benchmark_query_set"),
+    ("018_benchmark_query_sets.sql", "table", "benchmark_query"),
+    ("018_benchmark_query_sets.sql", "action", "BENCHMARK_QUERY_CHANGE"),
     # 011, 013, 015 and 017 only grant; a privilege is not an object, so there is
     # nothing here to look for. Missing one shows up as a permission error on
     # the first write, which names itself clearly enough.

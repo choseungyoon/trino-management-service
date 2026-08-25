@@ -46,6 +46,8 @@ SEED = (
      DONE, "R3", None, "docs/DECISIONS.md"),
     ("D-013", DECISION, "작업 보드. 상태는 보드가, 근거는 문서가 갖는다",
      DONE, "R2", None, "docs/DECISIONS.md"),
+    ("D-014", DECISION, "벤치마크 쿼리 세트를 설정에서 DB 로. 화면에서 편집한다",
+     DONE, "R2", None, "docs/DECISIONS.md"),
     ("D-2", DECISION, "restart_mode 를 ansible 로 전환할 것인가",
      NEEDS_DECISION, None,
      "사람 결정 — TMS 호스트가 전 노드 SSH 를 갖는다", "docs/NEXT_STEPS.md"),
@@ -73,6 +75,8 @@ SEED = (
      DONE, "R2", None, "docs/runbooks/benchmark.md"),
     ("FR-BM-03", REQUIREMENT, "벤치마크 실행 간 비교",
      DONE, "R2", None, "docs/runbooks/benchmark.md"),
+    ("FR-BM-06", REQUIREMENT, "쿼리 세트를 화면에서 관리 + 쿼리별 실행 이력",
+     DONE, "R2", None, "docs/DECISIONS.md"),
     ("FR-BM-02", REQUIREMENT, "컴포넌트별 CPU/Net/Disk 시계열 수집",
      BLOCKED, "R2", "Prometheus 미구축 (NEXT_STEPS W-6)", "docs/REQUIREMENTS.md"),
     ("FR-BM-05", REQUIREMENT, "프로덕션 쿼리 샘플 기반 세트 생성",
@@ -100,14 +104,19 @@ SEED = (
      BLOCKED, "R4", "OPA 미배포 (NEXT_STEPS W-3)", "docs/REQUIREMENTS.md"),
 
     # -------------------------------------------------------------- tasks
-    ("W-8", TASK, "마이그레이션 010~017 적용 + 보드 초기 적재",
-     PLANNED, "R2", None, "docs/runbooks/onsite-checklist.md"),
+    # 010~017 은 2026-08-25 사내 적용 완료. 018/019 는 그 뒤에 FR-BM-06 과 함께
+    # 생겼으므로 이 항목은 아직 끝나지 않았다.
+    ("W-8", TASK, "마이그레이션 010~019 적용 + 보드 초기 적재",
+     IN_PROGRESS, "R2", "010~017 적용 완료 · 018/019 미적용",
+     "docs/runbooks/onsite-checklist.md"),
     ("V-9", TASK, "리소스 그룹 편집 사내 검증 (010/011 선행)",
      PLANNED, "R2", None, "docs/runbooks/onsite-checklist.md"),
     ("V-7", TASK, "작업 보드 사내 검증 (화면 + append-only)",
-     PLANNED, "R2", None, "docs/runbooks/onsite-checklist.md"),
+     DONE, "R2", None, "docs/runbooks/onsite-checklist.md"),
+    # Gateway 설정은 2026-08-25 완료. 남은 선행은 ExecuteQuery 와, FR-BM-06 이
+    # 새로 들여온 018/019.
     ("V-8", TASK, "벤치마크 사내 검증 — 거부 경로부터",
-     BLOCKED, "R2", "Gateway 연동 + ExecuteQuery 부여가 선행",
+     BLOCKED, "R2", "ExecuteQuery 부여 + 마이그레이션 018/019",
      "docs/runbooks/onsite-checklist.md"),
     ("W-1", TASK, "NFR-PERF-03 프로덕션 실측 (피크 시간대)",
      PLANNED, "R1", "사람이 돌려야 한다 — R1 DoD 마지막 항목",

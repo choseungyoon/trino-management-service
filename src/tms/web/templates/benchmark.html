@@ -44,13 +44,16 @@
 <section class="panel">
   <div class="panel__head">
     <div class="panel__title">실행</div>
-    <div class="panel__sub">쿼리 세트는 설정에 선언된 것만 고를 수 있다</div>
+    <div class="panel__sub"><a href="/benchmarks/sets">쿼리 세트</a> 화면에서 만든 것만 고를 수 있다</div>
   </div>
   <form method="post" action="/clusters/{{ cluster }}/benchmark" class="wi-form">
     <label class="field">쿼리 세트
-      <select class="input" name="query_set" required>
+      <select class="input" name="query_set" required
+              {% if not bench.query_sets %}disabled{% endif %}>
         {% for qs in bench.query_sets %}
         <option value="{{ qs.key }}">{{ qs.title }} — {{ qs.queries | length }} queries</option>
+        {% else %}
+        <option value="">세트가 없다</option>
         {% endfor %}
       </select>
     </label>
@@ -76,6 +79,12 @@
   </form>
   {% if not bench.guard.ok %}
   <p class="panel__note">버튼은 잠겨 있지만 그것이 보호 장치는 아니다 — 서버가 같은 검사를 다시 하고 거부한다.</p>
+  {% endif %}
+  {% if not bench.query_sets %}
+  <p class="panel__note">
+    쿼리 세트가 하나도 없다. TMS 는 기본 세트를 갖고 오지 않는다 —
+    <a href="/benchmarks/sets">쿼리 세트</a> 화면에서 만든다.
+  </p>
   {% endif %}
 </section>
 {% endif %}

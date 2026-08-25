@@ -69,6 +69,33 @@ class StubTrino:
         return {"queryId": query_id, "query": "SELECT 1", "state": "RUNNING"}
 
 
+
+# The demo's query sets. Since FR-BM-06 these live in the database, not in
+# config - so the demo seeds them into the in-memory repository instead of
+# declaring them under `benchmark:`, which the config loader now rejects.
+DEMO_QUERY_SETS = {
+        # Named for what they measure, not for TPC-H table names: the
+        # point of the demo is that a set is something a person wrote
+        # for their own cluster.
+        "adhoc": {
+            "title": "Ad-hoc profile",
+            "description": "Superset 대시보드가 실제로 던지는 모양의 쿼리 4건",
+            "queries": [
+                {"name": "scan_narrow", "sql": "SELECT count(*) FROM tpch.tiny.orders"},
+                {"name": "join_three", "sql": (
+                    "SELECT n.name, count(*) FROM tpch.tiny.orders o "
+                    "JOIN tpch.tiny.customer c ON c.custkey = o.custkey "
+                    "JOIN tpch.tiny.nation n ON n.nationkey = c.nationkey "
+                    "GROUP BY n.name")},
+                {"name": "window_rank", "sql": (
+                    "SELECT custkey, rank() OVER (ORDER BY total DESC) "
+                    "FROM (SELECT custkey, sum(totalprice) AS total "
+                    "FROM tpch.tiny.orders GROUP BY custkey)")},
+                {"name": "wide_scan", "sql": "SELECT * FROM tpch.tiny.lineitem"},
+            ],
+        },
+    } if benchmark else {}
+
 def _query(qid, user, source, elapsed_ms, long_running=False, state="RUNNING"):
     return {
         "query_id": qid, "state": state, "user": user, "source": source,
@@ -150,28 +177,6 @@ def build_app(workload_enabled=False, seed=None, gateway=None,
         "benchmark": {
             "enabled": bool(benchmark),
             "default_repetitions": 3,
-            "query_sets": {
-                # Named for what they measure, not for TPC-H table names: the
-                # point of the demo is that a set is something a person wrote
-                # for their own cluster.
-                "adhoc": {
-                    "title": "Ad-hoc profile",
-                    "description": "Superset 대시보드가 실제로 던지는 모양의 쿼리 4건",
-                    "queries": [
-                        {"name": "scan_narrow", "sql": "SELECT count(*) FROM tpch.tiny.orders"},
-                        {"name": "join_three", "sql": (
-                            "SELECT n.name, count(*) FROM tpch.tiny.orders o "
-                            "JOIN tpch.tiny.customer c ON c.custkey = o.custkey "
-                            "JOIN tpch.tiny.nation n ON n.nationkey = c.nationkey "
-                            "GROUP BY n.name")},
-                        {"name": "window_rank", "sql": (
-                            "SELECT custkey, rank() OVER (ORDER BY total DESC) "
-                            "FROM (SELECT custkey, sum(totalprice) AS total "
-                            "FROM tpch.tiny.orders GROUP BY custkey)")},
-                        {"name": "wide_scan", "sql": "SELECT * FROM tpch.tiny.lineitem"},
-                    ],
-                },
-            } if benchmark else {},
         },
         "portal": {
             # Overridable so a hosted demo does not run on a password that is
@@ -261,6 +266,7 @@ def build_app(workload_enabled=False, seed=None, gateway=None,
     if benchmark:
         from tms.bench.queryset import build_query_sets
         from tms.bench.service import BenchmarkService
+        from tms.bench.setstore import InMemoryQuerySetRepository
         from tms.bench.store import InMemoryBenchmarkRepository
 
         bench_repository = InMemoryBenchmarkRepository()
@@ -341,7 +347,8 @@ def build_app(workload_enabled=False, seed=None, gateway=None,
         bench_service = BenchmarkService(
             config=config, snapshots=repository, audit_guard=AuditGuard(audit),
             repository=bench_repository, runner=DemoRunner(),
-            query_sets=build_query_sets(config.benchmark.query_sets),
+            query_sets=InMemoryQuerySetRepository(
+                build_query_sets(DEMO_QUERY_SETS)),
             gateway_client=DemoGateway())
 
     # The work board, seeded from the documents and given the kind of activity

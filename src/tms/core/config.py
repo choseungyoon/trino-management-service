@@ -253,10 +253,14 @@ class ResourceGroupStoreConfig:
 class BenchmarkConfig:
     """Declared query sets and their limits (FR-BM-01).
 
-    Off by default and with no sets, and both defaults are deliberate. A set
-    has to name catalogs, and which catalogs exist is a fact about the
-    deployment - a shipped default would fail on first use and teach the
-    operator that the feature is broken.
+    Off by default. A benchmark takes a real cluster's capacity, so it appears
+    only where somebody switched it on and meant it.
+
+    ⛔ **Query sets are not here.** They were, until FR-BM-06 moved them into
+    the database so an administrator can add one without a deploy. A set left
+    behind in YAML would be a second source for the same thing, and the one
+    the console edits would win silently - so `benchmark.query_sets` is
+    rejected outright rather than ignored. See DECISIONS.md D-014.
 
     `timeout_seconds` is per statement and much larger than the SQL client's
     30s: a benchmark query that takes four minutes is the finding, not a
@@ -264,7 +268,6 @@ class BenchmarkConfig:
     """
 
     enabled: bool = False
-    query_sets: Dict[str, Any] = field(default_factory=dict)
     default_repetitions: int = 3
     max_repetitions: int = 20
     timeout_seconds: float = 600.0
@@ -512,27 +515,24 @@ def _build_fleet(raw: Dict[str, Any]) -> FleetConfig:
 
 
 def _build_benchmark(raw: Dict[str, Any]) -> BenchmarkConfig:
-    from tms.bench.queryset import MAX_REPETITIONS, QuerySetError, build_query_sets
+    from tms.bench.queryset import MAX_REPETITIONS
 
     enabled = bool(raw.get("enabled", False))
-    sets = raw.get("query_sets") or {}
 
-    # Validated at load, so a malformed statement is a startup error rather
-    # than something found by the person who has already taken a cluster out
-    # of rotation to run it.
-    try:
-        build_query_sets(sets)
-    except QuerySetError as exc:
-        raise ConfigError("benchmark.query_sets: {}".format(exc))
+    # Refused, not ignored. Someone upgrading from before FR-BM-06 has a set
+    # in this file that the console will not show, and silently dropping it
+    # would look like the sets were lost.
+    if raw.get("query_sets"):
+        raise ConfigError(
+            "benchmark.query_sets has moved into the database (FR-BM-06). "
+            "Remove it from config and re-enter the sets on the benchmark "
+            "query set page - they are edited there now.")
 
     default_reps = int(raw.get("default_repetitions", 3))
     max_reps = int(raw.get("max_repetitions", MAX_REPETITIONS))
     timeout = float(raw.get("timeout_seconds", 600))
     pause = float(raw.get("pause_seconds", 1))
 
-    if enabled and not sets:
-        raise ConfigError(
-            "benchmark.enabled is true but benchmark.query_sets is empty")
     if not 1 <= max_reps <= MAX_REPETITIONS:
         raise ConfigError(
             "benchmark.max_repetitions must be between 1 and {}".format(
@@ -546,7 +546,7 @@ def _build_benchmark(raw: Dict[str, Any]) -> BenchmarkConfig:
     if pause < 0:
         raise ConfigError("benchmark.pause_seconds cannot be negative")
 
-    return BenchmarkConfig(enabled=enabled, query_sets=dict(sets),
+    return BenchmarkConfig(enabled=enabled,
                            default_repetitions=default_reps,
                            max_repetitions=max_reps, timeout_seconds=timeout,
                            pause_seconds=pause)

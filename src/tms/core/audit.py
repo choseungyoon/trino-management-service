@@ -58,6 +58,10 @@ ACTION_FLEET_JOB = "FLEET_JOB_RUN"
 # on somebody's say-so, and the reason is what explains why that cluster was
 # out of rotation at the time.
 ACTION_BENCHMARK_RUN = "BENCHMARK_RUN"
+# FR-BM-06. Editing a query set. Audited because the statement written here
+# is what a later run executes N times against a real cluster - the review
+# that a pull request used to provide has to come from somewhere.
+ACTION_BENCHMARK_QUERY_CHANGE = "BENCHMARK_QUERY_CHANGE"
 
 ALLOWED_ACTION_TYPES = frozenset(
     [
@@ -72,6 +76,7 @@ ALLOWED_ACTION_TYPES = frozenset(
         ACTION_RESOURCE_GROUP_REVERT,
         ACTION_FLEET_JOB,
         ACTION_BENCHMARK_RUN,
+        ACTION_BENCHMARK_QUERY_CHANGE,
     ]
 )
 
@@ -80,6 +85,7 @@ TARGET_CLUSTER = "cluster"
 TARGET_HEALTH_TEST = "health_test"
 TARGET_NODE = "node"
 TARGET_RESOURCE_GROUP = "resource_group"
+TARGET_BENCHMARK_SET = "benchmark_query_set"
 
 # The reason is forwarded to Trino and shown to the user whose query was killed,
 # so it is capped and flattened to a single line.

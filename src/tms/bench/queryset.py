@@ -1,16 +1,25 @@
-"""Declared query sets (FR-BM-01).
+"""Query sets and what a benchmark statement is allowed to be (FR-BM-01/06).
 
-A set is written into config by an administrator, exactly like `fleet.jobs`,
-and the request only ever names a key. The alternative - a text box that
-submits SQL - is a different product: it is the web SQL editor CLAUDE.md lists
-as a non-goal, wearing a benchmark's clothes.
+A set is a named list of named statements. It used to be written into config
+like `fleet.jobs`; since FR-BM-06 an administrator edits it in the console and
+it lives in the database (`bench/setstore.py`). This module is what a set *is*
+and what may go in one - the rules, not the storage.
+
+⛔ **The rules got more load-bearing when the storage moved.** While sets lived
+in YAML, the allowlist below was a startup check on a file somebody had
+reviewed and committed. Now it is the only thing between a pasted `DELETE` and
+N unattended executions on a cluster whose defining property, at that moment,
+is that nobody is watching it. So it is enforced twice - `refuse_statement` on
+the way in, and again in the runner on the way out - and the two are not
+redundant: a row can reach the table through psql. See DECISIONS.md D-014.
 
 **Read-only statements only.** Not because a write benchmark is illegitimate,
-but because a benchmark runs a statement N times unattended. A `DELETE` that
-reached a query set through a copy-paste would run N times against a cluster
-whose defining property, at that moment, is that nobody is watching it. The
-allowlist is checked at config load, so it is a startup error rather than a
-discovery made mid-run.
+but because a benchmark runs a statement N times unattended.
+
+This is still not a SQL editor (CLAUDE.md non-goal). The difference is not the
+text box - it is that nothing here ever shows a result row. A run returns
+timings; the rows Trino produced are counted and discarded. A screen that
+displays what the query selected is the non-goal, whatever it is called.
 
 ⛔ **No query set ships with TMS.** A default set would have to name a catalog,
 and which catalogs exist is a fact about the deployment - `tpch` is present on
@@ -42,15 +51,18 @@ class QuerySetError(Exception):
 class BenchmarkQuery:
     """One named statement."""
 
-    __slots__ = ("name", "sql", "title")
+    __slots__ = ("name", "sql", "title", "position")
 
-    def __init__(self, name: str, sql: str, title: str = "") -> None:
+    def __init__(self, name: str, sql: str, title: str = "",
+                 position: int = 0) -> None:
         self.name = name
         self.sql = sql
         self.title = title or name
+        self.position = int(position)
 
     def as_dict(self) -> Dict[str, Any]:
-        return {"name": self.name, "sql": self.sql, "title": self.title}
+        return {"name": self.name, "sql": self.sql, "title": self.title,
+                "position": self.position}
 
 
 class QuerySet:
@@ -94,6 +106,25 @@ def _without_comments(sql: str) -> str:
     """
     no_block = re.sub(r"/\*.*?\*/", " ", sql, flags=re.S)
     return re.sub(r"--[^\n]*", " ", no_block)
+
+
+def refuse_statement(sql: str) -> Optional[str]:
+    """None if this may be benchmarked, else why not, in a sentence.
+
+    The public form of the allowlist. Called on every write (FR-BM-06) and
+    again by the runner before each execution - see the module header for why
+    twice is not once too many.
+    """
+    return _statement_is_read_only(sql)
+
+
+def refuse_name(name: str, what: str = "name") -> Optional[str]:
+    """None if usable as a set key or query name, else why not."""
+    if not NAME_PATTERN.match(name or ""):
+        return ("{!r} is not a usable {}: lowercase letters, digits, '-' and "
+                "'_', up to 64 characters, starting with a letter or digit"
+                .format(name, what))
+    return None
 
 
 def build_query_sets(raw: Dict[str, Any]) -> Dict[str, QuerySet]:
@@ -140,8 +171,11 @@ def build_query_sets(raw: Dict[str, Any]) -> Dict[str, QuerySet]:
             refusal = _statement_is_read_only(sql)
             if refusal is not None:
                 raise QuerySetError("{}.{}: {}".format(key, name, refusal))
+            # `position=index` so the declared order survives a round trip
+            # through a repository, which sorts by position then name.
             queries.append(BenchmarkQuery(name=name, sql=sql.strip().rstrip(";"),
-                                          title=str(entry.get("title") or "")))
+                                          title=str(entry.get("title") or ""),
+                                          position=index))
 
         sets[key] = QuerySet(key=key, title=str(declared.get("title") or ""),
                              description=str(declared.get("description") or ""),
