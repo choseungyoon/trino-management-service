@@ -402,7 +402,14 @@ svg { display: block; flex: none; }
 
 /* Sortable column headings. The arrow only appears on the active column, so
    the header row does not turn into a field of arrows. */
-.sortable { color: inherit; text-decoration: none; display: inline-flex; gap: 4px; align-items: center; }
+:is(a, button).sortable {
+  color: inherit; text-decoration: none; display: inline-flex; gap: 4px;
+  align-items: center;
+  /* Written as a link, used as a button once the console became a client.
+     A bare <button> otherwise arrives with the platform's chrome on it. */
+  appearance: none; background: none; border: 0; padding: 0;
+  font: inherit; cursor: pointer;
+}
 .sortable:hover { color: var(--tx); }
 .sortable--on { color: var(--ac); font-weight: 700; }
 

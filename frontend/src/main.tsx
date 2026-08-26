@@ -8,6 +8,7 @@ import { Audit } from "./screens/Audit";
 import { Gateway } from "./screens/Gateway";
 import { Health } from "./screens/Health";
 import { Queries } from "./screens/Queries";
+import { Workload } from "./screens/Workload";
 
 // The approved design system, unchanged. It is the same file the server-
 // rendered console uses — one source of truth while both exist, and the file
@@ -23,6 +24,7 @@ createRoot(document.getElementById("root")!).render(
           <Route path="queries" element={<Queries />} />
           <Route path="health" element={<Health />} />
           <Route path="gateway" element={<Gateway />} />
+          <Route path="workload" element={<Workload />} />
           <Route path="audit" element={<Audit />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>

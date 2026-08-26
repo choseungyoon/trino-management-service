@@ -10,7 +10,7 @@
 |---|---|---|
 | 1 | JSON API 47개 | ✅ 완료 |
 | 2 | Vite + React 스캐폴드, FastAPI 정적 서빙 | ✅ 완료 |
-| 3 | 화면 12개 이전 | 🔄 **5 / 12** |
+| 3 | 화면 12개 이전 | 🔄 **6 / 12** |
 
 ## 화면
 
@@ -19,7 +19,7 @@
 | Overview | ✅ | `/app/` |
 | Live Queries | ✅ | 칩 필터 · kill 다이얼로그 |
 | Health | ✅ | `test_observed_text` → `health/observed.py` 로 이동 완료 |
-| Workload | ⬜ | |
+| Workload | ✅ | 정렬은 클라이언트. `bottleneck_text` → 서버 |
 | Resource Groups | ⬜ | 가장 인터랙티브. 트리 인라인 편집 |
 | Fleet | ⬜ | 로그 스트리밍은 SSE 권장 |
 | Safe Restart | ⬜ | 진행 콘솔 라이브 |
@@ -37,11 +37,12 @@
 |---|---|---|
 | `views.work_timeline` | `work/items.py` | 댓글과 상태 변경을 엮는 건 화면이 아니라 무엇을 보여줄지의 규칙이다 |
 | `views.cluster_summary` | `GET /api/v1/overview` | `active_workers` 를 워커로 세는 건 표현이 아니라 정확성이다 |
+| `views.bottleneck_text` | `collector/resourcegroups.py` | 진단 코드를 만드는 곳 옆에 문장을 둔다. 사유를 하나 추가하는 데 프론트 릴리스가 필요하면 안 된다 |
 | `views.test_observed_text` | `health/observed.py` | 어떤 테스트가 있고 그 숫자가 뭘 뜻하는지는 서버 지식이다. 세그먼트 `[{text, strong}]` 로 돌려주고 클라이언트는 강조만 복원한다 |
 
 **남은 후보** — 다음에 해당 화면을 옮길 때 같은 질문을 한다:
 
-- `bottleneck_text`, `order_groups`, `flatten_groups` (Workload) — 병목 판정은 숫자에 대한 판단이지 서식이 아니다
+- `order_groups` / `flatten_groups` (Workload) — **클라이언트에 남겼다.** 트리를 표로 펴는 것과 정렬은 화면이 하는 일이고, 정렬은 브라우저가 이미 들고 있는 숫자에 대한 질문이다
 - `benchmark_query_rows`, `query_history_chart`, `comparison_rows` (Benchmark) — 차트 라이브러리를 쓰면 집계만 남는다
 
 ## 옮기면서 찾은 버그
@@ -55,6 +56,14 @@
 ## 내비게이션
 
 **만든 화면만 나열한다.** 나머지는 아직 서버 렌더 `/` 에 있고, 눌렀는데 Overview 로 돌아오는 링크는 없는 것만 못하다. 화면을 옮길 때마다 한 줄씩 추가한다.
+
+## 옮기면서 고친 것
+
+| | |
+|---|---|
+| **Workload 빈 화면** | 활성화됐는데 행이 없으면 아무것도 안 그려졌다. "고장" 처럼 읽힌다 — 빈 상태를 넣었다 (그룹은 지연 생성되므로 정상 상태다) |
+| **정렬 헤더가 회색 버튼** | `.sortable` 은 `<a>` 용으로 쓰였는데 클라이언트가 되면서 `<button>` 이 됐다. tms.css 에 버튼 리셋을 넣었다 |
+| **요약 숫자가 빈칸** | 라벨 아래 빈칸은 0 으로 읽힌다. 없는 값은 em dash |
 
 ## 화면을 옮길 때의 규칙
 

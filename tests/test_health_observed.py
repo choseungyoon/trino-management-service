@@ -82,3 +82,42 @@ class ObservedSegmentsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BottleneckTextTest(unittest.TestCase):
+    """The diagnosis vocabulary, kept beside the diagnosis.
+
+    Moved out of the view layer with the rest: adding a reason should not need
+    a frontend release to become readable.
+    """
+
+    def test_each_code_reads_as_a_sentence(self):
+        from tms.collector.resourcegroups import (
+            CONCURRENCY_CAPPED,
+            REJECTING,
+            bottleneck_text,
+        )
+
+        self.assertEqual("Queue full — new queries rejected", bottleneck_text(REJECTING))
+        self.assertEqual("At concurrency limit", bottleneck_text(CONCURRENCY_CAPPED))
+
+    def test_an_unknown_code_renders_as_itself_not_as_blank(self):
+        """⛔ A blank cell beside a highlighted row reads as "no problem",
+        which is the opposite of what happened."""
+        from tms.collector.resourcegroups import bottleneck_text
+
+        self.assertEqual("something_new", bottleneck_text("something_new"))
+
+    def test_no_bottleneck_is_empty(self):
+        from tms.collector.resourcegroups import bottleneck_text
+
+        self.assertEqual("", bottleneck_text(None))
+
+    def test_a_summarised_group_carries_its_sentence(self):
+        from tms.collector.resourcegroups import summarise_group
+
+        row = summarise_group(["global"], {
+            "RunningQueries": 4, "QueuedQueries": 3,
+            "HardConcurrencyLimit": 4, "MaxQueuedQueries": 100})
+        self.assertEqual("concurrency_limit", row["bottleneck"])
+        self.assertEqual("At concurrency limit", row["bottleneck_text"])

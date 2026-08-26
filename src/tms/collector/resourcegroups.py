@@ -43,6 +43,27 @@ CONCURRENCY_CAPPED = "concurrency_limit"
 MEMORY_CAPPED = "memory_limit"
 CPU_CAPPED = "cpu_limit"
 
+#: The sentence for each diagnosis, kept beside the diagnosis itself. Adding a
+#: reason should not need a frontend release to become readable.
+BOTTLENECK_TEXT = {
+    REJECTING: "Queue full — new queries rejected",
+    CONCURRENCY_CAPPED: "At concurrency limit",
+    MEMORY_CAPPED: "At memory limit",
+    CPU_CAPPED: "At CPU limit",
+}
+
+
+def bottleneck_text(reason: Optional[str]) -> str:
+    """Plain words for a diagnosis code.
+
+    ⛔ An unknown code renders as itself, never as an empty string. A blank
+    cell beside a highlighted row reads as "no problem", which is the opposite
+    of what happened.
+    """
+    if not reason:
+        return ""
+    return BOTTLENECK_TEXT.get(str(reason), str(reason))
+
 
 def group_path(object_name: str) -> Optional[List[str]]:
     """'…,name=global.adhoc.dashboard' -> ['global', 'adhoc', 'dashboard']."""
@@ -128,6 +149,7 @@ def summarise_group(path: List[str], attributes: Dict[str, Any]) -> Dict[str, An
         "started_total": _number(attributes, "StartedQueries.TotalCount"),
     }
     summary["bottleneck"] = diagnose(summary)
+    summary["bottleneck_text"] = bottleneck_text(summary["bottleneck"])
     return summary
 
 
@@ -164,7 +186,9 @@ def rollup(groups: List[Dict[str, Any]]) -> Dict[str, Any]:
         "queued": sum(g.get("queued") or 0 for g in groups),
         "blocked_groups": len(blocked),
         "blocked": sorted(
-            ({"id": g["id"], "reason": g["bottleneck"], "queued": g.get("queued") or 0}
+            ({"id": g["id"], "reason": g["bottleneck"],
+              "reason_text": bottleneck_text(g["bottleneck"]),
+              "queued": g.get("queued") or 0}
              for g in blocked),
             key=lambda item: item["queued"], reverse=True,
         ),
@@ -240,6 +264,7 @@ def reconcile(configured, live, live_available=True):
         row["running"] = (observed or {}).get("running")
         row["queued"] = (observed or {}).get("queued")
         row["bottleneck"] = (observed or {}).get("bottleneck")
+        row["bottleneck_text"] = bottleneck_text(row["bottleneck"])
         rows.append(row)
 
     # Groups running with nothing behind them. Either someone edited the
