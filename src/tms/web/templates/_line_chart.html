@@ -1,0 +1,49 @@
+{#
+  A line chart, drawn on the server. No chart library and no client-side
+  rendering — the page arrives finished, same as everywhere else here.
+
+  Identity is never colour alone: every series is in the legend, and each
+  point carries a <title> the browser reads out and shows on hover. The table
+  underneath is the same data in full.
+#}
+{% if chart %}
+<figure class="chart">
+  <svg class="chart__svg" viewBox="0 0 {{ chart.width }} {{ chart.height }}"
+       role="img" aria-label="{{ chart_label }}" preserveAspectRatio="xMidYMid meet">
+
+    {# Recessive: the grid orients, it does not compete with the lines. #}
+    {% for tick in chart.ticks %}
+    <line class="chart__grid" x1="{{ chart.plot.x }}" x2="{{ chart.plot.x + chart.plot.w }}"
+          y1="{{ tick.y }}" y2="{{ tick.y }}"></line>
+    <text class="chart__tick" x="{{ chart.plot.x - 8 }}" y="{{ tick.y + 4 }}"
+          text-anchor="end">{{ tick.value | duration }}</text>
+    {% endfor %}
+
+    {% for label in chart.x_labels %}
+    <text class="chart__tick" x="{{ label.x }}" y="{{ chart.height - 8 }}"
+          text-anchor="{{ label.anchor }}">{{ label.text }}</text>
+    {% endfor %}
+
+    {% for s in chart.series %}
+    <path class="chart__line chart__series--{{ s.slot }}" d="{{ s.path }}"
+          {% if s.dash %}stroke-dasharray="{{ s.dash }}"{% endif %}></path>
+    {% for p in s.points %}
+    {# A ring in the surface colour so overlapping markers stay countable. #}
+    <circle class="chart__dot chart__series--{{ s.slot }}"
+            cx="{{ p.x }}" cy="{{ p.y }}" r="4">
+      <title>{{ s.name }} · {{ p.label }} — {{ p.note or p.value }}</title>
+    </circle>
+    {% endfor %}
+    {% endfor %}
+  </svg>
+
+  <figcaption class="chart__legend">
+    {% for s in chart.series %}
+    <span class="chart__key">
+      <span class="chart__swatch chart__series--{{ s.slot }}" aria-hidden="true"></span>
+      <span class="mono">{{ s.name }}</span>
+    </span>
+    {% endfor %}
+  </figcaption>
+</figure>
+{% endif %}

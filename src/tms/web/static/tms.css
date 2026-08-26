@@ -934,6 +934,52 @@ dialog::backdrop { background: rgba(4, 6, 10, .55); backdrop-filter: blur(1px); 
 
 /* One refusal per line. The guard usually has more than one thing wrong at
    once, and a run-on sentence hides the second one. */
+/* ── Charts ─────────────────────────────────────────────────────────
+   Drawn as inline SVG on the server. The series ramp is its own token set:
+   status hues mean a state, so a series wearing one would read as a verdict.
+   Both ramps are checked against their own surface for the lightness band,
+   chroma floor, colour-vision separation and contrast — re-run that check
+   before adding a fifth. */
+:root {
+  --s1: #ED43AE; --s2: #3D63D6; --s3: #2E9DC2; --s4: #8C63E0;
+}
+:root[data-theme="light"] {
+  --s1: #C40090; --s2: #2A4FC0; --s3: #0E93B4; --s4: #6E42C4;
+}
+
+.chart { margin: 0; padding: 4px 16px 14px; }
+/* Capped, not full-bleed: the viewBox is 720x220, so letting it fill a wide
+   panel would stretch a 220-unit-tall chart to half the screen. */
+.chart__svg {
+  width: 100%; max-width: 760px; height: auto; display: block; overflow: visible;
+}
+.chart__grid { stroke: var(--line); stroke-width: 1; }
+.chart__tick {
+  fill: var(--tx-3); font: 11px var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+.chart__line { fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+/* The ring is the panel colour, so two lines crossing stay countable. */
+.chart__dot { stroke: var(--panel); stroke-width: 2; }
+
+.chart__series--0 { stroke: var(--s1); }
+.chart__series--1 { stroke: var(--s2); }
+.chart__series--2 { stroke: var(--s3); }
+.chart__series--3 { stroke: var(--s4); }
+circle.chart__series--0 { fill: var(--s1); }
+circle.chart__series--1 { fill: var(--s2); }
+circle.chart__series--2 { fill: var(--s3); }
+circle.chart__series--3 { fill: var(--s4); }
+
+.chart__legend { display: flex; flex-wrap: wrap; gap: 6px 16px; padding-top: 8px; }
+.chart__key { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
+/* Text keeps text colour; the swatch beside it carries the identity. */
+.chart__swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+.chart__swatch.chart__series--0 { background: var(--s1); }
+.chart__swatch.chart__series--1 { background: var(--s2); }
+.chart__swatch.chart__series--2 { background: var(--s3); }
+.chart__swatch.chart__series--3 { background: var(--s4); }
+
 /* A labelled box inside a form. Grouping is the job a section heading should
    do; without it the grouping has to be smuggled into every label ("First
    query - name", "First query - SQL"), which reads as noise. */

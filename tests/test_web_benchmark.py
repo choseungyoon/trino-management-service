@@ -376,6 +376,53 @@ class BenchmarkScreenTest(unittest.IsolatedAsyncioTestCase):
             response = await c.get("/benchmarks/{}?against={}".format(ids[1], ids[0]))
         self.assertIn("-100ms", response.text)
 
+    async def test_the_picker_polls_only_while_something_is_running(self):
+        """⛔ The page itself must not reload on a timer.
+
+        The form beside the picker holds a reason someone is halfway through
+        typing. So one fieldset refreshes, and only while there is something
+        to wait for — the polled copy carries the trigger, so when the last
+        run finishes the swapped-in fieldset has none and polling stops.
+        """
+        app = self.build()
+        async with self.client(app) as c:
+            await sign_in(c)
+            idle = await c.get("/benchmark/clusters")
+            self.assertNotIn("hx-trigger", idle.text)
+
+            self.repository.create(
+                cluster="prod-a", query_set="smoke", actor="a", roles=["admin"],
+                reason="r", repetitions=1, guard={"ok": True})
+            busy = await c.get("/benchmark/clusters")
+        self.assertIn('hx-trigger="every 5s"', busy.text)
+        self.assertIn("A benchmark is already running here", busy.text)
+
+    async def test_a_poll_keeps_the_clusters_already_ticked(self):
+        """Without this the first poll silently un-chooses what was chosen."""
+        import re
+
+        app = self.build()
+        async with self.client(app) as c:
+            await sign_in(c)
+            response = await c.get("/benchmark/clusters?clusters=prod-b")
+
+        def ticked(name):
+            # Matched over the whole <input>, not on the template's line
+            # breaks - a reflow that changed nothing would fail that.
+            pattern = r'<input[^>]*value="{}"[^>]*>'.format(name)
+            found = re.search(pattern, response.text, re.S)
+            self.assertIsNotNone(found, name)
+            return "checked" in found.group(0)
+
+        self.assertTrue(ticked("prod-b"))
+        self.assertFalse(ticked("prod-a"))
+
+    async def test_the_benchmark_page_still_has_no_page_level_refresh(self):
+        async with self.client(self.build()) as c:
+            await sign_in(c)
+            response = await c.get("/benchmark")
+        self.assertNotIn("data-refresh", response.text)
+
     async def test_an_unknown_run_is_a_404_page(self):
         async with self.client(self.build()) as c:
             await sign_in(c)

@@ -16,36 +16,7 @@
   </div>
   <form method="post" action="/benchmark" class="wi-form">
 
-    {#
-      Every cluster is selectable. Serving production is a caveat on the
-      numbers, not a refusal — the point of running these on a schedule is to
-      watch performance on the clusters people are actually using. What each
-      row carries is what the result will have to be read with.
-    #}
-    <fieldset class="fieldgroup">
-      <legend class="fieldgroup__legend">Clusters</legend>
-      {% for c in bench.clusters %}
-      <div class="pick__row {% if not c.ready %}pick__row--blocked{% endif %}">
-        <label class="pick__pick">
-          <input type="checkbox" name="clusters" value="{{ c.name }}"
-                 {% if not c.ready %}disabled{% endif %}>
-          <span class="pick__name mono">{{ c.name }}</span>
-        </label>
-        {% if c.busy %}
-        <span class="test-chip test-chip--bad">A benchmark is already running here</span>
-        {% elif c.exclusive %}
-        <span class="test-chip test-chip--good">Quiet — out of rotation and idle</span>
-        {% else %}
-        <span class="test-chip test-chip--concerning">Serving traffic</span>
-        <div class="pick__why">
-          {% for advice in c.guard.advice %}
-          <div class="bench-refusal">{{ advice.text }}</div>
-          {% endfor %}
-        </div>
-        {% endif %}
-      </div>
-      {% endfor %}
-    </fieldset>
+    {% include "_bench_clusters.html" %}
 
     <label class="field"><span>Query set</span>
       <select class="input" name="query_set" required

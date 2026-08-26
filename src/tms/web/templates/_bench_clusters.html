@@ -1,0 +1,42 @@
+{#
+  The cluster picker, on its own so it can refresh without the rest of the
+  form. A whole-page reload here would throw away the reason someone is
+  halfway through typing, which is why /benchmark has no page-level refresh.
+
+  It polls only while a run is in flight, and the polled response carries the
+  trigger — so when the last run finishes, the swapped-in copy has no
+  `hx-trigger` and the polling stops by itself.
+
+  ⛔ `hx-include` sends the boxes that are already ticked, and the server
+  renders them back ticked. Without it, the first poll after someone chose two
+  clusters would quietly un-choose them.
+#}
+<fieldset class="fieldgroup" id="bench-clusters"
+          hx-get="/benchmark/clusters"
+          hx-target="#bench-clusters" hx-swap="outerHTML"
+          hx-include="#bench-clusters input[name='clusters']"
+          {% if clusters | selectattr('busy') | list %}hx-trigger="every 5s"{% endif %}>
+  <legend class="fieldgroup__legend">Clusters</legend>
+  {% for c in clusters %}
+  <div class="pick__row {% if not c.ready %}pick__row--blocked{% endif %}">
+    <label class="pick__pick">
+      <input type="checkbox" name="clusters" value="{{ c.name }}"
+             {% if c.name in chosen %}checked{% endif %}
+             {% if not c.ready %}disabled{% endif %}>
+      <span class="pick__name mono">{{ c.name }}</span>
+    </label>
+    {% if c.busy %}
+    <span class="test-chip test-chip--bad">A benchmark is already running here</span>
+    {% elif c.exclusive %}
+    <span class="test-chip test-chip--good">Quiet — out of rotation and idle</span>
+    {% else %}
+    <span class="test-chip test-chip--concerning">Serving traffic</span>
+    <div class="pick__why">
+      {% for advice in c.guard.advice %}
+      <div class="bench-refusal">{{ advice.text }}</div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+  {% endfor %}
+</fieldset>

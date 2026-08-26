@@ -58,7 +58,7 @@ def summarise_run(run: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     for result in run.get("results") or []:
         name = result.get("query_name")
         entry = grouped.setdefault(name, {"name": name, "runs": 0, "failures": 0,
-                                          "elapsed": [], "cpu": [], "rows": None})
+                                          "elapsed": [], "cpu": [], "rows": []})
         entry["runs"] += 1
         if result.get("state") == "FAILED":
             entry["failures"] += 1
@@ -66,13 +66,22 @@ def summarise_run(run: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
         entry["elapsed"].append(result.get("elapsed_ms"))
         if result.get("trino_cpu_ms") is not None:
             entry["cpu"].append(result.get("trino_cpu_ms"))
-        if entry["rows"] is None:
-            entry["rows"] = result.get("processed_rows")
+        # ⛔ Every repetition, not just the first. `processedRows` counts rows
+        # the engine *read*, not rows returned, and under a LIMIT it stops as
+        # soon as the limit is met - so two runs of one query legitimately
+        # read different amounts. Keeping only the first hid that, and the
+        # timings underneath it are then timings of different amounts of work.
+        entry["rows"].append(result.get("processed_rows"))
 
     for entry in grouped.values():
         entry["median_ms"] = median(entry["elapsed"])
         entry["median_cpu_ms"] = median(entry["cpu"])
         entry["fastest_ms"] = min(entry["elapsed"]) if entry["elapsed"] else None
+        counted = [r for r in entry["rows"] if r is not None]
+        entry["rows"] = median(counted)
+        entry["rows_varied"] = bool(counted) and min(counted) != max(counted)
+        entry["rows_range"] = ((min(counted), max(counted)) if entry["rows_varied"]
+                               else None)
     return grouped
 
 

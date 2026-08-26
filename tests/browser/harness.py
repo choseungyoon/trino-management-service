@@ -26,6 +26,7 @@ import sys
 import tempfile
 import threading
 import time
+from datetime import timedelta
 
 sys.path.insert(
     0,
@@ -325,46 +326,58 @@ def build_app(workload_enabled=False, seed=None, gateway=None,
                      scan_narrow="SELECT count(*) FROM tpch.tiny.orders "
                                  "WHERE orderstatus = 'O'")
 
-        for cluster, base_ms, label, statements in (
-            ("prod-a", 1, "heap 250G", older),
-            ("prod-b", 2, "heap 400G", current),
-        ):
-            past = bench_repository.create(
-                cluster=cluster, query_set="adhoc", actor="sre.kim",
-                roles=["admin"],
-                reason="Finding out why one cluster is slower than the other",
-                repetitions=3,
-                guard={"ok": True, "advice": [], "running_queries": 0,
-                       "checked_gateway_live": True,
-                       "backends": [{"name": "trino-{}-1".format(cluster),
-                                     "active": False}]},
-                label=label,
-                queries=[{"name": n, "sql": q, "title": n, "position": i}
-                         for i, (n, q) in enumerate(sorted(statements.items()))])
-            # Not a flat multiplier. The finding in a real comparison is
-            # almost never "everything is 2x" - it is one query that fell off a
-            # cliff while the rest are within noise, and a demo that shows a
-            # uniform doubling teaches the reader to skim the table.
-            timings = {"scan_narrow": 310, "join_three": 940,
-                       "window_rank": 1580, "wide_scan": 4200}
-            skew = {"scan_narrow": 1.02, "join_three": 1.04,
-                    "window_rank": 2.7, "wide_scan": 0.98}
-            for iteration in (1, 2, 3):
-                for name, base in timings.items():
-                    factor = 1.0 if base_ms == 1 else skew[name]
-                    elapsed = int(base * factor + (40 if iteration == 1 else 0))
-                    bench_repository.add_result(past["id"], {
-                        "query_name": name, "iteration": iteration,
-                        "state": "SUCCEEDED",
-                        "trino_query_id": "20260821_0000{}_0000{}_ab".format(
-                            iteration, len(name)),
-                        "elapsed_ms": elapsed,
-                        "trino_elapsed_ms": int(elapsed * 0.9),
-                        "trino_cpu_ms": int(elapsed * 0.7),
-                        "trino_queued_ms": 4, "trino_planning_ms": 30,
-                        "processed_rows": 15000, "processed_bytes": 1048576,
-                        "peak_memory_bytes": 33554432, "error": None})
-            bench_repository.finish(past["id"], "SUCCEEDED")
+        # Not a flat multiplier. The finding in a real comparison is almost
+        # never "everything is 2x" - it is one query that fell off a cliff
+        # while the rest are within noise, and a demo that shows a uniform
+        # doubling teaches the reader to skim the table.
+        timings = {"scan_narrow": 310, "join_three": 940,
+                   "window_rank": 1580, "wide_scan": 4200}
+        skew = {"scan_narrow": 1.02, "join_three": 1.04,
+                "window_rank": 2.7, "wide_scan": 0.98}
+        # Four runs a day apart on each cluster, so the trend chart has a line
+        # to draw. One run per cluster is two dots and no line, which is a
+        # chart pretending to be a trend - and the chart refuses to render it.
+        drift = (1.00, 1.06, 1.03, 1.14)
+
+        for day, factor in enumerate(drift):
+            for cluster, quick, label, statements in (
+                ("prod-a", True, "heap 250G", older),
+                ("prod-b", False, "heap 400G", current),
+            ):
+                started = now - timedelta(days=len(drift) - day)
+                past = bench_repository.create(
+                    cluster=cluster, query_set="adhoc", actor="sre.kim",
+                    roles=["admin"],
+                    reason="Nightly check on the ad-hoc profile",
+                    repetitions=3,
+                    guard={"ok": True, "advice": [], "running_queries": 0,
+                           "checked_gateway_live": True,
+                           "backends": [{"name": "trino-{}-1".format(cluster),
+                                         "active": False}]},
+                    label=label,
+                    queries=[{"name": n, "sql": q, "title": n, "position": i}
+                             for i, (n, q) in enumerate(sorted(statements.items()))])
+                past["started_at"] = started
+                for run in bench_repository.runs:
+                    if run["id"] == past["id"]:
+                        run["started_at"] = started
+                for iteration in (1, 2, 3):
+                    for name, base in timings.items():
+                        cluster_factor = 1.0 if quick else skew[name]
+                        elapsed = int(base * cluster_factor * factor
+                                      + (40 if iteration == 1 else 0))
+                        bench_repository.add_result(past["id"], {
+                            "query_name": name, "iteration": iteration,
+                            "state": "SUCCEEDED",
+                            "trino_query_id": "20260821_0000{}_0000{}_ab".format(
+                                iteration, len(name)),
+                            "elapsed_ms": elapsed,
+                            "trino_elapsed_ms": int(elapsed * 0.9),
+                            "trino_cpu_ms": int(elapsed * 0.7),
+                            "trino_queued_ms": 4, "trino_planning_ms": 30,
+                            "processed_rows": 15000, "processed_bytes": 1048576,
+                            "peak_memory_bytes": 33554432, "error": None})
+                bench_repository.finish(past["id"], "SUCCEEDED")
 
         bench_service = BenchmarkService(
             config=config, snapshots=repository, audit_guard=AuditGuard(audit),

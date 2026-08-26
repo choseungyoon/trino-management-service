@@ -81,13 +81,22 @@
     <div class="panel__title">Results by query</div>
     <div class="panel__sub">Repetitions folded into a <strong>median</strong> — the first execution is never like the rest</div>
   </div>
+  <p class="panel__note">
+    <strong>Rows read</strong> counts rows the engine had to touch, not rows the
+    query returned. Under a <span class="mono">LIMIT</span> it stops as soon as
+    the limit is met, so the same query can read a different number each time
+    depending on how the splits were scheduled. A range shown there means the
+    repetitions did different amounts of work, and their timings are not
+    strictly comparable.
+  </p>
   {% if queries %}
   <div class="table-scroll">
     <table class="table">
       <thead>
         <tr>
           <th scope="col">Query</th><th scope="col">Runs</th><th scope="col">Median</th>
-          <th scope="col">Fastest</th><th scope="col">Median CPU</th><th scope="col">Rows</th>
+          <th scope="col">Fastest</th><th scope="col">Median CPU</th>
+          <th scope="col">Rows read</th>
         </tr>
       </thead>
       <tbody>
@@ -101,7 +110,21 @@
           <td class="num">{{ q.median_ms | duration }}</td>
           <td class="num dim">{{ q.fastest_ms | duration }}</td>
           <td class="num dim">{{ q.median_cpu_ms | duration }}</td>
-          <td class="num dim">{{ q.rows_processed | integer }}</td>
+          <td class="num dim">
+            {{ q.rows_processed | integer }}
+            {% if q.rows_varied %}
+            {#
+              Rows the engine read, not rows returned. Under a LIMIT it stops
+              as soon as the limit is met, so repetitions legitimately read
+              different amounts — and when they do, the medians above them are
+              medians of different amounts of work.
+            #}
+            <div><span class="test-chip test-chip--concerning"
+                       title="Rows read varies between repetitions, so the timings are not of equal work">
+              {{ q.rows_range[0] | integer }}–{{ q.rows_range[1] | integer }}
+            </span></div>
+            {% endif %}
+          </td>
           {% endif %}
         </tr>
         {% endfor %}

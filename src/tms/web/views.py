@@ -498,12 +498,87 @@ def benchmark_query_rows(run: Dict[str, Any]) -> List[Dict[str, Any]]:
             "fastest_ms": entry["fastest_ms"],
             "median_cpu_ms": entry["median_cpu_ms"],
             "rows_processed": entry["rows"],
+            "rows_varied": entry["rows_varied"],
+            "rows_range": entry["rows_range"],
             # Every execution failed. Rendered differently from "slow", which
             # is what a blank timing column would otherwise imply.
             "all_failed": entry["failures"] == entry["runs"],
             "error": _first_error(run, name),
         })
     return rows
+
+
+def query_history_chart(history: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """One line per cluster, one point per run, plus the numbers beside it.
+
+    ⛔ Per run, not per execution. Plotting every repetition draws the warm-up
+    as a spike on every run and buries the thing the chart is for, which is
+    whether this query is drifting. Each point is that run's median; the
+    spread is in the summary table under it.
+    """
+    from tms.web.chart import line_chart, summarise
+
+    runs: Dict[Any, Dict[str, Any]] = {}
+    for entry in history or []:
+        if entry.get("state") == "FAILED":
+            continue
+        run = runs.setdefault(entry.get("run_id"), {
+            "run_id": entry.get("run_id"),
+            "cluster": entry.get("cluster"),
+            "at": entry.get("run_started_at"),
+            "elapsed": [],
+        })
+        if entry.get("elapsed_ms") is not None:
+            run["elapsed"].append(entry["elapsed_ms"])
+
+    by_cluster: Dict[str, List[Dict[str, Any]]] = {}
+    for run in runs.values():
+        if not run["elapsed"]:
+            continue
+        by_cluster.setdefault(run["cluster"], []).append(run)
+
+    series, summaries = [], []
+    for cluster in sorted(by_cluster):
+        # Oldest first: a chart of time that runs right-to-left is a trap.
+        ordered = sorted(by_cluster[cluster],
+                         key=lambda r: (r["at"] is None, r["at"], r["run_id"]))
+        points = []
+        for run in ordered:
+            stats = summarise(run["elapsed"])
+            points.append({
+                "x_label": _chart_clock(run["at"]),
+                "y": stats["median"],
+                "note": "#{} · {} of {} repetition{}".format(
+                    run["run_id"], _ms(stats["median"]), stats["count"],
+                    "" if stats["count"] == 1 else "s"),
+            })
+        series.append({"name": cluster, "points": points})
+        every = [ms for run in ordered for ms in run["elapsed"]]
+        summaries.append(dict(summarise(every), cluster=cluster,
+                              runs=len(ordered)))
+
+    chart = line_chart(series)
+    for index, entry in enumerate(summaries):
+        entry["slot"] = index % 4
+    return {"chart": chart, "summaries": summaries}
+
+
+def _ms(value: Optional[float]) -> str:
+    return "—" if value is None else "{:.0f}ms".format(value)
+
+
+def _chart_clock(value: Any) -> str:
+    """The same wall clock the tables use, minus the seconds.
+
+    ⛔ Not `strftime` on the raw value. These are stored in UTC and every
+    other time on the page goes through `formatting.clock`, which converts to
+    local - a chart labelled in UTC beside a table labelled in local time
+    shows one run at two different times.
+    """
+    from tms.web.formatting import EM_DASH, parse_iso
+
+    moment = parse_iso(value)
+    return EM_DASH if moment is None else moment.astimezone().strftime("%b %d %H:%M")
 
 
 def query_history_rows(history: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

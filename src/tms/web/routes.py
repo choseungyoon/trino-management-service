@@ -59,7 +59,7 @@ def register(app, service, config, authenticator, codec, session_cookie: str,
     enabled). None is a real state the screens handle, not an error - the
     console still shows everything else.
     """
-    from fastapi import Form, Request
+    from fastapi import Form, Query, Request
     from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
     from fastapi.staticfiles import StaticFiles
 
@@ -1489,6 +1489,7 @@ def register(app, service, config, authenticator, codec, session_cookie: str,
             "set": data["set"],
             "query": data["query"],
             "history": views.query_history_rows(data["history"]),
+            "trend": views.query_history_chart(data["history"]),
             "changed": data["changed"],
             "envelope": None,
         })
@@ -1516,12 +1517,45 @@ def register(app, service, config, authenticator, codec, session_cookie: str,
         context = base_context(request, principal, "benchmark")
         context.update({
             "bench": data,
+            # The picker is also served on its own, so it reads these rather
+            # than `bench.*` - one set of names for both renderings.
+            "clusters": data["clusters"],
+            "chosen": [],
             "runs": views.benchmark_rows(data["runs"]),
             "default_repetitions": config.benchmark.default_repetitions,
             "error": error,
             "envelope": None,
         })
         return render("benchmark.html", context)
+
+    @app.get("/benchmark/clusters", response_class=HTMLResponse,
+             include_in_schema=False)
+    def benchmark_clusters(request: Request,
+                           clusters: List[str] = Query(default=[])):
+        """Just the cluster picker, for htmx to poll while a run is in flight.
+
+        ⛔ The whole page must not reload on a timer: the form next to this
+        holds a reason someone is halfway through typing. Swapping one
+        fieldset leaves that alone.
+
+        `clusters` is what is currently ticked, sent back by hx-include, so a
+        poll does not silently un-choose what the operator chose.
+        """
+        principal, claims = principal_or_redirect(request)
+        if claims is None:
+            return principal
+        unavailable = _benchmark_or_error(request, principal)
+        if unavailable is not None:
+            return unavailable
+        try:
+            data = benchmark.overview(principal)
+        except ApiError as exc:
+            return _error_page(request, principal, exc)
+        return render("_bench_clusters.html", {
+            "request": request,
+            "clusters": data["clusters"],
+            "chosen": list(clusters),
+        })
 
     @app.get("/clusters/{cluster}/benchmark", include_in_schema=False)
     def benchmark_cluster_redirect(request: Request, cluster: str):
