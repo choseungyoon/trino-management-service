@@ -8,6 +8,8 @@ import { Audit } from "./screens/Audit";
 import { Gateway } from "./screens/Gateway";
 import { Health } from "./screens/Health";
 import { Queries } from "./screens/Queries";
+import { Work } from "./screens/Work";
+import { WorkItem } from "./screens/WorkItem";
 import { Workload } from "./screens/Workload";
 
 // The approved design system, unchanged. It is the same file the server-
@@ -25,6 +27,8 @@ createRoot(document.getElementById("root")!).render(
           <Route path="health" element={<Health />} />
           <Route path="gateway" element={<Gateway />} />
           <Route path="workload" element={<Workload />} />
+          <Route path="work" element={<Work />} />
+          <Route path="work/:key" element={<WorkItem />} />
           <Route path="audit" element={<Audit />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>

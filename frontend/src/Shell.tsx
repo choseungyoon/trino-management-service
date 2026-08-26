@@ -31,6 +31,7 @@ const NAV = [
   { to: "/health", label: "Health", icon: "health" },
   { to: "/workload", label: "Workload", icon: "queries" },
   { to: "/gateway", label: "Gateway", icon: "trino" },
+  { to: "/work", label: "Work Board", icon: "board" },
   { to: "/audit", label: "Audit Log", icon: "audit" },
 ];
 

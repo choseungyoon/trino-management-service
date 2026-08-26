@@ -52,6 +52,8 @@ SHOTS = (
     ("35-console-gateway", "/app/gateway", None),
     ("36-console-audit", "/app/audit", None),
     ("37-console-workload", "/app/workload", None),
+    ("38-console-work", "/app/work", None),
+    ("39-console-work-item", "/app/work/REQ-1", None),
 )
 
 
