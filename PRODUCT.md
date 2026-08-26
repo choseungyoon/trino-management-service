@@ -12,11 +12,11 @@ FastAPI backend (already built, `src/tms/`). Frontend delegated: server-rendered
 HTML + vanilla JS or a light framework, chosen at build time — must work behind
 the existing FastAPI app (`src/tms/web/`), no separate Node deployment.
 
-The reasoning, and what would reverse it, is in DECISIONS.md D-011. Read the
-2026-08-26 re-examination before quoting this line: the constraint it rests on
-is **not** that a JS toolchain is unavailable — the company runs one — it is
-that this console is opened when the cluster is broken, and a screen that
-needs a bundle to load is a screen that fails at the same time.
+⛔ **Superseded on 2026-08-26 by DECISIONS.md D-016**: React 19 islands, built
+with Vite, are being introduced. What survives from the line above is the part
+that mattered — **no Node process at runtime**, and the server keeps owning
+page structure and navigation, because this console is opened when the cluster
+is broken and a screen that needs a bundle to load fails at the same time.
 
 ## Users
 
@@ -62,8 +62,10 @@ recorded who/why** (the kill reason is even delivered to the query's owner).
 
 R1 screens are bounded by the built API (`docs/API_R1.md`): portal/links,
 live queries (list/detail/kill), cluster health (9 tests, roll-up, overrides),
-audit (search/export). Non-goals are contractual (CLAUDE.md): no charts
-(Grafana), no SQL editor, no log viewer, no RBAC editor. Write actions: kill
+audit (search/export). Non-goals are contractual (CLAUDE.md): no metrics
+dashboard (Grafana), no SQL editor, no log viewer, no RBAC editor. The one
+chart TMS draws is of its own benchmark results — data that exists nowhere
+else; cluster resource utilization stays with Grafana. Write actions: kill
 query, toggle health test/roll-up, change thresholds, export audit — all
 require a reason; audit store down = writes disabled (503), which the UI must
 present as intended behavior. States that must exist on every data surface:

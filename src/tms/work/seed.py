@@ -20,6 +20,7 @@ from tms.work.items import (
     BLOCKED,
     DECISION,
     DONE,
+    DROPPED,
     IN_PROGRESS,
     NEEDS_DECISION,
     PLANNED,
@@ -40,7 +41,9 @@ SEED = (
      DONE, "R3", None, "docs/DECISIONS.md"),
     ("D-010", DECISION, "리소스 그룹을 db 매니저로. TMS PostgreSQL 전용 schema",
      DONE, "R2", None, "docs/DECISIONS.md"),
-    ("D-011", DECISION, "UI 는 서버 렌더. SPA 프레임워크 도입 안 함",
+    # D-016 이 대체했다. 지우지 않는 이유는 D-013 과 같다 — 뒤집힌 결정도
+    # 기록이고, "왜 그때는 그렇게 정했나" 는 다음에 같은 질문이 왔을 때 답이다.
+    ("D-011", DECISION, "UI 는 서버 렌더. SPA 미도입 — D-016 으로 대체됨",
      DONE, None, None, "docs/DECISIONS.md"),
     ("D-012", DECISION, "tms-svc 에 ExecuteQuery 부여. A1 강제를 코드로 이동",
      DONE, "R3", None, "docs/DECISIONS.md"),
@@ -50,6 +53,8 @@ SEED = (
      DONE, "R2", None, "docs/DECISIONS.md"),
     ("D-015", DECISION, "벤치마크는 운영 중에도 실행. 제외 여부는 차단이 아니라 기록",
      DONE, "R2", None, "docs/DECISIONS.md"),
+    ("D-016", DECISION, "프론트에 React 19 도입. 아일랜드는 목적지가 아니라 이주 경로",
+     DONE, None, None, "docs/DECISIONS.md"),
     ("D-2", DECISION, "restart_mode 를 ansible 로 전환할 것인가",
      NEEDS_DECISION, None,
      "사람 결정 — TMS 호스트가 전 노드 SSH 를 갖는다", "docs/NEXT_STEPS.md"),
