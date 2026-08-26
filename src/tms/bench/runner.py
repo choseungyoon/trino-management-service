@@ -1,4 +1,4 @@
-"""Executing a query set (FR-BM-01).
+"""Executing a query set.
 
 Runs on a worker thread, like a fleet job, because a set of ten queries at
 thirty seconds each outlives any request. What it writes as it goes is the
@@ -152,7 +152,7 @@ class BenchmarkRunner:
         from tms.clients.sql import QueryFailed
 
         # ⛔ The allowlist, checked again. The service already refused this
-        # text when it was written (FR-BM-06), so reaching here means the row
+        # text when it was written, so reaching here means the row
         # was changed underneath - by psql, by a restore, by a migration
         # somebody wrote. This is the last place before N executions on a
         # cluster nobody is watching, and it costs a regex.

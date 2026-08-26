@@ -1,4 +1,4 @@
-"""Comparing two runs (FR-BM-03).
+"""Comparing two runs.
 
 The question this exists for is "why is cluster A slower than cluster B", so
 the output is per query, not one headline number. A single aggregate would let
@@ -101,7 +101,7 @@ def compare(baseline: Dict[str, Any], candidate: Dict[str, Any]) -> Dict[str, An
             "delta_percent": None,
             "verdict": SAME,
         }
-        # ⛔ Same set, same name, different SQL. Since FR-BM-06 a set can be
+        # ⛔ Same set, same name, different SQL. A set can now be
         # edited between two runs, and without this the table would show a
         # confident percentage for two different statements.
         row["statement_changed"] = name in edited

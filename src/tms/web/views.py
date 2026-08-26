@@ -317,7 +317,7 @@ def flatten_groups(tree: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return rows
 
 
-# Sortable columns for FR-WL-06, and the only values `sort` may take.
+# Sortable columns on the workload screen, and the only values `sort` may take.
 WORKLOAD_COLUMNS = (
     {"key": "running", "label": "Running"},
     {"key": "queued", "label": "Queued"},
@@ -369,7 +369,7 @@ def order_groups(tree, groups, sort=None, descending=True):
 
 
 
-# ── work board (FR-BOARD) ─────────────────────────────────────────────
+# ── work board ────────────────────────────────────────────────────────
 
 
 def status_label(status: Optional[str]) -> str:
@@ -457,7 +457,7 @@ def work_timeline(item: Dict[str, Any]) -> List[Dict[str, Any]]:
     return sorted(entries, key=lambda e: (e["at"] is None, e["at"]))
 
 
-# ── benchmark (FR-BM-01/03) ───────────────────────────────────────────
+# ── benchmark ─────────────────────────────────────────────────────────
 
 
 def benchmark_run(run: Dict[str, Any]) -> Dict[str, Any]:
@@ -507,7 +507,7 @@ def benchmark_query_rows(run: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 def query_history_rows(history: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """One row per execution of a single query, newest first (FR-BM-06).
+    """One row per execution of a single query, newest first.
 
     Not folded to a median, unlike `benchmark_query_rows`. That page answers
     "how long does this take here"; this one answers "when did it change",

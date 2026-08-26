@@ -56,7 +56,7 @@
       <a href="/gateway" {% if page == 'gateway' %}aria-current="page"{% endif %}>{{ ui.icon('trino') }}Gateway</a>
       {% endif %}
       {% if benchmark_enabled %}
-      <a href="/clusters/{{ cluster_names[0] }}/benchmark" {% if page == 'benchmark' %}aria-current="page"{% endif %}>{{ ui.icon('clock') }}Benchmark</a>
+      <a href="/benchmark" {% if page == 'benchmark' %}aria-current="page"{% endif %}>{{ ui.icon('clock') }}Benchmark</a>
       {% endif %}
       {% if board_enabled %}
       <a href="/work" {% if page == 'work' %}aria-current="page"{% endif %}>{{ ui.icon('board') }}Work Board</a>

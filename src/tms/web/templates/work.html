@@ -17,10 +17,11 @@
 <div class="banner" role="note">
   {{ ui.icon('info', 15) }}
   <div>
-    <strong>상태는 이 보드가, 근거는 문서가 갖는다.</strong>
-    항목이 가리키는 문서와 어긋나면 <strong>문서가 이긴다</strong>.
-    여기서 새로 올릴 수 있는 것은 <span class="mono">request</span> 뿐이다 —
-    결정과 요구사항은 각자의 문서에서 시작한다.
+    <strong>This board owns status. The documents own the reasoning.</strong>
+    Where a card disagrees with the document it points at, <strong>the document
+    wins</strong>. The only thing you can raise here is a
+    <span class="mono">request</span> — decisions and requirements start in
+    their own documents.
   </div>
 </div>
 
@@ -34,7 +35,7 @@
 <section class="panel">
   <div class="empty">
     {{ ui.icon('bad', 20, 1.6) }}
-    <div class="empty__title">보드를 읽을 수 없다</div>
+    <div class="empty__title">The board cannot be read</div>
     <div class="empty__desc">{{ board.error or 'The TMS database did not answer.' }}</div>
   </div>
 </section>
@@ -82,7 +83,7 @@
       {% endfor %}
     </ul>
     {% else %}
-    <p class="board__none">없음</p>
+    <p class="board__none">Nothing here</p>
     {% endif %}
   </section>
   {% endfor %}
@@ -91,20 +92,20 @@
 {% if can_write %}
 <section class="panel" style="margin-top:14px">
   <div class="panel__head">
-    <div class="panel__title">요청 올리기</div>
-    <div class="panel__sub">키는 <span class="mono">REQ-n</span> 으로 자동 부여된다</div>
+    <div class="panel__title">Raise a request</div>
+    <div class="panel__sub">It gets the next <span class="mono">REQ-n</span> key automatically</div>
   </div>
   <form method="post" action="/work" class="wi-form">
-    <label class="field">제목
+    <label class="field">Title
       <input class="input" name="title" value="{{ draft.title or '' }}" required
-             maxlength="200" placeholder="무엇이 필요한가 — 한 줄로">
+             maxlength="200" placeholder="What you need, in one line">
     </label>
-    <label class="field">내용 (선택)
+    <label class="field"><span>Details <span class="dim">(optional)</span></span>
       <textarea class="input" name="body" rows="4"
-                placeholder="왜 필요한지, 지금은 어떻게 하고 있는지">{{ draft.body or '' }}</textarea>
+                placeholder="Why it is needed, and how you work around it today">{{ draft.body or '' }}</textarea>
     </label>
     <div class="row-actions">
-      <button class="btn btn--primary" type="submit">요청 올리기</button>
+      <button class="btn btn--primary" type="submit">Raise it</button>
     </div>
   </form>
 </section>

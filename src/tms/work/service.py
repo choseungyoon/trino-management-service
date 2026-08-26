@@ -1,4 +1,4 @@
-"""The work board's rules (FR-BOARD).
+"""The work board's rules.
 
 ⚠️ **Absolute rule 3 does not apply here, and that is a deliberate reading.**
 

@@ -1,52 +1,58 @@
 {% extends "base.html" %}
 {% import "_icons.html" as ui %}
-{% block title %}쿼리 세트 · Benchmark{% endblock %}
-{% block heading %}쿼리 세트{% endblock %}
+{% block title %}Query sets · Benchmark{% endblock %}
+{% block heading %}Query sets{% endblock %}
 
 {% block content %}
+<p class="dim" style="margin-bottom:12px"><a href="/benchmark">← Benchmark</a></p>
+
 {#
-  FR-BM-06. 세트는 설정 파일에 있었고 이제 여기에 있다 — 배포 없이 고치기
-  위해서다. 대가는 화면 아래 배너에 적어 두었다: 리뷰가 사라졌으므로 허용
-  구문 검사와 감사 기록이 그 자리를 대신한다.
+  Sets used to live in a config file, where a pull request reviewed every SQL
+  statement before it shipped. They are edited here now so that adding a query
+  does not need a deploy — and the banner below is the price of that: the
+  allowlist and the audit record are what replaced the review.
 #}
 <div class="banner" role="note">
   {{ ui.icon('lock', 15) }}
   <div>
-    <strong>여기 적은 SQL 은 나중에 클러스터에서 N 번 실행된다.</strong>
-    읽기 전용 구문만 저장된다(<span class="mono">SELECT · WITH · SHOW · EXPLAIN ·
-    DESCRIBE · VALUES · TABLE</span>). 저장할 때와 실행 직전에 각각 한 번씩 확인한다.
-    결과 행은 어디에도 표시되지 않는다 — 이 화면이 돌려주는 것은 시간뿐이다.
+    <strong>Whatever you write here will later run N times against a cluster.</strong>
+    Only read-only statements are accepted (<span class="mono">SELECT · WITH ·
+    SHOW · EXPLAIN · DESCRIBE · VALUES · TABLE</span>), checked when you save
+    and again immediately before each execution. No result rows are ever shown
+    — the only thing a run gives back is timings.
   </div>
 </div>
 
 <section class="panel">
   <div class="panel__head">
-    <div class="panel__title">세트</div>
-    <div class="panel__sub">한 세트 = 함께 실행하고 함께 비교하는 쿼리 묶음</div>
+    <div class="panel__title">Sets</div>
+    <div class="panel__sub">A set is the queries that run together and get compared together</div>
   </div>
   {% if sets %}
   <div class="table-scroll">
     <table class="table">
       <thead>
         <tr>
-          <th scope="col">키</th><th scope="col">이름</th>
-          <th scope="col">쿼리</th><th scope="col">실행 이력</th><th scope="col">설명</th>
+          <th scope="col">Set</th><th scope="col">Queries</th>
+          <th scope="col">Has been run</th><th scope="col">What it measures</th>
         </tr>
       </thead>
       <tbody>
         {% for s in sets %}
         <tr>
-          <td><a class="mono" href="/benchmarks/sets/{{ s.key }}">{{ s.key }}</a></td>
-          <td>{{ s.title }}</td>
+          <td>
+            <a href="/benchmarks/sets/{{ s.key }}">{{ s.title }}</a>
+            <div class="dim mono">{{ s.key }}</div>
+          </td>
           <td class="num">{{ s.queries | length }}</td>
           <td>
             {% if s.has_runs %}
-            <span class="test-chip test-chip--good">있음</span>
+            <span class="test-chip test-chip--good">Yes</span>
             {% else %}
-            <span class="dim">없음</span>
+            <span class="dim">Not yet</span>
             {% endif %}
           </td>
-          <td class="wrap dim">{{ s.description }}</td>
+          <td class="wrap dim">{{ s.description or '—' }}</td>
         </tr>
         {% endfor %}
       </tbody>
@@ -54,12 +60,12 @@
   </div>
   {% else %}
   <div class="empty">
-    {{ ui.icon('clock', 20, 1.6) }}
-    <div class="empty__title">세트가 하나도 없다</div>
+    {{ ui.icon('queries', 20, 1.6) }}
+    <div class="empty__title">No sets yet</div>
     <div class="empty__desc">
-      TMS 는 기본 세트를 갖고 오지 않는다 — 어떤 카탈로그가 있는지는 이 설치본의
-      사실이고, 없는 카탈로그를 가리키는 기본값은 첫 실행에서 실패해서 기능이
-      고장 난 것처럼 보이게 만든다. 아래에서 하나 만든다.
+      Nothing ships by default. A bundled set would have to name a catalog, and
+      which catalogs exist is a fact about this deployment — a default that
+      fails on first use teaches you the feature is broken. Create one below.
     </div>
   </div>
   {% endif %}
@@ -68,34 +74,48 @@
 {% if can_edit %}
 <section class="panel" style="margin-top:14px">
   <div class="panel__head">
-    <div class="panel__title">세트 만들기 / 이름 바꾸기</div>
-    <div class="panel__sub">이미 있는 키를 넣으면 이름과 설명만 바뀐다</div>
+    <div class="panel__title">New query set</div>
+    <div class="panel__sub">A set and its first query. You can add more queries afterwards.</div>
   </div>
   <form method="post" action="/benchmarks/sets" class="wi-form">
     <div class="rg-add__grid">
-      <label class="field"><span>키 <span class="dim">(소문자·숫자·<span class="mono">-</span>·<span class="mono">_</span>)</span></span>
+      <label class="field"><span>Set ID <span class="dim">(lowercase, digits, <span class="mono">-</span>, <span class="mono">_</span>)</span></span>
         <input class="input mono" name="set_key" required maxlength="64"
                pattern="[a-z0-9][a-z0-9_-]*" placeholder="nightly">
       </label>
-      <label class="field"><span>이름 <span class="dim">(선택)</span></span>
-        <input class="input" name="title" maxlength="200" placeholder="야간 정기 벤치마크">
+      <label class="field"><span>Name <span class="dim">(optional)</span></span>
+        <input class="input" name="title" maxlength="200"
+               placeholder="Nightly regression set">
       </label>
     </div>
-    <label class="field"><span>설명 <span class="dim">(선택)</span></span>
+    <label class="field"><span>What it measures <span class="dim">(optional)</span></span>
       <input class="input" name="description" maxlength="500"
-             placeholder="이 세트로 무엇을 답하려 하는가">
+             placeholder="The question you want this set to answer">
     </label>
-    <label class="field"><span>사유 <span class="dim">(필수)</span></span>
+
+    <div class="rg-add__grid">
+      <label class="field"><span>First query — name <span class="dim">(results are keyed by this)</span></span>
+        <input class="input mono" name="name" required maxlength="64"
+               pattern="[a-z0-9][a-z0-9_-]*" placeholder="scan_orders">
+      </label>
+    </div>
+    <label class="field"><span>First query — SQL <span class="dim">(one read-only statement, no trailing <span class="mono">;</span> needed)</span></span>
+      <textarea class="input mono" name="statement" rows="8" required
+                placeholder="SELECT count(*) FROM hive.reporting.events WHERE dt = DATE '2026-08-01'"></textarea>
+    </label>
+
+    <label class="field"><span>Reason <span class="dim">(required)</span></span>
       <input class="input" name="reason" required maxlength="500"
-             placeholder="왜 이 세트가 필요한가">
+             placeholder="Why this set is needed">
     </label>
     <div class="row-actions">
-      <button class="btn btn--primary" type="submit">저장</button>
+      <button class="btn btn--primary" type="submit">Create</button>
     </div>
   </form>
   <p class="panel__note">
-    키는 나중에 바꿀 수 없다. 실행 기록이 이 키로 남고(<span class="mono">benchmark_run.query_set</span>),
-    비교는 같은 키끼리만 한다.
+    The set ID cannot be changed later. Runs are recorded against it and only
+    runs of the same set can be compared, so renaming it would orphan every
+    measurement taken so far.
   </p>
 </section>
 {% endif %}

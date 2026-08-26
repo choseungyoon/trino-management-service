@@ -1,4 +1,4 @@
-"""Storage for query sets an administrator edits in the console (FR-BM-06).
+"""Storage for query sets an administrator edits in the console.
 
 Deliberately *not* append-only, unlike `store.py` next door. A query set is
 configuration - it says what to measure - and the thing this replaced was a

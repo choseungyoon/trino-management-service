@@ -1,7 +1,7 @@
-"""Production protection (FR-BM-04). Non-negotiable.
+"""Production protection. Non-negotiable.
 
-> **FR-BM-04는 타협 불가.** 프로덕션 트래픽을 받는 클러스터에 벤치마크를
-> 돌리면 그 자체가 장애다. — REQUIREMENTS.md
+> Running a benchmark against a cluster that is taking production traffic is
+> itself an outage. Non-negotiable. — REQUIREMENTS.md
 
 Two things follow from that sentence, and the second one is the easy one to
 get wrong.
@@ -45,25 +45,27 @@ STALE_QUERY_VIEW = "stale_query_view"
 
 ADVICE = {
     NO_GATEWAY: (
-        "The Gateway integration is off, so TMS cannot tell whether this "
-        "cluster is still taking production traffic. It will not guess."),
+        "The Gateway integration is off, so there is no way to tell whether "
+        "this cluster is still taking production traffic. It will not guess."),
     NO_BACKEND: (
-        "No Gateway backend is matched to this cluster, so TMS cannot tell "
-        "whether it is in rotation."),
+        "No Gateway backend is matched to this cluster, so there is no way "
+        "to tell whether it is in rotation."),
     GATEWAY_UNREACHABLE: (
         "The Gateway did not answer, so its routing state is unknown. An "
         "unknown routing state is not an excluded one."),
+    # No internal rule numbers in this text: it is read by whoever is holding
+    # the console, and "rule 5" tells them nothing about what to do next.
     STILL_ROUTED: (
         "This cluster is still in rotation. Exclude it first — through the "
-        "Gateway, or as step 1 of a safe restart sequence. TMS will not "
-        "deactivate a backend on its own; that would be a way around the "
-        "safe restart sequence (CLAUDE.md rule 5)."),
+        "Gateway, or as the first step of a safe restart. This console will "
+        "not deactivate a backend on its own, because stopping traffic has to "
+        "go through the restart sequence that drains queries first."),
     NO_QUERY_VIEW: (
-        "TMS has not collected this cluster's running queries, so it cannot "
-        "tell whether the coordinator is idle."),
+        "This cluster's running queries have not been collected yet, so "
+        "there is no way to tell whether the coordinator is idle."),
     STALE_QUERY_VIEW: (
-        "The running-query view is stale. What TMS can see is the past, and "
-        "the past does not say the cluster is idle now."),
+        "The running-query view is stale. What it shows is the past, and the "
+        "past does not say the cluster is idle now."),
     QUERIES_RUNNING: (
         "Queries are still running here. They would compete with the "
         "benchmark for the same workers, so the numbers would measure them "

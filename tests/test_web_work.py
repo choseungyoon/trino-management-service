@@ -83,7 +83,10 @@ class WorkBoardScreenTest(unittest.IsolatedAsyncioTestCase):
         async with self.client() as c:
             await sign_in(c)
             response = await c.get("/work")
-        self.assertIn("문서가 이긴다", response.text)
+        # Asserted on a phrase that fits one line: matching across the
+        # template's own wrapping would break on a reflow that changed nothing.
+        self.assertIn("This board owns status. The documents own the reasoning.",
+                      response.text)
 
     async def test_a_blocked_card_carries_its_blocker(self):
         async with self.client() as c:
@@ -111,7 +114,7 @@ class WorkBoardScreenTest(unittest.IsolatedAsyncioTestCase):
             await sign_in(c)
             response = await c.get("/work")
         self.assertEqual(200, response.status_code)
-        self.assertIn("보드를 읽을 수 없다", response.text)
+        self.assertIn("The board cannot be read", response.text)
         self.assertIn("connection refused", response.text)
 
     # ------------------------------------------------------------- writing

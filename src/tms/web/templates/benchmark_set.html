@@ -1,60 +1,59 @@
 {% extends "base.html" %}
 {% import "_icons.html" as ui %}
-{% block title %}{{ set.key }} · 쿼리 세트{% endblock %}
+{% block title %}{{ set.key }} · Query set{% endblock %}
 {% block heading %}{{ set.title }} <span class="dim mono">{{ set.key }}</span>{% endblock %}
 
 {% block content %}
 <p class="dim" style="margin-bottom:12px">
-  <a href="/benchmarks/sets">← 쿼리 세트</a>
+  <a href="/benchmarks/sets">← Query sets</a>
   {% if set.description %} · {{ set.description }}{% endif %}
 </p>
 
 <section class="panel">
   <div class="panel__head">
-    <div class="panel__title">쿼리 {{ set.queries | length }}<span class="dim">/{{ max_queries }}</span></div>
-    <div class="panel__sub">실행 순서는 순번, 같으면 이름순</div>
+    <div class="panel__title">Queries {{ set.queries | length }}<span class="dim">/{{ max_queries }}</span></div>
+    <div class="panel__sub">Run in order of position, then by name</div>
   </div>
   {% if set.queries %}
   <div class="table-scroll">
     <table class="table">
       <thead>
         <tr>
-          <th scope="col">순번</th><th scope="col">이름</th>
+          <th scope="col">#</th><th scope="col">Name</th>
           <th scope="col">SQL</th><th scope="col"></th>
         </tr>
       </thead>
       <tbody>
         {% for q in set.queries %}
         {% if editing == q.name and can_edit %}
-        {#
-          한 번에 한 행만 폼이 된다. 열린 편집기가 둘이면 둘이 서로를 덮어쓴다.
-        #}
-        <tr>
+        {# One row is a form at a time. Two open editors on one set are two
+           people about to overwrite each other. #}
+        <tr class="row-editing">
           <td colspan="4">
             <form method="post" action="/benchmarks/sets/{{ set.key }}/queries" class="wi-form">
               <input type="hidden" name="original_name" value="{{ q.name }}">
               <div class="rg-add__grid">
-                <label class="field"><span>이름</span>
+                <label class="field"><span>Name</span>
                   <input class="input mono" name="name" required maxlength="64"
                          pattern="[a-z0-9][a-z0-9_-]*" value="{{ q.name }}">
                 </label>
-                <label class="field"><span>순번</span>
+                <label class="field"><span>Position</span>
                   <input class="input num" name="position" type="number" value="{{ q.position }}">
                 </label>
               </div>
-              <label class="field"><span>설명 <span class="dim">(선택)</span></span>
+              <label class="field"><span>What it measures <span class="dim">(optional)</span></span>
                 <input class="input" name="title" maxlength="200" value="{{ q.title }}">
               </label>
-              <label class="field"><span>SQL <span class="dim">(읽기 전용 구문 한 건)</span></span>
+              <label class="field"><span>SQL <span class="dim">(one read-only statement)</span></span>
                 <textarea class="input mono" name="statement" rows="8" required>{{ q.sql }}</textarea>
               </label>
-              <label class="field"><span>사유 <span class="dim">(필수)</span></span>
+              <label class="field"><span>Reason <span class="dim">(required)</span></span>
                 <input class="input" name="reason" required maxlength="500"
-                       placeholder="무엇을 왜 바꾸는가">
+                       placeholder="What you are changing, and why">
               </label>
               <div class="row-actions">
-                <button class="btn btn--primary" type="submit">저장</button>
-                <a class="btn" href="/benchmarks/sets/{{ set.key }}">취소</a>
+                <button class="btn btn--primary" type="submit">Save</button>
+                <a class="btn" href="/benchmarks/sets/{{ set.key }}">Cancel</a>
               </div>
             </form>
           </td>
@@ -68,14 +67,14 @@
           </td>
           <td class="wrap"><code class="mono">{{ q.sql | truncate(160) }}</code></td>
           <td class="row-actions">
-            <a class="btn" href="/benchmarks/sets/{{ set.key }}/queries/{{ q.name }}/history">이력</a>
+            <a class="btn" href="/benchmarks/sets/{{ set.key }}/queries/{{ q.name }}/history">History</a>
             {% if can_edit %}
-            <a class="btn" href="/benchmarks/sets/{{ set.key }}?edit={{ q.name }}">수정</a>
+            <a class="btn" href="/benchmarks/sets/{{ set.key }}?edit={{ q.name }}">Edit</a>
             <form method="post"
                   action="/benchmarks/sets/{{ set.key }}/queries/{{ q.name }}/delete">
               <input class="input" name="reason" required maxlength="500"
-                     placeholder="삭제 사유">
-              <button class="btn btn--danger" type="submit">삭제</button>
+                     placeholder="Reason for removing it">
+              <button class="btn btn--danger" type="submit">Remove</button>
             </form>
             {% endif %}
           </td>
@@ -88,8 +87,8 @@
   {% else %}
   <div class="empty">
     {{ ui.icon('queries', 20, 1.6) }}
-    <div class="empty__title">쿼리가 없다</div>
-    <div class="empty__desc">세트는 만들어졌지만 아직 실행할 것이 없다. 아래에서 첫 쿼리를 추가한다.</div>
+    <div class="empty__title">No queries in this set</div>
+    <div class="empty__desc">The set exists but there is nothing to run. Add the first query below.</div>
   </div>
   {% endif %}
 </section>
@@ -97,33 +96,33 @@
 {% if can_edit and not editing %}
 <section class="panel" style="margin-top:14px">
   <div class="panel__head">
-    <div class="panel__title">쿼리 추가</div>
-    <div class="panel__sub">읽기 전용 구문 한 건 · 세미콜론으로 이어 붙이지 않는다</div>
+    <div class="panel__title">Add a query</div>
+    <div class="panel__sub">One read-only statement — statements cannot be chained with <span class="mono">;</span></div>
   </div>
   <form method="post" action="/benchmarks/sets/{{ set.key }}/queries" class="wi-form">
     <div class="rg-add__grid">
-      <label class="field"><span>이름 <span class="dim">(결과가 이 이름으로 쌓인다)</span></span>
+      <label class="field"><span>Name <span class="dim">(results are keyed by this)</span></span>
         <input class="input mono" name="name" required maxlength="64"
                pattern="[a-z0-9][a-z0-9_-]*" placeholder="scan_orders">
       </label>
-      <label class="field"><span>순번</span>
+      <label class="field"><span>Position</span>
         <input class="input num" name="position" type="number"
                value="{{ set.queries | length }}">
       </label>
     </div>
-    <label class="field"><span>설명 <span class="dim">(선택)</span></span>
-      <input class="input" name="title" maxlength="200" placeholder="이 쿼리가 무엇을 재는가">
+    <label class="field"><span>What it measures <span class="dim">(optional)</span></span>
+      <input class="input" name="title" maxlength="200" placeholder="Wide scan over a partitioned table">
     </label>
     <label class="field"><span>SQL</span>
       <textarea class="input mono" name="statement" rows="8" required
-                placeholder="SELECT count(*) FROM ..."></textarea>
+                placeholder="SELECT count(*) FROM hive.reporting.events WHERE dt = DATE '2026-08-01'"></textarea>
     </label>
-    <label class="field"><span>사유 <span class="dim">(필수)</span></span>
+    <label class="field"><span>Reason <span class="dim">(required)</span></span>
       <input class="input" name="reason" required maxlength="500"
-             placeholder="왜 이 쿼리를 세트에 넣는가">
+             placeholder="Why this query belongs in the set">
     </label>
     <div class="row-actions">
-      <button class="btn btn--primary" type="submit">추가</button>
+      <button class="btn btn--primary" type="submit">Add</button>
     </div>
   </form>
 </section>
@@ -131,16 +130,18 @@
 
 <section class="panel" style="margin-top:14px">
   <div class="panel__head">
-    <div class="panel__title">최근 실행</div>
-    <div class="panel__sub">이 세트로 돌린 것만</div>
+    <div class="panel__title">Recent runs</div>
+    <div class="panel__sub">This set only</div>
+    <span class="spacer"></span>
+    <a class="btn btn--sm" href="/benchmark">Run it</a>
   </div>
   {% if runs %}
   <div class="table-scroll">
     <table class="table">
       <thead>
         <tr>
-          <th scope="col">#</th><th scope="col">시작</th><th scope="col">클러스터</th>
-          <th scope="col">상태</th><th scope="col">보호</th><th scope="col">실행자</th>
+          <th scope="col">#</th><th scope="col">Started</th><th scope="col">Cluster</th>
+          <th scope="col">State</th><th scope="col">Verified</th><th scope="col">By</th>
         </tr>
       </thead>
       <tbody>
@@ -151,8 +152,8 @@
           <td class="mono">{{ r.cluster }}{% if r.label %}<div class="dim">{{ r.label }}</div>{% endif %}</td>
           <td><span class="status status--{{ r.state | status_class }}">{{ r.state }}</span></td>
           <td>
-            {% if r.guard_ok %}<span class="test-chip test-chip--good">확인됨</span>
-            {% else %}<span class="test-chip test-chip--bad">미확인</span>{% endif %}
+            {% if r.guard_ok %}<span class="test-chip test-chip--good">Yes</span>
+            {% else %}<span class="test-chip test-chip--bad">No</span>{% endif %}
           </td>
           <td>{{ r.actor }}</td>
         </tr>
@@ -161,38 +162,53 @@
     </table>
   </div>
   {% else %}
-  <p class="panel__note">아직 없다. 클러스터의 벤치마크 화면에서 이 세트를 골라 실행한다.</p>
-  {% endif %}
-  {% if clusters %}
-  <p class="panel__note">
-    실행: {% for c in clusters %}<a class="mono" href="/clusters/{{ c }}/benchmark">{{ c }}</a>{% if not loop.last %} · {% endif %}{% endfor %}
-  </p>
+  <p class="panel__note">Not yet. Pick this set on the benchmark page and run it.</p>
   {% endif %}
 </section>
 
 {% if can_edit %}
 <section class="panel" style="margin-top:14px">
   <div class="panel__head">
-    <div class="panel__title">세트 삭제</div>
-    <div class="panel__sub">과거 실행 기록과 측정값은 그대로 남는다</div>
+    <div class="panel__title">Set details</div>
+    <div class="panel__sub">The ID cannot change — runs are recorded against it</div>
   </div>
-  <form method="post" action="/benchmarks/sets/{{ set.key }}/delete" class="wi-form">
-    <label class="field"><span>사유 <span class="dim">(필수)</span></span>
-      <input class="input" name="reason" required maxlength="500"
-             placeholder="왜 더 이상 필요 없는가">
+  <form method="post" action="/benchmarks/sets/{{ set.key }}/details" class="wi-form">
+    <label class="field"><span>Name</span>
+      <input class="input" name="title" maxlength="200" value="{{ set.title }}">
+    </label>
+    <label class="field"><span>What it measures</span>
+      <input class="input" name="description" maxlength="500" value="{{ set.description }}">
+    </label>
+    <label class="field"><span>Reason <span class="dim">(required)</span></span>
+      <input class="input" name="reason" required maxlength="500">
     </label>
     <div class="row-actions">
-      <button class="btn btn--danger" type="submit">삭제</button>
+      <button class="btn btn--primary" type="submit">Save</button>
+    </div>
+  </form>
+</section>
+
+<section class="panel" style="margin-top:14px">
+  <div class="panel__head">
+    <div class="panel__title">Delete this set</div>
+    <div class="panel__sub">Past runs and their measurements are left alone</div>
+  </div>
+  <form method="post" action="/benchmarks/sets/{{ set.key }}/delete" class="wi-form">
+    <label class="field"><span>Reason <span class="dim">(required)</span></span>
+      <input class="input" name="reason" required maxlength="500"
+             placeholder="Why it is no longer needed">
+    </label>
+    <div class="row-actions">
+      <button class="btn btn--danger" type="submit">Delete</button>
     </div>
   </form>
   <p class="panel__note">
-    {#
-      실행 기록은 이 세트를 참조가 아니라 값으로 갖는다 — 키는 문자열 칼럼이고
-      각 실행은 실행한 SQL 자체를 스냅샷으로 들고 있다. 그래서 삭제해도
-      과거 측정값의 의미가 사라지지 않는다.
-    #}
-    실행 기록(<span class="mono">#{{ runs | length }}건 이상</span>)은 이 세트를 참조가 아니라
-    값으로 갖는다. 삭제는 앞으로의 실행에서 빼는 것이고, 지나간 측정값을 지우지 않는다.
+    {# Runs hold this set by value, not by reference: the key is a plain column
+       and each run carries a snapshot of the SQL it executed. Deleting the set
+       removes it from future runs and takes nothing away from past ones. #}
+    Runs hold this set by value, not by reference — each one carries a snapshot
+    of the SQL it actually executed. Deleting removes the set from future runs
+    and takes nothing away from the measurements already taken.
   </p>
 </section>
 {% endif %}

@@ -47,12 +47,16 @@ SETS = {"smoke": {"title": "Smoke", "queries": [{"name": "a", "sql": "SELECT 1"}
 
 
 class Gateway:
-    def __init__(self, active=False):
+    def __init__(self, active=False, clusters=("prod-a",), refuse=None):
         self.active = active
+        self.clusters = clusters
+        self.refuse = refuse
         self.set_active_calls = []
 
     def list_backends(self, active_only=False):
-        return [{"name": "trino-prod-a-1", "active": self.active}]
+        return [{"name": "trino-{}-1".format(c),
+                 "active": self.active or c == self.refuse}
+                for c in self.clusters]
 
     def set_active(self, name, active):  # pragma: no cover - must never be called
         self.set_active_calls.append((name, active))
@@ -70,21 +74,27 @@ class RecordingRunner:
         self.aborted.append(run_id)
 
 
-def wire(roles=("admin",), gateway_active=False, running=0):
-    config, service, _trino = build_service(roles=roles)
+def wire(roles=("admin",), gateway_active=False, running=0, refuse_cluster=None,
+         clusters=("prod-a", "prod-b")):
+    config, service, _trino = build_service(roles=roles, clusters=clusters)
     now = utcnow()
-    service.repository.save(Snapshot(GATEWAY_SCOPE, KIND_GATEWAY, now, payload={
-        "backends": [{"name": "trino-prod-a-1", "cluster": "prod-a",
-                      "active": gateway_active}]}))
-    service.repository.save(Snapshot("prod-a", KIND_QUERIES, now, payload={
-        "summary": {"running": running, "queued": 0, "total": running},
-        "queries": []}))
+    backends = [{"name": "trino-{}-1".format(cluster), "cluster": cluster,
+                 "active": gateway_active or cluster == refuse_cluster}
+                for cluster in config.cluster_names]
+    service.repository.save(Snapshot(GATEWAY_SCOPE, KIND_GATEWAY, now,
+                                     payload={"backends": backends}))
+    for cluster in config.cluster_names:
+        service.repository.save(Snapshot(cluster, KIND_QUERIES, now, payload={
+            "summary": {"running": running, "queued": 0, "total": running},
+            "queries": []}))
     repository = InMemoryBenchmarkRepository()
     runner = RecordingRunner()
     benchmark = BenchmarkService(
         config=config, snapshots=service.repository, audit_guard=service.audit,
         repository=repository, runner=runner,
-        query_sets=build_query_sets(SETS), gateway_client=Gateway(gateway_active))
+        query_sets=build_query_sets(SETS),
+        gateway_client=Gateway(gateway_active, tuple(config.cluster_names),
+                               refuse_cluster))
     return config, service, benchmark, repository, runner
 
 
@@ -199,26 +209,73 @@ class BenchmarkScreenTest(unittest.IsolatedAsyncioTestCase):
     async def test_the_page_says_the_cluster_is_ready_when_it_is(self):
         async with self.client(self.build()) as c:
             await sign_in(c)
-            response = await c.get("/clusters/prod-a/benchmark")
+            response = await c.get("/benchmark")
         self.assertEqual(200, response.status_code)
-        self.assertIn("라우팅에서 빠져 있고", response.text)
+        self.assertIn("Ready", response.text)
+        # Selectable, which is the part the operator acts on.
+        self.assertIn('value="prod-a"', response.text)
 
     async def test_the_page_says_what_is_missing_when_it_is_not(self):
         async with self.client(self.build(gateway_active=True)) as c:
             await sign_in(c)
-            response = await c.get("/clusters/prod-a/benchmark")
+            response = await c.get("/benchmark")
         self.assertEqual(200, response.status_code)
-        self.assertIn("지금은 실행할 수 없다", response.text)
+        self.assertIn("Not available", response.text)
         # And it names the way to fix it, which is somewhere else entirely.
-        self.assertIn("안전 시퀀스", response.text)
+        self.assertIn("restart sequence", response.text)
+
+    async def test_every_cluster_is_offered_on_one_page(self):
+        """One page, not one per cluster.
+
+        The question that brings anyone here is "is A slower than B", and it
+        used to be answered by typing two URLs and running the set twice.
+        """
+        async with self.client(self.build()) as c:
+            await sign_in(c)
+            response = await c.get("/benchmark")
+        for cluster in ("prod-a", "prod-b"):
+            self.assertIn('value="{}"'.format(cluster), response.text)
+
+    async def test_the_old_per_cluster_address_still_leads_somewhere(self):
+        async with self.client(self.build()) as c:
+            await sign_in(c)
+            response = await c.get("/clusters/prod-a/benchmark",
+                                   follow_redirects=False)
+        self.assertEqual(308, response.status_code)
+        self.assertEqual("/benchmark", response.headers["location"])
+
+    async def test_a_run_can_be_started_on_several_clusters_at_once(self):
+        app = self.build()
+        async with self.client(app) as c:
+            await sign_in(c)
+            response = await c.post("/benchmark", data={
+                "clusters": ["prod-a", "prod-b"], "query_set": "smoke",
+                "reason": "comparing the two", "repetitions": "1"})
+        self.assertEqual(303, response.status_code)
+        self.assertEqual({"prod-a", "prod-b"},
+                         {r["cluster"] for r in self.repository.runs})
+
+    async def test_one_refused_cluster_does_not_cancel_the_others(self):
+        """⛔ Refusing all of them would mean the operator excludes the last
+        one, comes back, and runs the rest a second time - and those are the
+        numbers they would compare, from clusters whose caches are now warm."""
+        app = self.build(gateway_active=False, refuse_cluster="prod-b")
+        async with self.client(app) as c:
+            await sign_in(c)
+            response = await c.post("/benchmark", data={
+                "clusters": ["prod-a", "prod-b"], "query_set": "smoke",
+                "reason": "comparing the two", "repetitions": "1"})
+        self.assertEqual(303, response.status_code)
+        self.assertEqual(["prod-a"], [r["cluster"] for r in self.repository.runs])
 
     async def test_the_start_form_is_refused_by_the_server_not_only_the_button(self):
         """The disabled attribute is a courtesy; the check is on the server."""
         app = self.build(gateway_active=True)
         async with self.client(app) as c:
             await sign_in(c)
-            response = await c.post("/clusters/prod-a/benchmark", data={
-                "query_set": "smoke", "reason": "trying anyway", "repetitions": "1"})
+            response = await c.post("/benchmark", data={
+                "clusters": ["prod-a"], "query_set": "smoke",
+                "reason": "trying anyway", "repetitions": "1"})
         self.assertEqual(303, response.status_code)
         self.assertIn("error=", response.headers["location"])
         self.assertEqual([], self.repository.runs)
@@ -227,8 +284,9 @@ class BenchmarkScreenTest(unittest.IsolatedAsyncioTestCase):
         app = self.build()
         async with self.client(app) as c:
             await sign_in(c)
-            response = await c.post("/clusters/prod-a/benchmark", data={
-                "query_set": "smoke", "reason": "measuring", "repetitions": "2"})
+            response = await c.post("/benchmark", data={
+                "clusters": ["prod-a"], "query_set": "smoke",
+                "reason": "measuring", "repetitions": "2"})
             self.assertEqual(303, response.status_code)
             page = await c.get(response.headers["location"])
         self.assertEqual(200, page.status_code)
@@ -245,7 +303,8 @@ class BenchmarkScreenTest(unittest.IsolatedAsyncioTestCase):
         async with self.client(app) as c:
             await sign_in(c)
             response = await c.get("/benchmarks/{}".format(run["id"]))
-        self.assertIn("보호 조건이 확인되지 않은", response.text)
+        self.assertIn("without confirming the cluster was out of rotation",
+                      response.text)
         self.assertIn("This cluster was in rotation.", response.text)
 
     async def test_a_comparison_renders_with_its_direction_in_words(self):
@@ -270,7 +329,7 @@ class BenchmarkScreenTest(unittest.IsolatedAsyncioTestCase):
             response = await c.get("/benchmarks/{}?against={}".format(ids[1], ids[0]))
         self.assertEqual(200, response.status_code)
         # Colour alone would leave "is red good here" to the reader.
-        self.assertIn("느려짐", response.text)
+        self.assertIn("Slower", response.text)
 
     async def test_an_unknown_run_is_a_404_page(self):
         async with self.client(self.build()) as c:
@@ -293,7 +352,7 @@ class BenchmarkScreenTest(unittest.IsolatedAsyncioTestCase):
         """A timed reload would throw away the reason someone is typing."""
         async with self.client(self.build()) as c:
             await sign_in(c)
-            response = await c.get("/clusters/prod-a/benchmark")
+            response = await c.get("/benchmark")
         self.assertNotIn("data-refresh", response.text)
 
 

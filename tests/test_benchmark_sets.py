@@ -154,6 +154,26 @@ class WritePathTest(unittest.TestCase):
         names = [q["name"] for q in self.bench.query_set(ADMIN, "smoke")["set"]["queries"]]
         self.assertEqual(["a2", "b"], sorted(names))
 
+    def test_a_set_is_created_with_its_first_query_in_one_step(self):
+        """One form, not two screens.
+
+        Creating an empty set and then adding a query left the operator on a
+        page with no SQL field on it, which reads as though a query set were a
+        name and a description.
+        """
+        created = self.bench.create_set(
+            ADMIN, key="nightly", title="Nightly", description="",
+            name="scan", statement="SELECT count(*) FROM t",
+            reason="tracking the nightly load")
+        self.assertEqual(["scan"], [q["name"] for q in created["queries"]])
+
+    def test_a_rejected_first_statement_leaves_no_empty_set_behind(self):
+        with self.assertRaises(InvalidRequest):
+            self.bench.create_set(ADMIN, key="nightly", title="", description="",
+                                  name="scan", statement="DELETE FROM t",
+                                  reason="testing")
+        self.assertIsNone(self.bench.query_sets.get("nightly"))
+
     def test_a_set_key_must_be_usable_in_a_url_and_a_column(self):
         for key in ("Nightly", "night ly", "", "-lead"):
             with self.assertRaises(InvalidRequest, msg=key):
@@ -163,6 +183,31 @@ class WritePathTest(unittest.TestCase):
         with self.assertRaises(NotFound):
             self.bench.save_query(ADMIN, "nope", name="c", title="",
                                   statement="SELECT 1", reason="testing")
+
+
+class SeveralClustersTest(unittest.TestCase):
+    """Starting the same set on more than one cluster at a time."""
+
+    def setUp(self):
+        self.service, self.bench, self.repository, self.sql = wire()
+
+    def test_all_of_them_start_when_all_of_them_are_ready(self):
+        outcome = self.bench.start_many(
+            ADMIN, clusters=["prod-a"], query_set="smoke",
+            reason="comparing", repetitions=1)
+        self.assertEqual(["prod-a"], [r["cluster"] for r in outcome["started"]])
+        self.assertEqual([], outcome["refused"])
+
+    def test_selecting_nothing_is_refused(self):
+        with self.assertRaises(InvalidRequest):
+            self.bench.start_many(ADMIN, clusters=[], query_set="smoke",
+                                  reason="r", repetitions=1)
+
+    def test_an_unknown_cluster_fails_before_anything_starts(self):
+        with self.assertRaises(NotFound):
+            self.bench.start_many(ADMIN, clusters=["prod-a", "nope"],
+                                  query_set="smoke", reason="r", repetitions=1)
+        self.assertEqual([], self.repository.runs)
 
 
 # ── editing versus running ────────────────────────────────────────────

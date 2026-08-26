@@ -1,9 +1,9 @@
-"""Query sets and what a benchmark statement is allowed to be (FR-BM-01/06).
+"""Query sets, and what a benchmark statement is allowed to be.
 
 A set is a named list of named statements. It used to be written into config
-like `fleet.jobs`; since FR-BM-06 an administrator edits it in the console and
-it lives in the database (`bench/setstore.py`). This module is what a set *is*
-and what may go in one - the rules, not the storage.
+like `fleet.jobs`; it now lives in the database (`bench/setstore.py`) and an
+administrator edits it in the console. This module is what a set *is* and what
+may go in one - the rules, not the storage.
 
 ⛔ **The rules got more load-bearing when the storage moved.** While sets lived
 in YAML, the allowlist below was a startup check on a file somebody had
@@ -111,7 +111,7 @@ def _without_comments(sql: str) -> str:
 def refuse_statement(sql: str) -> Optional[str]:
     """None if this may be benchmarked, else why not, in a sentence.
 
-    The public form of the allowlist. Called on every write (FR-BM-06) and
+    The public form of the allowlist. Called on every write and
     again by the runner before each execution - see the module header for why
     twice is not once too many.
     """

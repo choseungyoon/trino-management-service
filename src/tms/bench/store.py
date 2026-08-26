@@ -1,4 +1,4 @@
-"""Storage for benchmark runs and their measurements (FR-BM-01/03).
+"""Storage for benchmark runs and their measurements.
 
 Append-only where it matters, the same grade as the audit log: a measurement
 someone can edit afterwards is not a measurement, and the entire value of
@@ -237,7 +237,7 @@ class PostgresBenchmarkRepository:
 
     def history_for_query(self, query_set, query_name,
                           limit: int = 100) -> List[Dict[str, Any]]:
-        """Every execution of one named query, newest first (FR-BM-06).
+        """Every execution of one named query, newest first.
 
         Scoped to the set, not just the name: `q1` in `nightly` and `q1` in
         `adhoc` are different statements, and a chart that mixed them would be

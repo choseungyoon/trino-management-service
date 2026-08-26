@@ -53,8 +53,8 @@ def register(app, service, config, authenticator, codec, session_cookie: str,
              restarts=None, fleet=None, board=None, benchmark=None) -> None:
     """Mount the UI on an existing FastAPI app.
 
-    `restarts` is the FR-CO-02 sequence service, `fleet` the FR-FLEET one,
-    `board` the FR-BOARD work board and `benchmark` the FR-BM harness. Any may
+    `restarts` is the safe restart sequence service, `fleet` the node and job
+    one, `board` the work board and `benchmark` the query harness. Any may
     be None when it cannot run (no Gateway, no inventory, no database, not
     enabled). None is a real state the screens handle, not an error - the
     console still shows everything else.
@@ -548,7 +548,7 @@ def register(app, service, config, authenticator, codec, session_cookie: str,
     @app.get("/clusters/{cluster}/resource-groups", response_class=HTMLResponse,
              include_in_schema=False)
     def resource_groups(request: Request, cluster: str):
-        """The configured tree (FR-WL-07), read only.
+        """The configured resource group tree, read only.
 
         No envelope and no staleness banner: this comes from the store rather
         than a collector snapshot, so it is current by construction. The one
@@ -566,7 +566,7 @@ def register(app, service, config, authenticator, codec, session_cookie: str,
         context = _rg_context(request, principal, cluster)
         return render("resource_groups.html", context)
 
-    # -------------------------------------------- FR-WL-08/09, editing (htmx)
+    # ------------------------------------- resource group editing (htmx)
     #
     # Every write below answers with an HTML fragment rather than JSON, so the
     # validation that refused it is written once - on the server, where it is
@@ -905,7 +905,7 @@ def register(app, service, config, authenticator, codec, session_cookie: str,
             status_code=303,
         )
 
-    # ── fleet (FR-FL-01, FR-FL-03) ─────────────────────────────────────
+    # ── fleet ──────────────────────────────────────────────────────────
 
     @app.get("/clusters/{cluster}/fleet", response_class=HTMLResponse,
              include_in_schema=False)
@@ -935,7 +935,7 @@ def register(app, service, config, authenticator, codec, session_cookie: str,
             "jobs": jobs,
             "selected_cluster": cluster,
             "can_manage": principal.can(MANAGE_HEALTH),
-            # FR-FL-02. Only when the counts already disagree: a button that
+            # Only when the counts already disagree: a button that
             # spends a query slot to confirm what the screen already shows is
             # a button people press out of habit.
             "can_identify": (fleet.discovery_lookup_available
@@ -948,7 +948,7 @@ def register(app, service, config, authenticator, codec, session_cookie: str,
 
     @app.post("/clusters/{cluster}/fleet/identify", include_in_schema=False)
     def fleet_identify(request: Request, cluster: str):
-        """FR-FL-02. Runs one query against the coordinator, on request.
+        """Runs one query against the coordinator, on request.
 
         A POST although it reads nothing of TMS's own: it costs the cluster a
         query slot, and a GET that does that would be followed by every crawler
@@ -985,11 +985,12 @@ def register(app, service, config, authenticator, codec, session_cookie: str,
                    "Every node in the inventory is joined to discovery.")
         return response
 
-    # ── fleet jobs (FR-FL-04/05) ───────────────────────────────────────
+    # ── fleet jobs ─────────────────────────────────────────────────────
     #
     # ⛔ Not the restart sequence and not a replacement for it. TMS sees a
     # configured path and an exit code; it cannot know whether a playbook
-    # drained anything first. Restarts go through FR-CO-02, which has gates.
+    # drained anything first. Restarts go through the safe sequence, which
+    # has gates.
 
     @app.post("/clusters/{cluster}/fleet/jobs", include_in_schema=False)
     async def fleet_job_start(request: Request, cluster: str):
@@ -1066,7 +1067,7 @@ def register(app, service, config, authenticator, codec, session_cookie: str,
         _flash(response, "good", result["note"])
         return response
 
-    # ── safe restart sequence (FR-CO-02) ───────────────────────────────
+    # ── safe restart sequence ──────────────────────────────────────────
     #
     # One page for the whole procedure. The left column is the checklist -
     # where the sequence has got to and what it is waiting for - and the right
@@ -1282,7 +1283,7 @@ def register(app, service, config, authenticator, codec, session_cookie: str,
             headers={"Content-Disposition": 'attachment; filename="tms-audit.csv"'},
         )
 
-    # ── benchmark (FR-BM-01/03/04) ─────────────────────────────────────
+    # ── benchmark ──────────────────────────────────────────────────────
     #
     # ⛔ There is no route here that deactivates a backend, and there must
     # never be one. The screen shows what is missing and names who can fix it;
@@ -1295,7 +1296,7 @@ def register(app, service, config, authenticator, codec, session_cookie: str,
                 "The benchmark harness is off. Set benchmark.enabled."))
         return None
 
-    # ── query sets (FR-BM-06) ──────────────────────────────────────────
+    # ── query sets ─────────────────────────────────────────────────────
     #
     # ⛔ Registered before `/benchmarks/{run_id}`. FastAPI matches in
     # registration order, so the other way round `/benchmarks/sets` is a run
@@ -1328,9 +1329,16 @@ def register(app, service, config, authenticator, codec, session_cookie: str,
         return render("benchmark_sets.html", context)
 
     @app.post("/benchmarks/sets", include_in_schema=False)
-    def benchmark_set_save(request: Request, set_key: str = Form(""),
-                           title: str = Form(""), description: str = Form(""),
-                           reason: str = Form("")):
+    def benchmark_set_create(request: Request, set_key: str = Form(""),
+                             title: str = Form(""), description: str = Form(""),
+                             name: str = Form(""), statement: str = Form(""),
+                             reason: str = Form("")):
+        """Create a set and its first query together.
+
+        One form, not two screens. The old flow created an empty set and left
+        the operator on a page with no SQL field on it, which read as though a
+        query set were a name and a description.
+        """
         principal, claims = principal_or_redirect(request)
         if claims is None:
             return principal
@@ -1338,14 +1346,36 @@ def register(app, service, config, authenticator, codec, session_cookie: str,
         if unavailable is not None:
             return unavailable
         try:
-            saved = benchmark.save_set(principal, key=set_key.strip(), title=title,
-                                       description=description, reason=reason)
+            saved = benchmark.create_set(
+                principal, key=set_key.strip(), title=title,
+                description=description, name=name.strip(), statement=statement,
+                reason=reason)
         except ApiError as exc:
             response = RedirectResponse(_sets_redirect(), status_code=303)
             _flash(response, "bad", exc.message)
             return response
         response = RedirectResponse(_sets_redirect(saved["key"]), status_code=303)
-        _flash(response, "good", "Saved {}.".format(saved["key"]))
+        _flash(response, "good", "Created {}.".format(saved["key"]))
+        return response
+
+    @app.post("/benchmarks/sets/{set_key}/details", include_in_schema=False)
+    def benchmark_set_details(request: Request, set_key: str,
+                              title: str = Form(""), description: str = Form(""),
+                              reason: str = Form("")):
+        principal, claims = principal_or_redirect(request)
+        if claims is None:
+            return principal
+        unavailable = _benchmark_or_error(request, principal)
+        if unavailable is not None:
+            return unavailable
+        response = RedirectResponse(_sets_redirect(set_key), status_code=303)
+        try:
+            benchmark.save_set(principal, key=set_key, title=title,
+                               description=description, reason=reason)
+        except ApiError as exc:
+            _flash(response, "bad", exc.message)
+        else:
+            _flash(response, "good", "Updated {}.".format(set_key))
         return response
 
     @app.get("/benchmarks/sets/{set_key}", response_class=HTMLResponse,
@@ -1371,7 +1401,6 @@ def register(app, service, config, authenticator, codec, session_cookie: str,
             # Which row is open as a form. One at a time: two open editors on
             # one set is two people about to overwrite each other.
             "editing": edit,
-            "clusters": sorted(config.clusters),
             "envelope": None,
         })
         return render("benchmark_set.html", context)
@@ -1465,9 +1494,14 @@ def register(app, service, config, authenticator, codec, session_cookie: str,
         })
         return render("benchmark_query_history.html", context)
 
-    @app.get("/clusters/{cluster}/benchmark", response_class=HTMLResponse,
-             include_in_schema=False)
-    def benchmark_page(request: Request, cluster: str, error: Optional[str] = None):
+    @app.get("/benchmark", response_class=HTMLResponse, include_in_schema=False)
+    def benchmark_page(request: Request, error: Optional[str] = None):
+        """Every cluster on one page.
+
+        The question that brings anyone here is "is A slower than B", and one
+        page per cluster meant answering it by typing two URLs and running the
+        set twice.
+        """
         principal, claims = principal_or_redirect(request)
         if claims is None:
             return principal
@@ -1475,13 +1509,12 @@ def register(app, service, config, authenticator, codec, session_cookie: str,
         if unavailable is not None:
             return unavailable
         try:
-            data = benchmark.overview(principal, cluster)
+            data = benchmark.overview(principal)
         except ApiError as exc:
             return _error_page(request, principal, exc)
 
         context = base_context(request, principal, "benchmark")
         context.update({
-            "cluster": cluster,
             "bench": data,
             "runs": views.benchmark_rows(data["runs"]),
             "default_repetitions": config.benchmark.default_repetitions,
@@ -1490,10 +1523,16 @@ def register(app, service, config, authenticator, codec, session_cookie: str,
         })
         return render("benchmark.html", context)
 
-    @app.post("/clusters/{cluster}/benchmark", include_in_schema=False)
-    def benchmark_start(request: Request, cluster: str, query_set: str = Form(""),
+    @app.get("/clusters/{cluster}/benchmark", include_in_schema=False)
+    def benchmark_cluster_redirect(request: Request, cluster: str):
+        """The old per-cluster address. Kept so bookmarks do not 404."""
+        return RedirectResponse("/benchmark", status_code=308)
+
+    @app.post("/benchmark", include_in_schema=False)
+    def benchmark_start(request: Request, query_set: str = Form(""),
                         reason: str = Form(""), repetitions: str = Form("1"),
-                        label: str = Form("")):
+                        label: str = Form(""),
+                        clusters: List[str] = Form(default=[])):
         principal, claims = principal_or_redirect(request)
         if claims is None:
             return principal
@@ -1501,20 +1540,37 @@ def register(app, service, config, authenticator, codec, session_cookie: str,
         if unavailable is not None:
             return unavailable
         try:
-            run = benchmark.start(principal, cluster, query_set=query_set,
-                                  reason=reason,
-                                  repetitions=_int_or_none(repetitions) or 0,
-                                  label=label)
+            outcome = benchmark.start_many(
+                principal, clusters=list(clusters), query_set=query_set,
+                reason=reason, repetitions=_int_or_none(repetitions) or 0,
+                label=label)
         except ApiError as exc:
             # Back to the page with the refusal on it. The refusal is usually
             # the guard, and the guard is the thing the operator has to go and
             # fix somewhere else.
             return RedirectResponse(
-                "/clusters/{}/benchmark?error={}".format(
-                    _quote(cluster), _quote(exc.message)), status_code=303)
+                "/benchmark?error={}".format(_quote(exc.message)),
+                status_code=303)
 
-        response = RedirectResponse("/benchmarks/{}".format(run["id"]), status_code=303)
-        _flash(response, "good", "Benchmark #{} started.".format(run["id"]))
+        started, refused = outcome["started"], outcome["refused"]
+        if refused:
+            # Some started and some did not. Staying on the overview keeps both
+            # halves visible; jumping to one run would hide the refusals.
+            response = RedirectResponse("/benchmark", status_code=303)
+            _flash(response, "bad", "Started on {}. Refused on {}.".format(
+                ", ".join(r["cluster"] for r in started),
+                "; ".join("{} ({})".format(r["cluster"], r["message"])
+                          for r in refused)))
+            return response
+        if len(started) == 1:
+            response = RedirectResponse(
+                "/benchmarks/{}".format(started[0]["id"]), status_code=303)
+            _flash(response, "good",
+                   "Benchmark #{} started.".format(started[0]["id"]))
+            return response
+        response = RedirectResponse("/benchmark", status_code=303)
+        _flash(response, "good", "Started on {}.".format(
+            ", ".join(r["cluster"] for r in started)))
         return response
 
     @app.get("/benchmarks/{run_id}", response_class=HTMLResponse,
@@ -1570,7 +1626,7 @@ def register(app, service, config, authenticator, codec, session_cookie: str,
                    "Stopping after the query in flight.")
         return response
 
-    # ── work board (FR-BOARD) ──────────────────────────────────────────
+    # ── work board ─────────────────────────────────────────────────────
     #
     # Read by anyone signed in, written by administrators. The board owns
     # status; the document each item points at owns the reasoning, and the

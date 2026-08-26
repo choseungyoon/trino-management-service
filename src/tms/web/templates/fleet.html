@@ -153,7 +153,7 @@
     <p class="seq__act-why">{{ limit }}</p>
     {% endfor %}
     {% if can_identify %}
-    {# FR-FL-02. Offered, not automatic: this costs the coordinator a query
+    {# Offered, not automatic: this costs the coordinator a query
        slot, and D-012 only holds while these stay rare. So it appears where
        the count already disagrees and someone is looking at it. #}
     <form method="post"
@@ -183,7 +183,7 @@
 </div>
 
 {% if jobs.enabled %}
-{# FR-FL-04/05. Deliberately below the inventory: this screen is read far more
+{# Deliberately below the inventory: this screen is read far more
    often than it is acted on, and a control that changes the cluster should not
    be the first thing under the operator's cursor. #}
 <div class="panel">

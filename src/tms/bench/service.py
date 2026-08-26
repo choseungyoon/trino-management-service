@@ -1,13 +1,12 @@
-"""The benchmark harness's rules (FR-BM-01/03/04).
+"""What the benchmark harness will and will not do.
 
-Absolute rule 3 applies here in full, unlike the work board: starting a run
-consumes a real cluster's capacity on somebody's say-so. Reason, audit record,
-administrator.
+Starting a run is a write in the full sense: it consumes a real cluster's
+capacity on somebody's say-so. Reason, audit record, administrator.
 
-Absolute rule 5 shapes what this service refuses to do. It never deactivates a
-backend - see `guard.py`. The operator excludes the cluster and TMS checks
-their work, because a "run benchmark" button that could take a cluster out of
-rotation is the independent deactivate toggle CLAUDE.md forbids, renamed.
+⛔ It never takes a cluster out of rotation. The operator excludes the cluster
+and this service checks their work, because a "run benchmark" button that
+could deactivate a backend is the shortcut around the safe restart sequence,
+renamed. See guard.py.
 
 Python 3.9 compatible.
 """
@@ -16,6 +15,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from tms.api.errors import (
+    ApiError,
     AuditUnavailableError,
     Forbidden,
     InvalidRequest,
@@ -124,26 +124,40 @@ class BenchmarkService:
                 "or abort it first.".format(key, ", ".join(sorted(clusters))))
 
     def guard_for(self, cluster: str) -> guards.GuardResult:
-        """FR-BM-04, as data. Shown before anyone presses anything."""
+        """Production protection, as data. Shown before anyone presses anything."""
         return guards.check(cluster, self.gateway, self.snapshots,
                             self._stale_threshold)
 
     # ------------------------------------------------------------ reading
 
-    def overview(self, principal: Principal, cluster: str) -> Dict[str, Any]:
+    def overview(self, principal: Principal) -> Dict[str, Any]:
+        """Every cluster at once, each with its own readiness.
+
+        One page rather than one per cluster: the question that brings anyone
+        here is "is A slower than B", and answering it used to mean typing two
+        URLs and running the set twice by hand.
+        """
         self._require_view(principal)
-        self._cluster_or_404(cluster)
-        guard = self.guard_for(cluster)
         try:
-            recent = self.repository.recent(limit=20, cluster=cluster)
-            active = self.repository.active(cluster=cluster)
+            recent = self.repository.recent(limit=25)
+            active = self.repository.active()
         except BenchmarkStoreUnavailable as exc:
             log.warning("benchmark store unavailable: %s", exc)
             recent, active = [], []
+
+        running = {r["cluster"] for r in active}
+        clusters = []
+        for cluster in self.config.cluster_names:
+            guard = self.guard_for(cluster)
+            clusters.append({
+                "name": cluster,
+                "guard": guard.as_dict(),
+                "ready": guard.ok and cluster not in running,
+                "busy": cluster in running,
+            })
         return {
-            "cluster": cluster,
+            "clusters": clusters,
             "query_sets": [s.as_dict() for s in self._all_sets()],
-            "guard": guard.as_dict(),
             "runs": recent,
             "active": active,
             "can_start": principal.can(MANAGE_HEALTH),
@@ -277,7 +291,7 @@ class BenchmarkService:
             raise InvalidRequest(
                 "Repetitions must be between 1 and {}.".format(ceiling))
 
-        # ⛔ FR-BM-04. Checked here, before the audit record, so a refused run
+        # ⛔ Production protection. Checked here, before the audit record, so a refused run
         # is not written down as an action that happened.
         guard = self.guard_for(cluster)
         if not guard.ok:
@@ -323,6 +337,42 @@ class BenchmarkService:
                      len(declared.queries))
             return run
 
+    def start_many(self, principal: Principal, clusters: List[str], query_set: str,
+                   reason: str, repetitions: int = 1,
+                   label: Optional[str] = None) -> Dict[str, Any]:
+        """Start the same set on several clusters. Report each outcome.
+
+        ⛔ One cluster being refused does not cancel the others. Refusing all
+        four because the fourth is still in rotation would mean the operator
+        excludes it, comes back, and runs the first three a second time - and
+        the second numbers are the ones they would compare, from a cluster
+        whose caches are now warm. Started is started; refused is named.
+        """
+        self._require_admin(principal)
+        if not clusters:
+            raise InvalidRequest("Select at least one cluster.")
+        for cluster in clusters:
+            self._cluster_or_404(cluster)
+
+        started, refused = [], []
+        for cluster in clusters:
+            try:
+                started.append(self.start(principal, cluster, query_set=query_set,
+                                          reason=reason, repetitions=repetitions,
+                                          label=label))
+            except (ReasonRequiredError, Forbidden, NotFound):
+                # Nothing cluster-specific about these - the request itself is
+                # wrong, so failing the whole thing is the honest answer.
+                raise
+            except ApiError as exc:
+                refused.append({"cluster": cluster, "message": exc.message})
+        if not started and refused:
+            # Every one was refused. Raising rather than reporting keeps the
+            # operator on the form with their reason still in it.
+            raise InvalidRequest("; ".join(
+                "{}: {}".format(r["cluster"], r["message"]) for r in refused))
+        return {"started": started, "refused": refused}
+
     def abort(self, principal: Principal, run_id: Any) -> Dict[str, Any]:
         """Stop after the query in flight.
 
@@ -339,7 +389,7 @@ class BenchmarkService:
         return run
 
 
-    # ------------------------------------------------- editing (FR-BM-06)
+    # -------------------------------------------------------- editing
 
     def save_set(self, principal: Principal, key: str, title: str,
                  description: str, reason: str) -> Dict[str, Any]:
@@ -354,6 +404,38 @@ class BenchmarkService:
                 key=key, title=(title or "").strip(),
                 description=(description or "").strip(),
                 actor=principal.username)).as_dict()
+
+    def create_set(self, principal: Principal, key: str, title: str,
+                   description: str, name: str, statement: str,
+                   reason: str) -> Dict[str, Any]:
+        """A set and its first query, in one step.
+
+        Creating an empty set and then adding a query was two screens, and the
+        first one had no field to type SQL into - so the obvious reading of it
+        was that a query set *is* a name and a description.
+        """
+        self._require_admin(principal)
+        refusal = refuse_name(key, "set key")
+        if refusal:
+            raise InvalidRequest(refusal)
+        refusal = refuse_name(name, "query name")
+        if refusal:
+            raise InvalidRequest(refusal)
+        statement = (statement or "").strip().rstrip(";")
+        refusal = refuse_statement(statement)
+        if refusal:
+            raise InvalidRequest("That statement cannot be benchmarked: {}."
+                                 .format(refusal))
+        if self.query_sets.get(key) is not None:
+            raise InvalidRequest(
+                "A query set named {!r} already exists.".format(key))
+
+        # Validated first, written second, so a rejected statement never
+        # leaves an empty set behind for somebody to wonder about.
+        self.save_set(principal, key, title, description, reason)
+        self.save_query(principal, key, name=name, title="", statement=statement,
+                        reason=reason)
+        return self.query_sets.get(key).as_dict()
 
     def delete_set(self, principal: Principal, key: str, reason: str) -> None:
         self._require_admin(principal)

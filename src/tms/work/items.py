@@ -102,7 +102,7 @@ def next_request_key(existing_keys) -> str:
     """REQ-1, REQ-2, ... - the only keys the board mints itself.
 
     Document-backed items keep the identifier their document already gave them
-    (`D-012`, `FR-BM-01`), because that identifier is what people paste into
+    (`D-012`, `FR-BM-01`) - that identifier is what people paste into
     chat and what the document is titled with. Renumbering those here would
     break the link in both directions.
     """

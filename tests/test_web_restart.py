@@ -516,7 +516,9 @@ class EveryScreenTest(unittest.IsolatedAsyncioTestCase):
     #: Not screens. `/logout` in particular would end the session part-way
     #: through the sweep and turn every later route into a redirect to /login -
     #: which looks like the sweep passing over pages it never rendered.
-    NOT_SCREENS = ("/logout",)
+    #: `/clusters/{c}/benchmark` is the address the benchmark screen used to
+    #: have; it is a permanent redirect now, kept so bookmarks do not 404.
+    NOT_SCREENS = ("/logout", "/clusters/{cluster}/benchmark")
 
     #: Not write routes in the sense this sweep means. `/login` would replace
     #: the session mid-run and turn every later route into a redirect; the

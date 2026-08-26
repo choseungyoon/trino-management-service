@@ -1,107 +1,156 @@
 {% extends "base.html" %}
 {% import "_icons.html" as ui %}
-{% block title %}Benchmark · {{ cluster }}{% endblock %}
-{% block heading %}Benchmark <span class="dim">{{ cluster }}</span>{% endblock %}
+{% block title %}Benchmark{% endblock %}
+{% block heading %}Benchmark{% endblock %}
 
 {% block content %}
 {% if error %}
 <div class="banner banner--bad" role="alert">{{ ui.icon('bad', 15) }}<div>{{ error }}</div></div>
 {% endif %}
 
-{#
-  The guard is the first thing on the page, before the form, because it is the
-  answer to "can I run this" — and when it says no, the fix is somewhere else
-  entirely. FR-BM-04 is non-negotiable: TMS refuses, it does not arrange.
-#}
-{% if bench.guard.ok %}
-<div class="banner banner--good" role="status">
-  {{ ui.icon('good', 15) }}
-  <div>
-    <strong>이 클러스터는 라우팅에서 빠져 있고 비어 있다.</strong>
-    실행 중 쿼리 {{ bench.guard.running_queries | integer }}건 ·
-    백엔드 {% for b in bench.guard.backends %}<span class="mono">{{ b.name }}</span>{% if not loop.last %}, {% endif %}{% endfor %} 비활성 확인
-  </div>
-</div>
-{% else %}
-<div class="banner banner--bad" role="alert">
-  {{ ui.icon('lock', 15) }}
-  <div>
-    <strong>지금은 실행할 수 없다.</strong>
-    {% for advice in bench.guard.advice %}
-    <div class="bench-refusal">{{ advice.text }}</div>
-    {% endfor %}
-    <div class="dim" style="margin-top:6px">
-      TMS 는 백엔드를 스스로 비활성화하지 않는다 — 유입 차단은 안전 시퀀스의 1단계로만 도달한다.
-      {% if restarts_enabled %}
-      <a href="/clusters/{{ cluster }}/restart">안전 재시작 화면</a>으로 가거나 Gateway 에서 직접 제외한다.
-      {% endif %}
-    </div>
-  </div>
-</div>
-{% endif %}
-
 {% if bench.can_start %}
 <section class="panel">
   <div class="panel__head">
-    <div class="panel__title">실행</div>
-    <div class="panel__sub"><a href="/benchmarks/sets">쿼리 세트</a> 화면에서 만든 것만 고를 수 있다</div>
+    <div class="panel__title">Run a benchmark</div>
+    <div class="panel__sub">Pick the clusters and the query set. The same set on two clusters is how you compare them.</div>
   </div>
-  <form method="post" action="/clusters/{{ cluster }}/benchmark" class="wi-form">
-    <label class="field">쿼리 세트
+  <form method="post" action="/benchmark" class="wi-form">
+
+    {#
+      Readiness is per cluster, and it is shown before the form rather than
+      after the submit: when a cluster is not ready the fix is somewhere else
+      entirely — the Gateway, or a restart sequence. This console verifies and
+      refuses. It never takes a cluster out of rotation itself.
+    #}
+    <fieldset class="pick">
+      <legend class="pick__legend">Clusters</legend>
+      {% for c in bench.clusters %}
+      <div class="pick__row {% if not c.ready %}pick__row--blocked{% endif %}">
+        <label class="pick__pick">
+          <input type="checkbox" name="clusters" value="{{ c.name }}"
+                 {% if not c.ready %}disabled{% endif %}>
+          <span class="pick__name mono">{{ c.name }}</span>
+        </label>
+        {% if c.busy %}
+        <span class="test-chip test-chip--bad">A benchmark is already running</span>
+        {% elif c.ready %}
+        <span class="test-chip test-chip--good">Ready — out of rotation and idle</span>
+        {% else %}
+        <span class="test-chip test-chip--bad">Not available</span>
+        <div class="pick__why">
+          {% for advice in c.guard.advice %}
+          <div class="bench-refusal">{{ advice.text }}</div>
+          {% endfor %}
+        </div>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </fieldset>
+
+    <label class="field"><span>Query set</span>
       <select class="input" name="query_set" required
               {% if not bench.query_sets %}disabled{% endif %}>
         {% for qs in bench.query_sets %}
-        <option value="{{ qs.key }}">{{ qs.title }} — {{ qs.queries | length }} queries</option>
+        <option value="{{ qs.key }}">{{ qs.title }} — {{ qs.queries | length }} quer{% if qs.queries | length == 1 %}y{% else %}ies{% endif %}</option>
         {% else %}
-        <option value="">세트가 없다</option>
+        <option value="">No query sets yet</option>
         {% endfor %}
       </select>
     </label>
+
     <div class="rg-add__grid">
-      <label class="field">반복 횟수
+      <label class="field">Repetitions
         <input class="input num" name="repetitions" type="number" min="1"
                max="{{ bench.max_repetitions }}" value="{{ default_repetitions }}">
       </label>
-      <label class="field"><span>라벨 <span class="dim">(선택)</span></span>
-        <input class="input" name="label" maxlength="200" placeholder="예: heap 400G 적용 후">
+      <label class="field"><span>Label <span class="dim">(optional)</span></span>
+        <input class="input" name="label" maxlength="200"
+               placeholder="e.g. after raising the heap to 400G">
       </label>
     </div>
-    <label class="field"><span>사유 <span class="dim">(필수)</span></span>
+    <label class="field"><span>Reason <span class="dim">(required)</span></span>
       <input class="input" name="reason" required maxlength="500"
-             placeholder="왜 지금 이 클러스터에서 돌리는가">
+             placeholder="Why run this now, on these clusters">
     </label>
     <div class="row-actions">
       <button class="btn btn--primary" type="submit"
-              {% if not bench.guard.ok %}disabled title="라우팅에서 제외되지 않았다"{% endif %}>
-        실행
-      </button>
+              {% if not bench.query_sets %}disabled{% endif %}>Run</button>
     </div>
   </form>
-  {% if not bench.guard.ok %}
-  <p class="panel__note">버튼은 잠겨 있지만 그것이 보호 장치는 아니다 — 서버가 같은 검사를 다시 하고 거부한다.</p>
-  {% endif %}
-  {% if not bench.query_sets %}
+
   <p class="panel__note">
-    쿼리 세트가 하나도 없다. TMS 는 기본 세트를 갖고 오지 않는다 —
-    <a href="/benchmarks/sets">쿼리 세트</a> 화면에서 만든다.
+    A run takes the cluster's capacity, so it only starts on a cluster that is
+    already out of rotation and idle. Excluding a cluster is a step you take in
+    the Gateway or in a restart sequence — this page checks it and refuses,
+    and there is deliberately no button here that would do it for you.
+    {% if not bench.query_sets %}
+    <br>There are no query sets yet. Create one below — nothing ships by
+    default, because a bundled set would have to name a catalog that may not
+    exist here.
+    {% endif %}
   </p>
-  {% endif %}
 </section>
 {% endif %}
 
 <section class="panel" style="margin-top:14px">
   <div class="panel__head">
-    <div class="panel__title">실행 이력</div>
-    <div class="panel__sub">비교(FR-BM-03)는 각 실행 화면에서 한다</div>
+    <div class="panel__title">Query sets</div>
+    <div class="panel__sub">A set is the queries that run together and get compared together</div>
+    <span class="spacer"></span>
+    {% if bench.can_edit %}
+    <a class="btn btn--primary btn--sm" href="/benchmarks/sets">New query set</a>
+    {% endif %}
+  </div>
+  {% if bench.query_sets %}
+  <div class="table-scroll">
+    <table class="table">
+      <thead>
+        <tr>
+          <th scope="col">Set</th><th scope="col">Queries</th><th scope="col">What it measures</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for qs in bench.query_sets %}
+        <tr>
+          <td>
+            <a href="/benchmarks/sets/{{ qs.key }}">{{ qs.title }}</a>
+            <div class="dim mono">{{ qs.key }}</div>
+          </td>
+          <td class="num">{{ qs.queries | length }}</td>
+          <td class="wrap dim">{{ qs.description or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty">
+    {{ ui.icon('queries', 20, 1.6) }}
+    <div class="empty__title">No query sets yet</div>
+    <div class="empty__desc">
+      A set is a handful of read-only queries you run together. Create one, add
+      the queries you want to time, then run it on two clusters and compare.
+    </div>
+    {% if bench.can_edit %}
+    <a class="btn btn--primary" href="/benchmarks/sets">Create a query set</a>
+    {% endif %}
+  </div>
+  {% endif %}
+</section>
+
+<section class="panel" style="margin-top:14px">
+  <div class="panel__head">
+    <div class="panel__title">Recent runs</div>
+    <div class="panel__sub">Open a run to see per-query timings and to compare it with another</div>
   </div>
   {% if runs %}
   <div class="table-scroll">
     <table class="table">
       <thead>
         <tr>
-          <th scope="col">#</th><th scope="col">시작</th><th scope="col">세트</th>
-          <th scope="col">반복</th><th scope="col">상태</th><th scope="col">보호</th>
-          <th scope="col">사유</th><th scope="col">실행자</th>
+          <th scope="col">#</th><th scope="col">Started</th><th scope="col">Cluster</th>
+          <th scope="col">Set</th><th scope="col">Reps</th><th scope="col">State</th>
+          <th scope="col">Verified</th><th scope="col">Reason</th><th scope="col">By</th>
         </tr>
       </thead>
       <tbody>
@@ -109,17 +158,20 @@
         <tr>
           <td><a class="mono" href="/benchmarks/{{ r.id }}">#{{ r.id }}</a></td>
           <td class="mono num dim">{{ r.started_at | clock }}</td>
-          <td class="mono">{{ r.query_set }}{% if r.label %}<div class="dim">{{ r.label }}</div>{% endif %}</td>
+          <td class="mono">{{ r.cluster }}{% if r.label %}<div class="dim">{{ r.label }}</div>{% endif %}</td>
+          <td class="mono">{{ r.query_set }}</td>
           <td class="num">{{ r.repetitions | integer }}</td>
           <td><span class="status status--{{ r.state | status_class }}">{{ r.state }}</span></td>
           <td>
             {% if r.guard_ok %}
-            <span class="test-chip test-chip--good">확인됨</span>
+            <span class="test-chip test-chip--good">Yes</span>
             {% else %}
-            {# Kept and flagged rather than hidden: a run taken while the
-               cluster was in rotation measured production traffic, and that
-               fact has to survive to whoever reads the numbers later. #}
-            <span class="test-chip test-chip--bad">미확인</span>
+            {#
+              Kept and flagged rather than hidden: a run taken while the
+              cluster was still serving traffic measured that traffic too, and
+              that fact has to reach whoever reads the numbers later.
+            #}
+            <span class="test-chip test-chip--bad">No</span>
             {% endif %}
           </td>
           <td class="wrap">{{ r.reason }}</td>
@@ -132,9 +184,9 @@
   {% else %}
   <div class="empty">
     {{ ui.icon('clock', 20, 1.6) }}
-    <div class="empty__title">아직 실행이 없다</div>
-    <div class="empty__desc">쿼리 세트를 고르고 사유를 적어 실행하면 여기에 남는다.
-      같은 세트의 실행끼리는 나중에 나란히 비교할 수 있다.</div>
+    <div class="empty__title">Nothing has been run yet</div>
+    <div class="empty__desc">Pick a set, give a reason, and run it. Runs of the
+      same set can be compared side by side afterwards.</div>
   </div>
   {% endif %}
 </section>

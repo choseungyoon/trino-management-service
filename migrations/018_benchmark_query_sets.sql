@@ -1,10 +1,10 @@
--- 018 — benchmark query sets, edited from the console (FR-BM-06).
+-- 018 — benchmark query sets, edited from the console.
 --
 -- 016 stored `benchmark_run.query_set` as a key into config, and said so:
 -- "SQL here would mean the request chose what to execute". That was the right
 -- shape while sets lived in a git-reviewed YAML file. It is the wrong shape
 -- once an administrator is expected to add a query without a deploy, which is
--- what FR-BM-06 asks for, so the sets move here.
+-- what an administrator now needs, so the sets move here.
 --
 -- ⛔ What that costs, stated plainly: the read-only allowlist in
 -- `bench/queryset.py` used to be a *startup* check on a file somebody had
@@ -15,7 +15,7 @@
 --
 -- `benchmark_run.queries` is the other half of the price. A set that can be
 -- edited is a set whose *key* no longer identifies what ran: comparing run 3
--- with run 9 (FR-BM-03) would silently compare two different statements. The
+-- with run 9 would silently compare two different statements. The
 -- snapshot is what actually executed, and compare.py refuses to be quiet when
 -- two runs disagree about it.
 --

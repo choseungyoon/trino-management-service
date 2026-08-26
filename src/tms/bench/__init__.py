@@ -1,1 +1,1 @@
-"""Benchmark harness (FR-BM-01/03/04)."""
+"""Benchmark harness."""

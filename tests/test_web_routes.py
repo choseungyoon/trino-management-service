@@ -65,7 +65,8 @@ class StubTrino:
         return {"queryId": query_id, "query": "SELECT 1", "state": "RUNNING"}
 
 
-def build_service(roles=("admin",), with_data=True, workload=None):
+def build_service(roles=("admin",), with_data=True, workload=None,
+                  clusters=("prod-a",)):
     repository = InMemorySnapshotRepository()
     now = utcnow()
     if with_data:
@@ -95,9 +96,14 @@ def build_service(roles=("admin",), with_data=True, workload=None):
         }))
 
     config = build_config({
-        "clusters": [{"name": "prod-a", "coordinator_url": "https://a.invalid:8443",
+        # One cluster by default: most screens are per-cluster and a second one
+        # would double every count the other tests assert on. The benchmark
+        # screen is the exception - it is about comparing two - so it asks.
+        "clusters": [{"name": name,
+                      "coordinator_url": "https://{}.invalid:8443".format(name),
                       "expected_workers": 12,
-                      "trino_ui_url": "https://a.invalid:8443/ui/"}],
+                      "trino_ui_url": "https://{}.invalid:8443/ui/".format(name)}
+                     for name in clusters],
         "trino": {"user": "tms-svc", "password": "pw"},
         "database": {"url": "postgresql://u:p@h:5432/d"},
         "collector": {"stale_threshold_seconds": 600},

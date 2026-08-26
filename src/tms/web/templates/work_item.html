@@ -12,7 +12,7 @@
 {% if item.blocked_by %}
 <div class="banner banner--concerning" role="status">
   {{ ui.icon('lock', 15) }}
-  <div><strong>막고 있는 것</strong> — {{ item.blocked_by }}</div>
+  <div><strong>Blocked by</strong> — {{ item.blocked_by }}</div>
 </div>
 {% endif %}
 
@@ -23,8 +23,9 @@
 #}
 <div class="banner" role="note">
   {{ ui.icon('info', 15) }}
-  <div><strong>근거는 문서에 있다</strong> — <span class="mono">{{ item.source_doc }}</span>.
-    이 화면이 문서와 다르면 문서가 맞다.</div>
+  <div><strong>The reasoning lives in a document</strong> —
+    <span class="mono">{{ item.source_doc }}</span>. Where this screen and that
+    document disagree, the document is right.</div>
 </div>
 {% endif %}
 
@@ -34,19 +35,19 @@
       <div class="fact__value">
         <span class="board__mark board__mark--{{ item.status }}" aria-hidden="true"></span>{{ item.status_label }}
       </div>
-      <div class="fact__key">상태</div>
+      <div class="fact__key">Status</div>
     </div>
     <div class="fact">
       <div class="fact__value">{{ item.kind_label }}</div>
-      <div class="fact__key">종류</div>
+      <div class="fact__key">Kind</div>
     </div>
     <div class="fact">
       <div class="fact__value mono">{{ item.release or '—' }}</div>
-      <div class="fact__key">릴리스</div>
+      <div class="fact__key">Release</div>
     </div>
     <div class="fact">
       <div class="fact__value">{{ item.created_by }}</div>
-      <div class="fact__key">등록 · {{ item.created_at | clock }}</div>
+      <div class="fact__key">Raised · {{ item.created_at | clock }}</div>
     </div>
   </div>
   {% if item.body %}
@@ -57,22 +58,22 @@
 {% if can_write %}
 <section class="panel" style="margin-top:14px">
   <div class="panel__head">
-    <div class="panel__title">상태 변경</div>
-    <div class="panel__sub">한 줄 설명은 댓글로 남는다</div>
+    <div class="panel__title">Move it</div>
+    <div class="panel__sub">Your note is kept as a comment</div>
   </div>
   <form method="post" action="/work/{{ item.key }}/status" class="wi-form">
-    <label class="field">상태
+    <label class="field">Status
       <select class="input" name="status">
         {% for choice in statuses %}
         <option value="{{ choice.value }}" {% if choice.selected %}selected{% endif %}>{{ choice.label }} — {{ choice.meaning }}</option>
         {% endfor %}
       </select>
     </label>
-    <label class="field">한 줄 설명 (선택)
-      <input class="input" name="note" maxlength="500" placeholder="왜 옮기는가">
+    <label class="field"><span>Note <span class="dim">(optional)</span></span>
+      <input class="input" name="note" maxlength="500" placeholder="Why you are moving it">
     </label>
     <div class="row-actions">
-      <button class="btn btn--primary" type="submit">변경</button>
+      <button class="btn btn--primary" type="submit">Move</button>
     </div>
   </form>
 </section>
@@ -80,8 +81,8 @@
 
 <section class="panel" style="margin-top:14px">
   <div class="panel__head">
-    <div class="panel__title">기록</div>
-    <div class="panel__sub">댓글과 상태 변경이 한 줄기로 흐른다</div>
+    <div class="panel__title">History</div>
+    <div class="panel__sub">Comments and moves in one thread</div>
   </div>
   {% if timeline %}
   <ol class="wi-log">
@@ -100,16 +101,16 @@
     {% endfor %}
   </ol>
   {% else %}
-  <p class="panel__note">아직 아무 기록도 없다.</p>
+  <p class="panel__note">Nothing has happened yet.</p>
   {% endif %}
 
   {% if can_write %}
   <form method="post" action="/work/{{ item.key }}/comment" class="wi-form">
-    <label class="field"><span class="sr-only">댓글</span>
-      <textarea class="input" name="body" rows="3" required placeholder="댓글"></textarea>
+    <label class="field"><span class="sr-only">Comment</span>
+      <textarea class="input" name="body" rows="3" required placeholder="Add a comment"></textarea>
     </label>
     <div class="row-actions">
-      <button class="btn" type="submit">댓글 달기</button>
+      <button class="btn" type="submit">Comment</button>
     </div>
   </form>
   {% endif %}

@@ -163,7 +163,7 @@
 {% endif %}
 
 {% if gateway.enabled and gateway.backends %}
-{# FR-GW-04, reduced to what is true. The AC asked TMS to show whether the
+{# Reduced to what is true. The requirement asked this screen to show whether the
    backend list is being served from `databaseCache` - and TMS cannot know that.
    The Gateway exposes no signal for it, and inferring it from a frozen list is
    indistinguishable from a cluster list that simply is not changing.

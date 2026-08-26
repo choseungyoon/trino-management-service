@@ -70,31 +70,31 @@ class StubTrino:
 
 
 
-# The demo's query sets. Since FR-BM-06 these live in the database, not in
-# config - so the demo seeds them into the in-memory repository instead of
-# declaring them under `benchmark:`, which the config loader now rejects.
+# The demo's query sets. They live in the database now rather than in config,
+# so the demo seeds them into the in-memory repository - the config loader
+# rejects `benchmark.query_sets` outright.
 DEMO_QUERY_SETS = {
-        # Named for what they measure, not for TPC-H table names: the
-        # point of the demo is that a set is something a person wrote
-        # for their own cluster.
-        "adhoc": {
-            "title": "Ad-hoc profile",
-            "description": "Superset 대시보드가 실제로 던지는 모양의 쿼리 4건",
-            "queries": [
-                {"name": "scan_narrow", "sql": "SELECT count(*) FROM tpch.tiny.orders"},
-                {"name": "join_three", "sql": (
-                    "SELECT n.name, count(*) FROM tpch.tiny.orders o "
-                    "JOIN tpch.tiny.customer c ON c.custkey = o.custkey "
-                    "JOIN tpch.tiny.nation n ON n.nationkey = c.nationkey "
-                    "GROUP BY n.name")},
-                {"name": "window_rank", "sql": (
-                    "SELECT custkey, rank() OVER (ORDER BY total DESC) "
-                    "FROM (SELECT custkey, sum(totalprice) AS total "
-                    "FROM tpch.tiny.orders GROUP BY custkey)")},
-                {"name": "wide_scan", "sql": "SELECT * FROM tpch.tiny.lineitem"},
-            ],
-        },
-    } if benchmark else {}
+    # Named for what they measure, not for TPC-H table names: the point of the
+    # demo is that a set is something a person wrote for their own cluster.
+    "adhoc": {
+        "title": "Ad-hoc profile",
+        "description": "The shape of query a Superset dashboard actually sends",
+        "queries": [
+            {"name": "scan_narrow", "sql": "SELECT count(*) FROM tpch.tiny.orders"},
+            {"name": "join_three", "sql": (
+                "SELECT n.name, count(*) FROM tpch.tiny.orders o "
+                "JOIN tpch.tiny.customer c ON c.custkey = o.custkey "
+                "JOIN tpch.tiny.nation n ON n.nationkey = c.nationkey "
+                "GROUP BY n.name")},
+            {"name": "window_rank", "sql": (
+                "SELECT custkey, rank() OVER (ORDER BY total DESC) "
+                "FROM (SELECT custkey, sum(totalprice) AS total "
+                "FROM tpch.tiny.orders GROUP BY custkey)")},
+            {"name": "wide_scan", "sql": "SELECT * FROM tpch.tiny.lineitem"},
+        ],
+    },
+}
+
 
 def _query(qid, user, source, elapsed_ms, long_running=False, state="RUNNING"):
     return {

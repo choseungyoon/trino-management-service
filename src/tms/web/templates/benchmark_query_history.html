@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% import "_icons.html" as ui %}
-{% block title %}{{ query.name }} · 실행 이력{% endblock %}
+{% block title %}{{ query.name }} · History{% endblock %}
 {% block heading %}{{ query.name }} <span class="dim mono">{{ set.key }}</span>{% endblock %}
 
 {% block content %}
@@ -11,41 +11,42 @@
 
 {% if changed %}
 {#
-  이 배너가 이 화면의 존재 이유다. 세트를 화면에서 고칠 수 있게 된 순간,
-  "같은 이름"이 "같은 쿼리"를 뜻하지 않게 됐다. 어긋난 행에 표시를 달지 않으면
-  이 표는 서로 다른 두 쿼리의 시간을 한 줄로 세워 놓고 추세라고 부르게 된다.
+  This banner is why the page exists. Once a set can be edited, "same name" no
+  longer means "same query", and an unmarked table would line up the timings of
+  two different statements and call it a trend.
 #}
 <div class="banner banner--bad" role="alert">
   {{ ui.icon('bad', 15) }}
   <div>
-    <strong>이 쿼리의 SQL 이 중간에 바뀌었다.</strong>
-    아래에서 <span class="test-chip test-chip--bad">변경됨</span> 표시가 붙은 실행은
-    지금의 SQL 이 아니라 그때의 SQL 을 잰 것이다. 그 경계를 넘어서는 비교는 추세가 아니다.
+    <strong>The SQL for this query changed at some point.</strong>
+    Rows marked <span class="test-chip test-chip--bad">Changed</span> below
+    measured the statement as it was then, not as it is now. Comparing across
+    that boundary is not a trend.
   </div>
 </div>
 {% endif %}
 
 <section class="panel">
   <div class="panel__head">
-    <div class="panel__title">현재 SQL</div>
-    <div class="panel__sub">지금 이 세트를 실행하면 나가는 문장</div>
+    <div class="panel__title">Current SQL</div>
+    <div class="panel__sub">What runs today when this set is executed</div>
   </div>
   <pre class="mono wrap" style="margin:0;white-space:pre-wrap">{{ query.sql }}</pre>
 </section>
 
 <section class="panel" style="margin-top:14px">
   <div class="panel__head">
-    <div class="panel__title">실행 이력</div>
-    <div class="panel__sub">중앙값이 아니라 실행 한 건마다 한 줄 — 튀는 값이 답인 질문이다</div>
+    <div class="panel__title">Executions</div>
+    <div class="panel__sub">One row per execution, not a median — the outlier is usually the answer here</div>
   </div>
   {% if history %}
   <div class="table-scroll">
     <table class="table">
       <thead>
         <tr>
-          <th scope="col">실행</th><th scope="col">시각</th><th scope="col">클러스터</th>
-          <th scope="col">회차</th><th scope="col">경과</th><th scope="col">CPU</th>
-          <th scope="col">처리 행</th><th scope="col">Trino ID</th><th scope="col">SQL</th>
+          <th scope="col">Run</th><th scope="col">Started</th><th scope="col">Cluster</th>
+          <th scope="col">Rep</th><th scope="col">Elapsed</th><th scope="col">CPU</th>
+          <th scope="col">Rows</th><th scope="col">Trino ID</th><th scope="col">SQL</th>
         </tr>
       </thead>
       <tbody>
@@ -65,13 +66,13 @@
           <td class="mono dim">{{ h.trino_query_id or '—' }}</td>
           <td>
             {% if h.statement is none %}
-            {# 018 이전 실행. 스냅샷이 없으니 무엇을 실행했는지 말할 수 없다 —
-               지금 SQL 을 보여 주면 그건 추측이다. #}
-            <span class="dim" title="이 실행은 SQL 스냅샷을 남기지 않았다">기록 없음</span>
+            {# An older run that kept no snapshot. Showing today's SQL for it
+               would be a guess, so it says so instead. #}
+            <span class="dim" title="This run did not record the statement it used">Not recorded</span>
             {% elif h.differs %}
-            <span class="test-chip test-chip--bad">변경됨</span>
+            <span class="test-chip test-chip--bad">Changed</span>
             {% else %}
-            <span class="test-chip test-chip--good">동일</span>
+            <span class="test-chip test-chip--good">Same</span>
             {% endif %}
           </td>
         </tr>
@@ -85,8 +86,8 @@
   {% else %}
   <div class="empty">
     {{ ui.icon('clock', 20, 1.6) }}
-    <div class="empty__title">아직 실행된 적이 없다</div>
-    <div class="empty__desc">이 세트를 한 번이라도 돌리면 회차마다 한 줄씩 여기 쌓인다.</div>
+    <div class="empty__title">This query has never run</div>
+    <div class="empty__desc">Run the set once and every repetition shows up here as its own row.</div>
   </div>
   {% endif %}
 </section>
