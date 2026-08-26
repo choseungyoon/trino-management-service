@@ -154,7 +154,7 @@
       <thead>
         <tr>
           <th scope="col">#</th><th scope="col">Started</th><th scope="col">Cluster</th>
-          <th scope="col">State</th><th scope="col">Verified</th><th scope="col">By</th>
+          <th scope="col">State</th><th scope="col">Cluster was</th><th scope="col">By</th>
         </tr>
       </thead>
       <tbody>
@@ -165,8 +165,8 @@
           <td class="mono">{{ r.cluster }}{% if r.label %}<div class="dim">{{ r.label }}</div>{% endif %}</td>
           <td><span class="status status--{{ r.state | status_class }}">{{ r.state }}</span></td>
           <td>
-            {% if r.guard_ok %}<span class="test-chip test-chip--good">Yes</span>
-            {% else %}<span class="test-chip test-chip--bad">No</span>{% endif %}
+            {% if r.guard_ok %}<span class="test-chip test-chip--good">Quiet</span>
+            {% else %}<span class="test-chip test-chip--concerning">Serving traffic</span>{% endif %}
           </td>
           <td>{{ r.actor }}</td>
         </tr>

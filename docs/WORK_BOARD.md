@@ -4,7 +4,7 @@
 > 상태의 주인은 TMS 의 보드이고, **근거의 주인은 각 항목이 가리키는 문서**다.
 > 둘이 어긋나면 문서가 이긴다.
 
-> 생성 시각: 2026-08-25 09:11 UTC
+> 생성 시각: 2026-08-26 06:56 UTC
 
 | 상태 | 건수 |
 |---|---|
@@ -12,7 +12,7 @@
 | Blocked | 14 |
 | In progress | 2 |
 | Planned | 2 |
-| Done | 21 |
+| Done | 22 |
 | Dropped | 0 |
 
 ---
@@ -64,7 +64,7 @@
 | `V-9` | 리소스 그룹 편집 사내 검증 (010/011 선행) | task | R2 | — | `docs/runbooks/onsite-checklist.md` |
 | `W-1` | NFR-PERF-03 프로덕션 실측 (피크 시간대) | task | R1 | 사람이 돌려야 한다 — R1 DoD 마지막 항목 | `docs/NEXT_STEPS.md` |
 
-## Done (21)
+## Done (22)
 
 > Built and in the repository.
 
@@ -78,9 +78,10 @@
 | `D-012` | tms-svc 에 ExecuteQuery 부여. A1 강제를 코드로 이동 | decision | R3 | — | `docs/DECISIONS.md` |
 | `D-013` | 작업 보드. 상태는 보드가, 근거는 문서가 갖는다 | decision | R2 | — | `docs/DECISIONS.md` |
 | `D-014` | 벤치마크 쿼리 세트를 설정에서 DB 로. 화면에서 편집한다 | decision | R2 | — | `docs/DECISIONS.md` |
+| `D-015` | 벤치마크는 운영 중에도 실행. 제외 여부는 차단이 아니라 기록 | decision | R2 | — | `docs/DECISIONS.md` |
 | `FR-BM-01` | 표준 쿼리 세트 실행 | requirement | R2 | — | `docs/REQUIREMENTS.md` |
 | `FR-BM-03` | 벤치마크 실행 간 비교 | requirement | R2 | — | `docs/REQUIREMENTS.md` |
-| `FR-BM-04` | 벤치마크 프로덕션 보호 — 라우팅 그룹 제외 강제 | requirement | R2 | — | `docs/REQUIREMENTS.md` |
+| `FR-BM-04` | 벤치마크 실행 조건 기록 — Quiet / Serving traffic | requirement | R2 | — | `docs/REQUIREMENTS.md` |
 | `FR-BM-06` | 쿼리 세트를 화면에서 관리 + 쿼리별 실행 이력 | requirement | R2 | — | `docs/DECISIONS.md` |
 | `FR-BOARD` | 작업 보드 — 상태·요청·댓글 + 저장소 내보내기 | requirement | R2 | — | `docs/REQUIREMENTS.md` |
 | `FR-FL-02` | 미조인 워커 식별 | requirement | R3 | — | `docs/REQUIREMENTS.md` |

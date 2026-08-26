@@ -48,6 +48,8 @@ SEED = (
      DONE, "R2", None, "docs/DECISIONS.md"),
     ("D-014", DECISION, "벤치마크 쿼리 세트를 설정에서 DB 로. 화면에서 편집한다",
      DONE, "R2", None, "docs/DECISIONS.md"),
+    ("D-015", DECISION, "벤치마크는 운영 중에도 실행. 제외 여부는 차단이 아니라 기록",
+     DONE, "R2", None, "docs/DECISIONS.md"),
     ("D-2", DECISION, "restart_mode 를 ansible 로 전환할 것인가",
      NEEDS_DECISION, None,
      "사람 결정 — TMS 호스트가 전 노드 SSH 를 갖는다", "docs/NEXT_STEPS.md"),
@@ -69,7 +71,8 @@ SEED = (
      DONE, "R3", None, "docs/REQUIREMENTS.md"),
     ("FR-FL-05", REQUIREMENT, "실행 이력 및 진행 상태 추적",
      DONE, "R3", None, "docs/REQUIREMENTS.md"),
-    ("FR-BM-04", REQUIREMENT, "벤치마크 프로덕션 보호 — 라우팅 그룹 제외 강제",
+    # 게이트에서 라벨로 (D-015). 제목이 남아 있으면 강제하는 것으로 읽힌다.
+    ("FR-BM-04", REQUIREMENT, "벤치마크 실행 조건 기록 — Quiet / Serving traffic",
      DONE, "R2", None, "docs/runbooks/benchmark.md"),
     ("FR-BM-01", REQUIREMENT, "표준 쿼리 세트 실행",
      DONE, "R2", None, "docs/runbooks/benchmark.md"),

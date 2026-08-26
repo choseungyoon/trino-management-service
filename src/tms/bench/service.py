@@ -3,10 +3,14 @@
 Starting a run is a write in the full sense: it consumes a real cluster's
 capacity on somebody's say-so. Reason, audit record, administrator.
 
-⛔ It never takes a cluster out of rotation. The operator excludes the cluster
-and this service checks their work, because a "run benchmark" button that
-could deactivate a backend is the shortcut around the safe restart sequence,
-renamed. See guard.py.
+Whether the cluster was quiet is recorded, not required: these are run against
+serving clusters on purpose, to watch performance over time. What that costs
+and how it is paid for is in guard.py.
+
+⛔ It never takes a cluster out of rotation, and removing the requirement did
+not change that. A "run benchmark" button that could deactivate a backend is
+the shortcut around the safe restart sequence, renamed - the operator excludes
+the cluster if they want it quiet, and this service only ever looks.
 
 Python 3.9 compatible.
 """
@@ -152,7 +156,12 @@ class BenchmarkService:
             clusters.append({
                 "name": cluster,
                 "guard": guard.as_dict(),
-                "ready": guard.ok and cluster not in running,
+                # Selectable unless a benchmark is already on it. Two runs on
+                # one cluster measure each other; production traffic is a
+                # caveat on the numbers, not a reason to refuse.
+                "ready": cluster not in running,
+                "exclusive": guard.ok,
+                "caveat": guard.caveat(),
                 "busy": cluster in running,
             })
         return {
@@ -291,11 +300,17 @@ class BenchmarkService:
             raise InvalidRequest(
                 "Repetitions must be between 1 and {}.".format(ceiling))
 
-        # ⛔ Production protection. Checked here, before the audit record, so a refused run
-        # is not written down as an action that happened.
+        # Whether the cluster was exclusive is recorded, not enforced. Runs
+        # against live clusters are the point - performance is watched over
+        # time, not only when a cluster can be taken out of rotation.
+        #
+        # ⛔ What the old gate protected is still real: a heavy set on a
+        # serving cluster competes with production for the same workers and
+        # can cause the slowdown it is measuring. So the answer travels with
+        # the run - the run page says it, and a comparison spanning the
+        # difference warns, because a number taken on an idle cluster and one
+        # taken under load are not two measurements of the same thing.
         guard = self.guard_for(cluster)
-        if not guard.ok:
-            raise InvalidRequest(guard.summary())
 
         try:
             return self._start_audited(principal, cluster, declared, reason,
@@ -342,11 +357,12 @@ class BenchmarkService:
                    label: Optional[str] = None) -> Dict[str, Any]:
         """Start the same set on several clusters. Report each outcome.
 
-        ⛔ One cluster being refused does not cancel the others. Refusing all
-        four because the fourth is still in rotation would mean the operator
-        excludes it, comes back, and runs the first three a second time - and
-        the second numbers are the ones they would compare, from a cluster
-        whose caches are now warm. Started is started; refused is named.
+        ⛔ One cluster being refused does not cancel the others. The remaining
+        refusal is "a benchmark is already running here"; cancelling the whole
+        request over it would mean the operator waits, comes back, and runs
+        the others a second time - and the second numbers are the ones they
+        would compare, from clusters whose caches are now warm. Started is
+        started; refused is named.
         """
         self._require_admin(principal)
         if not clusters:

@@ -11,16 +11,20 @@
 {% block content %}
 {% if not run.guard_ok %}
 {#
-  Loud, and on every visit. These numbers were taken while TMS could not
-  confirm the cluster was out of rotation — they measure whatever else was
-  happening. Kept rather than deleted, because deleting evidence is worse.
+  On every visit, because it is the condition the numbers were taken under and
+  it does not stop being true once you scroll past it. Not an error — running
+  against a serving cluster is a deliberate thing to do — but a comparison
+  that mixes this with a quiet run compares two different situations.
 #}
-<div class="banner banner--bad" role="alert">
-  {{ ui.icon('bad', 15) }}
+<div class="banner banner--concerning" role="status">
+  {{ ui.icon('concerning', 15) }}
   <div>
-    <strong>This run was recorded without confirming the cluster was out of rotation.</strong>
+    <strong>The cluster was serving traffic while this ran.</strong>
     {% for advice in run.guard_advice %}<div class="bench-refusal">{{ advice }}</div>{% endfor %}
-    <div class="dim" style="margin-top:6px">Read this before using the numbers in a comparison.</div>
+    <div class="dim" style="margin-top:6px">
+      Compare it with another run taken under the same conditions. A quiet
+      cluster and a busy one are not two measurements of the same thing.
+    </div>
   </div>
 </div>
 {% endif %}

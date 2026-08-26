@@ -355,11 +355,22 @@ class ComparisonTest(unittest.TestCase):
                          run_of(2, "b", {"q": [None, None]}))
         self.assertNotEqual("same", result["rows"][0]["verdict"])
 
-    def test_an_unguarded_run_is_warned_about_loudly(self):
+    def test_a_quiet_run_against_a_busy_one_is_warned_about(self):
         result = compare(run_of(1, "a", {"q": [100]}, guard_ok=False),
                          run_of(2, "b", {"q": [100]}))
-        self.assertTrue(result["warnings"])
-        self.assertIn("out of rotation", result["warnings"][0])
+        self.assertTrue(any("different conditions" in w
+                            for w in result["warnings"]))
+
+    def test_two_busy_runs_compare_without_a_warning(self):
+        """⛔ The mismatch is the finding, not the condition.
+
+        These are run against serving clusters on purpose, so "both were busy"
+        is a normal comparison - and a warning printed on every comparison is
+        a warning on none.
+        """
+        result = compare(run_of(1, "a", {"q": [100]}, guard_ok=False),
+                         run_of(2, "b", {"q": [100]}, guard_ok=False))
+        self.assertEqual([], result["warnings"])
 
     def test_an_unfinished_run_is_warned_about(self):
         result = compare(run_of(1, "a", {"q": [100]}),

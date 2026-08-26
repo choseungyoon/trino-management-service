@@ -127,26 +127,45 @@ class BenchmarkServiceTest(unittest.TestCase):
 
     # ── FR-BM-04, through the service ────────────────────────────────
 
-    def test_a_cluster_still_in_rotation_is_refused(self):
+    def test_a_cluster_still_in_rotation_runs_and_is_labelled(self):
+        """Serving traffic is a caveat on the numbers, not a refusal.
+
+        These are run on a schedule against the clusters people actually use;
+        a gate would make that the one thing the feature could not do.
+        """
         _c, _s, benchmark, repository, runner = wire(gateway_active=True)
-        with self.assertRaises(InvalidRequest) as caught:
-            benchmark.start(ADMIN, "prod-a", query_set="smoke", reason="please")
-        self.assertIn("still in rotation", str(caught.exception))
-        self.assertEqual([], runner.started)
+        run = benchmark.start(ADMIN, "prod-a", query_set="smoke", reason="please")
+        self.assertEqual(1, len(runner.started))
+        self.assertFalse(run["guard"]["ok"])
+        self.assertIn("still_routed", run["guard"]["refusals"])
 
-    def test_a_refused_run_is_not_written_down_as_having_happened(self):
-        """The guard runs before the audit record, on purpose."""
-        _c, service, benchmark, repository, _runner = wire(gateway_active=True)
-        with self.assertRaises(InvalidRequest):
-            benchmark.start(ADMIN, "prod-a", query_set="smoke", reason="please")
-        self.assertEqual([], repository.runs)
-        self.assertEqual([], service.audit.repository.search(limit=10))
+    def test_a_busy_cluster_runs_and_is_labelled(self):
+        _c, _s, benchmark, repository, runner = wire(running=4)
+        run = benchmark.start(ADMIN, "prod-a", query_set="smoke", reason="please")
+        self.assertEqual(1, len(runner.started))
+        self.assertFalse(run["guard"]["ok"])
+        self.assertIn("queries_running", run["guard"]["refusals"])
 
-    def test_a_busy_cluster_is_refused(self):
-        _c, _s, benchmark, _r, runner = wire(running=4)
+    def test_the_condition_is_stored_on_the_run_not_only_shown(self):
+        """⛔ The whole safeguard now.
+
+        Six months from now this column is the only way to tell a number taken
+        on a quiet cluster from one taken while production was landing on the
+        same coordinator.
+        """
+        _c, _s, benchmark, repository, _runner = wire(gateway_active=True)
+        run = benchmark.start(ADMIN, "prod-a", query_set="smoke", reason="please")
+        stored = repository.get(run["id"])
+        self.assertFalse(stored["guard"]["ok"])
+        self.assertTrue(stored["guard"]["advice"])
+
+    def test_two_runs_on_one_cluster_are_still_refused(self):
+        """The one refusal left. Two runs on a cluster measure each other."""
+        _c, _s, benchmark, _r, runner = wire()
+        benchmark.start(ADMIN, "prod-a", query_set="smoke", reason="first")
         with self.assertRaises(InvalidRequest):
-            benchmark.start(ADMIN, "prod-a", query_set="smoke", reason="please")
-        self.assertEqual([], runner.started)
+            benchmark.start(ADMIN, "prod-a", query_set="smoke", reason="second")
+        self.assertEqual(1, len(runner.started))
 
     def test_the_service_never_deactivates_a_backend(self):
         """⛔ CLAUDE.md rule 5. There is no path from here to set_active."""
@@ -206,23 +225,24 @@ class BenchmarkScreenTest(unittest.IsolatedAsyncioTestCase):
     def client(self, app):
         return client_for(app)
 
-    async def test_the_page_says_the_cluster_is_ready_when_it_is(self):
+    async def test_the_page_says_a_quiet_cluster_is_quiet(self):
         async with self.client(self.build()) as c:
             await sign_in(c)
             response = await c.get("/benchmark")
         self.assertEqual(200, response.status_code)
-        self.assertIn("Ready", response.text)
-        # Selectable, which is the part the operator acts on.
+        self.assertIn("Quiet", response.text)
         self.assertIn('value="prod-a"', response.text)
 
-    async def test_the_page_says_what_is_missing_when_it_is_not(self):
+    async def test_a_serving_cluster_is_selectable_and_says_so(self):
+        """Labelled, not locked. Running against a live cluster is the point."""
         async with self.client(self.build(gateway_active=True)) as c:
             await sign_in(c)
             response = await c.get("/benchmark")
         self.assertEqual(200, response.status_code)
-        self.assertIn("Not available", response.text)
-        # And it names the way to fix it, which is somewhere else entirely.
-        self.assertIn("restart sequence", response.text)
+        self.assertIn("Serving traffic", response.text)
+        self.assertNotIn("disabled>", response.text)
+        # It still says what it saw, so the caveat is readable before running.
+        self.assertIn("production queries are landing on it", response.text)
 
     async def test_every_cluster_is_offered_on_one_page(self):
         """One page, not one per cluster.
@@ -255,10 +275,8 @@ class BenchmarkScreenTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual({"prod-a", "prod-b"},
                          {r["cluster"] for r in self.repository.runs})
 
-    async def test_one_refused_cluster_does_not_cancel_the_others(self):
-        """⛔ Refusing all of them would mean the operator excludes the last
-        one, comes back, and runs the rest a second time - and those are the
-        numbers they would compare, from clusters whose caches are now warm."""
+    async def test_a_serving_cluster_runs_alongside_a_quiet_one(self):
+        """Both start; the difference is recorded, and the comparison warns."""
         app = self.build(gateway_active=False, refuse_cluster="prod-b")
         async with self.client(app) as c:
             await sign_in(c)
@@ -266,19 +284,22 @@ class BenchmarkScreenTest(unittest.IsolatedAsyncioTestCase):
                 "clusters": ["prod-a", "prod-b"], "query_set": "smoke",
                 "reason": "comparing the two", "repetitions": "1"})
         self.assertEqual(303, response.status_code)
-        self.assertEqual(["prod-a"], [r["cluster"] for r in self.repository.runs])
+        by_cluster = {r["cluster"]: r for r in self.repository.runs}
+        self.assertEqual({"prod-a", "prod-b"}, set(by_cluster))
+        self.assertTrue(by_cluster["prod-a"]["guard"]["ok"])
+        self.assertFalse(by_cluster["prod-b"]["guard"]["ok"])
 
-    async def test_the_start_form_is_refused_by_the_server_not_only_the_button(self):
-        """The disabled attribute is a courtesy; the check is on the server."""
+    async def test_a_run_on_a_serving_cluster_goes_through(self):
         app = self.build(gateway_active=True)
         async with self.client(app) as c:
             await sign_in(c)
             response = await c.post("/benchmark", data={
                 "clusters": ["prod-a"], "query_set": "smoke",
-                "reason": "trying anyway", "repetitions": "1"})
+                "reason": "the scheduled hourly probe", "repetitions": "1"})
         self.assertEqual(303, response.status_code)
-        self.assertIn("error=", response.headers["location"])
-        self.assertEqual([], self.repository.runs)
+        self.assertNotIn("error=", response.headers["location"])
+        self.assertEqual(1, len(self.repository.runs))
+        self.assertFalse(self.repository.runs[0]["guard"]["ok"])
 
     async def test_a_started_run_redirects_to_its_page(self):
         app = self.build()
@@ -303,7 +324,7 @@ class BenchmarkScreenTest(unittest.IsolatedAsyncioTestCase):
         async with self.client(app) as c:
             await sign_in(c)
             response = await c.get("/benchmarks/{}".format(run["id"]))
-        self.assertIn("without confirming the cluster was out of rotation",
+        self.assertIn("The cluster was serving traffic while this ran.",
                       response.text)
         self.assertIn("This cluster was in rotation.", response.text)
 

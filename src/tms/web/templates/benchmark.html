@@ -17,10 +17,10 @@
   <form method="post" action="/benchmark" class="wi-form">
 
     {#
-      Readiness is per cluster, and it is shown before the form rather than
-      after the submit: when a cluster is not ready the fix is somewhere else
-      entirely — the Gateway, or a restart sequence. This console verifies and
-      refuses. It never takes a cluster out of rotation itself.
+      Every cluster is selectable. Serving production is a caveat on the
+      numbers, not a refusal — the point of running these on a schedule is to
+      watch performance on the clusters people are actually using. What each
+      row carries is what the result will have to be read with.
     #}
     <fieldset class="fieldgroup">
       <legend class="fieldgroup__legend">Clusters</legend>
@@ -32,11 +32,11 @@
           <span class="pick__name mono">{{ c.name }}</span>
         </label>
         {% if c.busy %}
-        <span class="test-chip test-chip--bad">A benchmark is already running</span>
-        {% elif c.ready %}
-        <span class="test-chip test-chip--good">Ready — out of rotation and idle</span>
+        <span class="test-chip test-chip--bad">A benchmark is already running here</span>
+        {% elif c.exclusive %}
+        <span class="test-chip test-chip--good">Quiet — out of rotation and idle</span>
         {% else %}
-        <span class="test-chip test-chip--bad">Not available</span>
+        <span class="test-chip test-chip--concerning">Serving traffic</span>
         <div class="pick__why">
           {% for advice in c.guard.advice %}
           <div class="bench-refusal">{{ advice.text }}</div>
@@ -79,10 +79,11 @@
   </form>
 
   <p class="panel__note">
-    A run takes the cluster's capacity, so it only starts on a cluster that is
-    already out of rotation and idle. Excluding a cluster is a step you take in
-    the Gateway or in a restart sequence — this page checks it and refuses,
-    and there is deliberately no button here that would do it for you.
+    A run takes the cluster's capacity. On a cluster that is serving, the set
+    competes with real queries for the same workers — it can cause the
+    slowdown it is measuring, and its numbers include whatever else was
+    running. That is recorded with every run rather than blocked, so compare
+    quiet against quiet and serving against serving.
     {% if not bench.query_sets %}
     <br>There are no query sets yet. Create one below — nothing ships by
     default, because a bundled set would have to name a catalog that may not
@@ -150,7 +151,7 @@
         <tr>
           <th scope="col">#</th><th scope="col">Started</th><th scope="col">Cluster</th>
           <th scope="col">Set</th><th scope="col">Reps</th><th scope="col">State</th>
-          <th scope="col">Verified</th><th scope="col">Reason</th><th scope="col">By</th>
+          <th scope="col">Cluster was</th><th scope="col">Reason</th><th scope="col">By</th>
         </tr>
       </thead>
       <tbody>
@@ -163,15 +164,16 @@
           <td class="num">{{ r.repetitions | integer }}</td>
           <td><span class="status status--{{ r.state | status_class }}">{{ r.state }}</span></td>
           <td>
-            {% if r.guard_ok %}
-            <span class="test-chip test-chip--good">Yes</span>
-            {% else %}
             {#
-              Kept and flagged rather than hidden: a run taken while the
-              cluster was still serving traffic measured that traffic too, and
-              that fact has to reach whoever reads the numbers later.
+              Not a pass/fail. It is the condition the numbers were taken
+              under, and it has to reach whoever reads them later — two runs
+              taken under different conditions are not two measurements of the
+              same thing.
             #}
-            <span class="test-chip test-chip--bad">No</span>
+            {% if r.guard_ok %}
+            <span class="test-chip test-chip--good">Quiet</span>
+            {% else %}
+            <span class="test-chip test-chip--concerning">Serving traffic</span>
             {% endif %}
           </td>
           <td class="wrap">{{ r.reason }}</td>

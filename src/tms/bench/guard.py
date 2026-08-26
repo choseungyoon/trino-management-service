@@ -1,29 +1,34 @@
-"""Production protection. Non-negotiable.
+"""Whether a cluster was exclusive when a run was taken.
 
-> Running a benchmark against a cluster that is taking production traffic is
-> itself an outage. Non-negotiable. — REQUIREMENTS.md
+This used to be a gate: no run started unless the cluster was out of rotation
+and idle. It is now a **label**. Benchmarks are run against live clusters on
+purpose - periodically, to watch performance over time - and a gate would make
+that the one thing the feature could not do.
 
-Two things follow from that sentence, and the second one is the easy one to
-get wrong.
+⛔ **What the gate was protecting is still real.** A set of heavy queries on a
+cluster serving production competes with that traffic for the same workers: it
+can cause the slowdown it is measuring, and its numbers include whatever else
+was running. So the answer is recorded rather than enforced: every run stores
+what this module found in `benchmark_run.guard`, the run page says so, and a
+comparison that spans the difference warns - a number taken on an idle cluster
+and one taken under load are not two measurements of the same thing.
 
-**TMS refuses; it does not arrange.** This module never deactivates anything.
-CLAUDE.md is explicit that intake can only be stopped as step 1 of the safe
-restart sequence, because an independent way to stop intake *is* the path
-around absolute rule 5. A "run benchmark" button that quietly took a cluster
-out of rotation would be exactly that button with a different label. So the
-operator excludes the cluster - through the Gateway, or through a restart
-sequence already in progress - and TMS checks their work.
+**It never deactivates anything, and that has not changed.** CLAUDE.md is
+explicit that intake can only be stopped as step 1 of the safe restart
+sequence, because an independent way to stop intake *is* the path around
+absolute rule 5. A "run benchmark" button that quietly took a cluster out of
+rotation would be exactly that button with a different label.
 
 **The check reads the Gateway, not TMS's snapshot.** A snapshot up to a poll
 interval old can say "deactivated" about a backend that was re-activated
-twenty seconds ago, and the whole guard would then be a description of the
-past. The backend->cluster mapping still comes from the snapshot, because that
-join is the only source of truth for which backend is which cluster; but
-whether it is active is asked live, every time.
+twenty seconds ago, and the label would then describe the past. The
+backend->cluster mapping still comes from the snapshot, because that join is
+the only source of truth for which backend is which cluster; but whether it is
+active is asked live, every time.
 
-What the guard returns is recorded on the run (`benchmark_run.guard`). Six
-months later that column is the only way to tell a comparable result from one
-taken while production traffic was landing on the same coordinator.
+Six months from now, `benchmark_run.guard` is the only way to tell a result
+taken on a quiet cluster from one taken while production traffic was landing
+on the same coordinator.
 
 Python 3.9 compatible.
 """
@@ -33,8 +38,8 @@ from typing import Any, Dict, List, Optional
 
 log = logging.getLogger(__name__)
 
-#: Why a run was refused. The screen renders these; they are not free text so
-#: that a test can assert on the reason rather than on a sentence.
+#: Why a cluster is not exclusive. The screen renders these; they are not free
+#: text so that a test can assert on the reason rather than on a sentence.
 NO_GATEWAY = "no_gateway"
 NO_BACKEND = "no_backend"
 STILL_ROUTED = "still_routed"
@@ -46,20 +51,24 @@ STALE_QUERY_VIEW = "stale_query_view"
 ADVICE = {
     NO_GATEWAY: (
         "The Gateway integration is off, so there is no way to tell whether "
-        "this cluster is still taking production traffic. It will not guess."),
+        "this cluster is taking production traffic. Runs will be recorded as "
+        "though it were."),
     NO_BACKEND: (
         "No Gateway backend is matched to this cluster, so there is no way "
-        "to tell whether it is in rotation."),
+        "to tell whether it is in rotation. Runs will be recorded as though "
+        "it were."),
     GATEWAY_UNREACHABLE: (
         "The Gateway did not answer, so its routing state is unknown. An "
-        "unknown routing state is not an excluded one."),
-    # No internal rule numbers in this text: it is read by whoever is holding
-    # the console, and "rule 5" tells them nothing about what to do next.
+        "unknown routing state is recorded as a serving one."),
+    # These read as conditions, not instructions. Nothing here has to be
+    # fixed before running - they describe what the numbers will contain. No
+    # internal rule numbers either: whoever is holding the console gets
+    # nothing from "rule 5".
     STILL_ROUTED: (
-        "This cluster is still in rotation. Exclude it first — through the "
-        "Gateway, or as the first step of a safe restart. This console will "
-        "not deactivate a backend on its own, because stopping traffic has to "
-        "go through the restart sequence that drains queries first."),
+        "This cluster is in rotation, so production queries are landing on it "
+        "while the benchmark runs. To measure it quiet instead, exclude it in "
+        "the Gateway first — this console will not deactivate a backend on "
+        "its own."),
     NO_QUERY_VIEW: (
         "This cluster's running queries have not been collected yet, so "
         "there is no way to tell whether the coordinator is idle."),
@@ -67,18 +76,22 @@ ADVICE = {
         "The running-query view is stale. What it shows is the past, and the "
         "past does not say the cluster is idle now."),
     QUERIES_RUNNING: (
-        "Queries are still running here. They would compete with the "
-        "benchmark for the same workers, so the numbers would measure them "
-        "as much as the cluster."),
+        "Queries are running here. They compete with the benchmark for the "
+        "same workers, so the numbers measure them as much as the cluster."),
 }
 
 
 class GuardResult:
-    """What TMS checked, and whether it agrees to start.
+    """What the cluster looked like when the run started.
 
     Kept as data rather than an exception so the same object can be shown on
-    the screen *before* anyone presses anything - the operator should be able
-    to see what is missing without submitting a request to find out.
+    the screen *before* anyone presses anything, and stored on the run
+    afterwards.
+
+    The serialised key is still `ok` and the codes are still called
+    `refusals` - both are written into `benchmark_run.guard`, and renaming them
+    would make every row taken before this change read as though the cluster
+    had been live. `ok` now means "was exclusive", not "may run".
     """
 
     __slots__ = ("cluster", "refusals", "backends", "running_queries",
@@ -119,10 +132,20 @@ class GuardResult:
             return "Excluded from routing and idle."
         return " ".join(ADVICE.get(code, code) for code in self.refusals)
 
+    def caveat(self) -> str:
+        """One line for a run taken on a cluster that was not exclusive."""
+        if self.ok:
+            return ""
+        return ("These numbers include whatever else the cluster was doing. "
+                + self.summary())
+
 
 def check(cluster: str, gateway_client, snapshots, stale_threshold: float,
           queries_envelope: Optional[Dict[str, Any]] = None) -> GuardResult:
-    """Is it safe to benchmark `cluster` right now?
+    """Was `cluster` exclusive - out of rotation and idle - right now?
+
+    Answers the question; it does not decide anything. The caller records the
+    answer on the run and shows it next to the numbers.
 
     `queries_envelope` is the already-loaded running-query view when the caller
     has one (the screen does); omitted, it is read from the snapshot store.

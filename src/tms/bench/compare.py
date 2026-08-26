@@ -175,13 +175,22 @@ def _side(run: Dict[str, Any]) -> Dict[str, Any]:
 
 def _warnings(baseline: Dict[str, Any], candidate: Dict[str, Any]) -> List[str]:
     warnings: List[str] = []
+
+    # ⛔ The mismatch, not the condition. Benchmarks are run against serving
+    # clusters on purpose, so "this one was busy" on both sides is not a
+    # finding - two busy runs compare fine. What ruins a comparison is one of
+    # each, and a warning printed on every comparison is a warning on none.
+    quiet = {label: bool((run.get("guard") or {}).get("ok"))
+             for label, run in (("baseline", baseline), ("candidate", candidate))}
+    if quiet["baseline"] != quiet["candidate"]:
+        busy = "baseline" if not quiet["baseline"] else "candidate"
+        idle = "candidate" if busy == "baseline" else "baseline"
+        warnings.append(
+            "These two runs were taken under different conditions: the {} "
+            "cluster was serving traffic and the {} one was idle. The "
+            "difference between them includes that.".format(busy, idle))
+
     for label, run in (("baseline", baseline), ("candidate", candidate)):
-        if not (run.get("guard") or {}).get("ok"):
-            warnings.append(
-                "The {} run (#{}) was taken while TMS could not confirm the "
-                "cluster was out of rotation and idle. Treat its numbers as "
-                "measurements of whatever else was happening.".format(
-                    label, run.get("id")))
         if run.get("state") not in ("SUCCEEDED",):
             warnings.append(
                 "The {} run (#{}) ended {}, so its set may be "
