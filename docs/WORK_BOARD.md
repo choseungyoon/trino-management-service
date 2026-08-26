@@ -4,15 +4,15 @@
 > 상태의 주인은 TMS 의 보드이고, **근거의 주인은 각 항목이 가리키는 문서**다.
 > 둘이 어긋나면 문서가 이긴다.
 
-> 생성 시각: 2026-08-26 13:50 UTC
+> 생성 시각: 2026-08-26 14:18 UTC
 
 | 상태 | 건수 |
 |---|---|
 | Needs a decision | 1 |
 | Blocked | 14 |
 | In progress | 2 |
-| Planned | 2 |
-| Done | 24 |
+| Planned | 4 |
+| Done | 25 |
 | Dropped | 0 |
 
 ---
@@ -55,7 +55,7 @@
 | `W-5` | Gateway DB 를 VM1 에서 분리 + HA | task | — | 인프라 — 사용자가 처리 중 | `docs/NEXT_STEPS.md` |
 | `W-8` | 마이그레이션 010~019 적용 + 보드 초기 적재 | task | R2 | 010~017 적용 완료 · 018/019 미적용 | `docs/runbooks/onsite-checklist.md` |
 
-## Planned (2)
+## Planned (4)
 
 > Agreed and unblocked, not started.
 
@@ -63,8 +63,10 @@
 |---|---|---|---|---|---|
 | `V-9` | 리소스 그룹 편집 사내 검증 (010/011 선행) | task | R2 | — | `docs/runbooks/onsite-checklist.md` |
 | `W-1` | NFR-PERF-03 프로덕션 실측 (피크 시간대) | task | R1 | 사람이 돌려야 한다 — R1 DoD 마지막 항목 | `docs/NEXT_STEPS.md` |
+| `W-11` | Vite + React 스캐폴드, FastAPI 정적 서빙 (2단계) | task | — | — | `docs/FRONTEND_PLAN.md` |
+| `W-12` | 화면 12개를 React 로 이전 (3단계) — frontend-design 스킬 사용 | task | — | W-11 선행 | `docs/FRONTEND_PLAN.md` |
 
-## Done (24)
+## Done (25)
 
 > Built and in the repository.
 
@@ -93,6 +95,7 @@
 | `FR-WL-09` | 리소스 그룹·셀렉터 추가/삭제 | requirement | R2 | — | `docs/DESIGN_WL07.md` |
 | `FR-WL-10` | 리소스 그룹 변경 이력 + 되돌리기 | requirement | R2 | — | `docs/DESIGN_WL07.md` |
 | `V-7` | 작업 보드 사내 검증 (화면 + append-only) | task | R2 | — | `docs/runbooks/onsite-checklist.md` |
+| `W-10` | JSON API 47개 작성 (프론트 전환 1단계) | task | — | — | `docs/FRONTEND_PLAN.md` |
 | `W-9` | 화면 12개 × 필요한 API 목록화 (docs/FRONTEND_PLAN.md) | task | — | — | `docs/DECISIONS.md` |
 
 ## Dropped (0)
@@ -103,4 +106,4 @@ _없음._
 
 ---
 
-**열린 항목 19건.** 착수 전에 이 파일을 읽는다 — 특히 "Needs a decision" 은 사람이 답하기 전까지 아무것도 움직이지 않는 항목이다.
+**열린 항목 21건.** 착수 전에 이 파일을 읽는다 — 특히 "Needs a decision" 은 사람이 답하기 전까지 아무것도 움직이지 않는 항목이다.
