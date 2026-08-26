@@ -18,15 +18,18 @@ interface ExternalLink {
   icon: string;
 }
 
+/**
+ * Only screens that exist.
+ *
+ * The rest of the console is still server-rendered at `/`; listing a link
+ * that lands back on Overview would be worse than not listing it. Each entry
+ * appears as its screen is ported.
+ */
 const NAV = [
   { to: "/", label: "Overview", icon: "overview", end: true },
   { to: "/queries", label: "Live Queries", icon: "queries" },
   { to: "/health", label: "Health", icon: "health" },
-  { to: "/workload", label: "Workload", icon: "queries" },
-  { to: "/resource-groups", label: "Resource Groups", icon: "queries" },
-  { to: "/fleet", label: "Fleet", icon: "overview" },
-  { to: "/benchmark", label: "Benchmark", icon: "clock" },
-  { to: "/work", label: "Work Board", icon: "board" },
+  { to: "/gateway", label: "Gateway", icon: "trino" },
   { to: "/audit", label: "Audit Log", icon: "audit" },
 ];
 

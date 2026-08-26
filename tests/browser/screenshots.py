@@ -49,6 +49,8 @@ SHOTS = (
     ("32-console-queries", "/app/queries", None),
     ("33-console-kill", "/app/queries", "console_kill"),
     ("34-console-health", "/app/health", None),
+    ("35-console-gateway", "/app/gateway", None),
+    ("36-console-audit", "/app/audit", None),
 )
 
 
@@ -108,7 +110,11 @@ def main(out_dir):
     written = []
 
     with serve(workload_enabled=True, resource_groups=True,
-               fleet_jobs=True, benchmark=True) as (base_url, _trino):
+               fleet_jobs=True, benchmark=True,
+               # On, so the Gateway screen shows its tables rather than only
+               # the "integration is off" banner.
+               gateway={"enabled": True, "base_url": "https://gw.invalid:8080"},
+               ) as (base_url, _trino):
         with sync_playwright() as pw:
             browser = pw.chromium.launch()
             for name, path, action in SHOTS:
