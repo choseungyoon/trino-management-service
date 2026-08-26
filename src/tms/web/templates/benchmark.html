@@ -22,8 +22,8 @@
       entirely — the Gateway, or a restart sequence. This console verifies and
       refuses. It never takes a cluster out of rotation itself.
     #}
-    <fieldset class="pick">
-      <legend class="pick__legend">Clusters</legend>
+    <fieldset class="fieldgroup">
+      <legend class="fieldgroup__legend">Clusters</legend>
       {% for c in bench.clusters %}
       <div class="pick__row {% if not c.ready %}pick__row--blocked{% endif %}">
         <label class="pick__pick">

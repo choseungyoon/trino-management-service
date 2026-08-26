@@ -272,16 +272,19 @@ def build_app(workload_enabled=False, seed=None, gateway=None,
         bench_repository = InMemoryBenchmarkRepository()
 
         class DemoGateway:
-            """prod-a is out of rotation, prod-b is not.
+            """prod-b is out of rotation and idle; prod-a is neither.
 
-            Both states on one deployment, so the screenshots show the guard
-            passing *and* refusing without editing anything between shots.
+            Both states on one deployment, so a screenshot of the picker shows
+            a runnable cluster and a refused one side by side. prod-a is the
+            refused one because the Live Queries screen needs it to have real
+            queries running - and a cluster with queries running is exactly
+            what the guard will not benchmark.
             """
 
             @staticmethod
             def list_backends(active_only=False):
-                return [{"name": "trino-prod-a-1", "active": False},
-                        {"name": "trino-prod-b-1", "active": True}]
+                return [{"name": "trino-prod-a-1", "active": True},
+                        {"name": "trino-prod-b-1", "active": False}]
 
         class DemoRunner:
             def start(self, run, query_set, repetitions):
@@ -290,35 +293,54 @@ def build_app(workload_enabled=False, seed=None, gateway=None,
             def abort(self, run_id):
                 return None
 
-        # prod-b needs a mapped backend and a query view, otherwise its refusal
-        # is "TMS cannot tell" rather than the one that actually matters:
-        # "this cluster is still taking production traffic".
+        # Both clusters need a mapped backend and a query view. Without them
+        # the refusal is "there is no way to tell" rather than the one that
+        # actually matters: "this cluster is still taking production traffic".
         repository.save(Snapshot(GATEWAY_SCOPE, KIND_GATEWAY, now, payload={
             "backends": [
-                {"name": "trino-prod-a-1", "cluster": "prod-a", "active": False,
+                {"name": "trino-prod-a-1", "cluster": "prod-a", "active": True,
                  "routing_group": "adhoc"},
-                {"name": "trino-prod-b-1", "cluster": "prod-b", "active": True,
+                {"name": "trino-prod-b-1", "cluster": "prod-b", "active": False,
                  "routing_group": "adhoc"},
             ],
             "summary": {"backends": 2, "active": 1},
-            "inactive_backends": ["trino-prod-a-1"],
+            "inactive_backends": ["trino-prod-b-1"],
         }))
+        # Idle, so the guard passes for prod-b and the picker has something
+        # selectable in it.
         repository.save(Snapshot("prod-b", KIND_QUERIES, now, payload={
-            "summary": {"running": 7, "queued": 2, "long_running": 0, "total": 9},
+            "summary": {"running": 0, "queued": 0, "long_running": 0, "total": 0},
             "queries": []}))
 
-        # Two finished runs of the same set on the two clusters, which is the
-        # comparison FR-BENCHMARK exists for: "why is A slower than B".
-        for cluster, base_ms, label in (("prod-a", 1, "heap 250G"),
-                                        ("prod-b", 2, "heap 400G")):
+        # Two finished runs of the same set on the two clusters - the whole
+        # reason this feature exists: "why is A slower than B".
+        # The older run executed a narrower `scan_narrow` than the set holds
+        # today, so the demo shows what an edited set does to a comparison:
+        # the history page marks those rows Changed and the comparison warns.
+        # Without it every SQL column reads "Not recorded" and the safeguard
+        # looks like it does nothing.
+        current = {q["name"]: q["sql"]
+                   for q in build_query_sets(DEMO_QUERY_SETS)["adhoc"].as_dict()["queries"]}
+        older = dict(current,
+                     scan_narrow="SELECT count(*) FROM tpch.tiny.orders "
+                                 "WHERE orderstatus = 'O'")
+
+        for cluster, base_ms, label, statements in (
+            ("prod-a", 1, "heap 250G", older),
+            ("prod-b", 2, "heap 400G", current),
+        ):
             past = bench_repository.create(
                 cluster=cluster, query_set="adhoc", actor="sre.kim",
-                roles=["admin"], reason="클러스터 간 성능 편차 규명", repetitions=3,
+                roles=["admin"],
+                reason="Finding out why one cluster is slower than the other",
+                repetitions=3,
                 guard={"ok": True, "advice": [], "running_queries": 0,
                        "checked_gateway_live": True,
                        "backends": [{"name": "trino-{}-1".format(cluster),
                                      "active": False}]},
-                label=label)
+                label=label,
+                queries=[{"name": n, "sql": q, "title": n, "position": i}
+                         for i, (n, q) in enumerate(sorted(statements.items()))])
             # Not a flat multiplier. The finding in a real comparison is
             # almost never "everything is 2x" - it is one query that fell off a
             # cliff while the rest are within noise, and a demo that shows a
@@ -360,16 +382,20 @@ def build_app(workload_enabled=False, seed=None, gateway=None,
 
     board_repository = InMemoryBoardRepository()
     seed_board(board_repository)
-    board_repository.create(key="REQ-1", kind="request",
-                            title="쿼리를 id 말고 사용자로도 죽일 수 있으면 좋겠다",
-                            status="planned", created_by="sre.kim",
-                            body="지금은 사용자 한 명의 쿼리 여덟 개를 하나씩 죽여야 한다.")
+    board_repository.create(
+        key="REQ-1", kind="request",
+        title="Kill queries by user, not only by id",
+        status="planned", created_by="sre.kim",
+        body="Today, clearing one user's eight queries means killing them "
+             "one at a time.")
     board_repository.add_comment(
         "REQ-1", "syhcho",
-        "여러 건을 한 번에 죽이는 것은 절대규칙 3 의 확인 절차와 맞물린다.\n"
-        "reason 을 한 번 받고 여덟 건을 죽이는 게 맞는지부터 정해야 한다.")
+        "Killing several at once runs into the confirmation every write "
+        "needs.\nWhether one reason can cover eight kills is the question to "
+        "settle first.")
     board_repository.add_comment("D-2", "sre.kim",
-                                 "SSH 범위 때문에 아직 결정 못 했다.")
+                                 "Still undecided - it turns on how far the "
+                                 "SSH access would reach.")
     board_repository.update("FR-BM-04", "syhcho", status=IN_PROGRESS)
 
     return create_app(config=config, service=service, fleet=fleet,

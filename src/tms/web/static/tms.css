@@ -934,10 +934,19 @@ dialog::backdrop { background: rgba(4, 6, 10, .55); backdrop-filter: blur(1px); 
 
 /* One refusal per line. The guard usually has more than one thing wrong at
    once, and a run-on sentence hides the second one. */
+/* A labelled box inside a form. Grouping is the job a section heading should
+   do; without it the grouping has to be smuggled into every label ("First
+   query - name", "First query - SQL"), which reads as noise. */
+.fieldgroup {
+  border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px;
+  display: grid; gap: 10px;
+}
+.fieldgroup__legend {
+  font-size: 12px; font-weight: 600; color: var(--tx-2); padding: 0 4px;
+}
+
 /* Cluster picker. Each row carries its own reason for being unavailable, so
    the operator reads why here rather than clicking through to find out. */
-.pick { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
-.pick__legend { font-size: 12px; font-weight: 600; color: var(--tx-2); padding: 0 4px; }
 .pick__row {
   display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
   padding: 7px 4px; cursor: pointer;

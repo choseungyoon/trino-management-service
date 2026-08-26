@@ -12,7 +12,7 @@
 <section class="panel">
   <div class="panel__head">
     <div class="panel__title">Queries {{ set.queries | length }}<span class="dim">/{{ max_queries }}</span></div>
-    <div class="panel__sub">Run in order of position, then by name</div>
+    <div class="panel__sub">Run in order of position, then by name. Edit a query to change or remove it.</div>
   </div>
   {% if set.queries %}
   <div class="table-scroll">
@@ -42,7 +42,11 @@
                 </label>
               </div>
               <label class="field"><span>What it measures <span class="dim">(optional)</span></span>
-                <input class="input" name="title" maxlength="200" value="{{ q.title }}">
+                {# `title` falls back to the name when nobody set one, so the
+                   box would otherwise open pre-filled with the query's own
+                   name and look like a description somebody wrote. #}
+                <input class="input" name="title" maxlength="200"
+                       value="{{ q.title if q.title != q.name else '' }}">
               </label>
               <label class="field"><span>SQL <span class="dim">(one read-only statement)</span></span>
                 <textarea class="input mono" name="statement" rows="8" required>{{ q.sql }}</textarea>
@@ -52,8 +56,23 @@
                        placeholder="What you are changing, and why">
               </label>
               <div class="row-actions">
-                <button class="btn btn--primary" type="submit">Save</button>
+                {#
+                  Remove posts the same form to a different endpoint. It keeps
+                  the reason field one field away from the destructive button
+                  instead of putting a text input in every table row, which
+                  pushed the row wider than the table it lives in.
+
+                  `formnovalidate` because the name and SQL boxes are required
+                  for a save and irrelevant to a delete. The reason is still
+                  required — the server refuses without one.
+                #}
+                <button class="btn btn--danger" type="submit" formnovalidate
+                        formaction="/benchmarks/sets/{{ set.key }}/queries/{{ q.name }}/delete">
+                  Remove
+                </button>
+                <span class="spacer"></span>
                 <a class="btn" href="/benchmarks/sets/{{ set.key }}">Cancel</a>
+                <button class="btn btn--primary" type="submit">Save</button>
               </div>
             </form>
           </td>
@@ -70,12 +89,6 @@
             <a class="btn" href="/benchmarks/sets/{{ set.key }}/queries/{{ q.name }}/history">History</a>
             {% if can_edit %}
             <a class="btn" href="/benchmarks/sets/{{ set.key }}?edit={{ q.name }}">Edit</a>
-            <form method="post"
-                  action="/benchmarks/sets/{{ set.key }}/queries/{{ q.name }}/delete">
-              <input class="input" name="reason" required maxlength="500"
-                     placeholder="Reason for removing it">
-              <button class="btn btn--danger" type="submit">Remove</button>
-            </form>
             {% endif %}
           </td>
         </tr>

@@ -75,7 +75,7 @@
 <section class="panel" style="margin-top:14px">
   <div class="panel__head">
     <div class="panel__title">New query set</div>
-    <div class="panel__sub">A set and its first query. You can add more queries afterwards.</div>
+    <div class="panel__sub">The set, plus one query to start it off — add the rest on the set's own page</div>
   </div>
   <form method="post" action="/benchmarks/sets" class="wi-form">
     <div class="rg-add__grid">
@@ -93,16 +93,17 @@
              placeholder="The question you want this set to answer">
     </label>
 
-    <div class="rg-add__grid">
-      <label class="field"><span>First query — name <span class="dim">(results are keyed by this)</span></span>
+    <fieldset class="fieldgroup">
+      <legend class="fieldgroup__legend">First query</legend>
+      <label class="field"><span>Name <span class="dim">(results are keyed by this)</span></span>
         <input class="input mono" name="name" required maxlength="64"
                pattern="[a-z0-9][a-z0-9_-]*" placeholder="scan_orders">
       </label>
-    </div>
-    <label class="field"><span>First query — SQL <span class="dim">(one read-only statement, no trailing <span class="mono">;</span> needed)</span></span>
-      <textarea class="input mono" name="statement" rows="8" required
-                placeholder="SELECT count(*) FROM hive.reporting.events WHERE dt = DATE '2026-08-01'"></textarea>
-    </label>
+      <label class="field"><span>SQL <span class="dim">(one read-only statement, no trailing <span class="mono">;</span> needed)</span></span>
+        <textarea class="input mono" name="statement" rows="8" required
+                  placeholder="SELECT count(*) FROM hive.reporting.events WHERE dt = DATE '2026-08-01'"></textarea>
+      </label>
+    </fieldset>
 
     <label class="field"><span>Reason <span class="dim">(required)</span></span>
       <input class="input" name="reason" required maxlength="500"

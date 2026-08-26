@@ -1,4 +1,4 @@
-"""Capture the resource group screens (FR-WL-07~10).
+"""Capture the console screens as images.
 
 Not a test. This exists so the screens can be reviewed by someone who cannot
 reach the deployment - which is most of the time, since TMS runs inside a
@@ -35,10 +35,14 @@ SHOTS = (
     ("12-work-item", "/work/REQ-1", None),
     ("13-work-decision", "/work/D-2", None),
     ("14-work-board-dark", "/work", "toggle_theme"),
-    ("15-benchmark-ready", "/clusters/prod-a/benchmark", None),
-    ("16-benchmark-refused", "/clusters/prod-b/benchmark", None),
-    ("17-benchmark-run", "/benchmarks/1", None),
-    ("18-benchmark-compare", "/benchmarks/2?against=1", None),
+    ("15-benchmark", "/benchmark", None),
+    ("16-benchmark-dark", "/benchmark", "toggle_theme"),
+    ("17-query-sets", "/benchmarks/sets", None),
+    ("18-query-set", "/benchmarks/sets/adhoc", None),
+    ("19-query-edit", "/benchmarks/sets/adhoc?edit=join_three", None),
+    ("20-query-history", "/benchmarks/sets/adhoc/queries/scan_narrow/history", None),
+    ("21-benchmark-run", "/benchmarks/1", None),
+    ("22-benchmark-compare", "/benchmarks/2?against=1", None),
 )
 
 

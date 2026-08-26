@@ -331,6 +331,30 @@ class BenchmarkScreenTest(unittest.IsolatedAsyncioTestCase):
         # Colour alone would leave "is red good here" to the reader.
         self.assertIn("Slower", response.text)
 
+    async def test_a_faster_query_shows_its_size_not_a_dash(self):
+        """`duration` renders negatives as an em dash - right for an elapsed
+        time, wrong for a difference. A 2% improvement read as "—"."""
+        app = self.build()
+        ids = []
+        for cluster, timing in (("prod-a", 4200), ("prod-b", 4100)):
+            run = self.repository.create(
+                cluster=cluster, query_set="smoke", actor="a", roles=["admin"],
+                reason="r", repetitions=1, guard={"ok": True})
+            self.repository.add_result(run["id"], {
+                "query_name": "a", "iteration": 1, "state": "SUCCEEDED",
+                "trino_query_id": "q", "elapsed_ms": timing,
+                "trino_elapsed_ms": timing, "trino_cpu_ms": timing,
+                "trino_queued_ms": 0, "trino_planning_ms": 0,
+                "processed_rows": 1, "processed_bytes": 1,
+                "peak_memory_bytes": 1, "error": None})
+            self.repository.finish(run["id"], "SUCCEEDED")
+            ids.append(run["id"])
+
+        async with self.client(app) as c:
+            await sign_in(c)
+            response = await c.get("/benchmarks/{}?against={}".format(ids[1], ids[0]))
+        self.assertIn("-100ms", response.text)
+
     async def test_an_unknown_run_is_a_404_page(self):
         async with self.client(self.build()) as c:
             await sign_in(c)

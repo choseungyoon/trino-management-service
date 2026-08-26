@@ -172,8 +172,14 @@
           <td class="num">{% if row.baseline %}{{ row.baseline.median_ms | duration }}{% else %}—{% endif %}</td>
           <td class="num">{% if row.candidate %}{{ row.candidate.median_ms | duration }}{% else %}—{% endif %}</td>
           <td class="num delta delta--{{ row.verdict_class }}">
+            {#
+              `duration` renders anything negative as an em dash, which is
+              right for an elapsed time and wrong for a difference: it turned
+              "2% faster" into "—". The sign is carried here and the filter
+              only ever sees a magnitude.
+            #}
             {% if row.delta_percent is not none %}
-            {{ '+' if row.delta_ms > 0 else '' }}{{ row.delta_ms | duration }} ({{ row.delta_percent | round(1) }}%)
+            {{ '+' if row.delta_ms > 0 else '-' if row.delta_ms < 0 else '' }}{{ row.delta_ms | abs | duration }} ({{ row.delta_percent | round(1) }}%)
             {% else %}—{% endif %}
           </td>
           {# The word, not just the colour. "Is red good here" is a question
