@@ -4,14 +4,14 @@
 > 상태의 주인은 TMS 의 보드이고, **근거의 주인은 각 항목이 가리키는 문서**다.
 > 둘이 어긋나면 문서가 이긴다.
 
-> 생성 시각: 2026-08-26 12:24 UTC
+> 생성 시각: 2026-08-26 13:29 UTC
 
 | 상태 | 건수 |
 |---|---|
 | Needs a decision | 1 |
 | Blocked | 14 |
 | In progress | 2 |
-| Planned | 2 |
+| Planned | 3 |
 | Done | 23 |
 | Dropped | 0 |
 
@@ -55,7 +55,7 @@
 | `W-5` | Gateway DB 를 VM1 에서 분리 + HA | task | — | 인프라 — 사용자가 처리 중 | `docs/NEXT_STEPS.md` |
 | `W-8` | 마이그레이션 010~019 적용 + 보드 초기 적재 | task | R2 | 010~017 적용 완료 · 018/019 미적용 | `docs/runbooks/onsite-checklist.md` |
 
-## Planned (2)
+## Planned (3)
 
 > Agreed and unblocked, not started.
 
@@ -63,6 +63,7 @@
 |---|---|---|---|---|---|
 | `V-9` | 리소스 그룹 편집 사내 검증 (010/011 선행) | task | R2 | — | `docs/runbooks/onsite-checklist.md` |
 | `W-1` | NFR-PERF-03 프로덕션 실측 (피크 시간대) | task | R1 | 사람이 돌려야 한다 — R1 DoD 마지막 항목 | `docs/NEXT_STEPS.md` |
+| `W-9` | 화면 12개 × 필요한 API 목록화 (docs/FRONTEND_PLAN.md) | task | — | D-016 착수의 1단계 — API 12개 / web 라우트 69개 | `docs/DECISIONS.md` |
 
 ## Done (23)
 
@@ -79,7 +80,7 @@
 | `D-013` | 작업 보드. 상태는 보드가, 근거는 문서가 갖는다 | decision | R2 | — | `docs/DECISIONS.md` |
 | `D-014` | 벤치마크 쿼리 세트를 설정에서 DB 로. 화면에서 편집한다 | decision | R2 | — | `docs/DECISIONS.md` |
 | `D-015` | 벤치마크는 운영 중에도 실행. 제외 여부는 차단이 아니라 기록 | decision | R2 | — | `docs/DECISIONS.md` |
-| `D-016` | 프론트에 React 19 도입. 아일랜드는 목적지가 아니라 이주 경로 | decision | — | — | `docs/DECISIONS.md` |
+| `D-016` | 프론트를 React 19 SPA 로. 런타임 Node 없음 | decision | — | — | `docs/DECISIONS.md` |
 | `FR-BM-01` | 표준 쿼리 세트 실행 | requirement | R2 | — | `docs/REQUIREMENTS.md` |
 | `FR-BM-03` | 벤치마크 실행 간 비교 | requirement | R2 | — | `docs/REQUIREMENTS.md` |
 | `FR-BM-04` | 벤치마크 실행 조건 기록 — Quiet / Serving traffic | requirement | R2 | — | `docs/REQUIREMENTS.md` |
@@ -102,4 +103,4 @@ _없음._
 
 ---
 
-**열린 항목 19건.** 착수 전에 이 파일을 읽는다 — 특히 "Needs a decision" 은 사람이 답하기 전까지 아무것도 움직이지 않는 항목이다.
+**열린 항목 20건.** 착수 전에 이 파일을 읽는다 — 특히 "Needs a decision" 은 사람이 답하기 전까지 아무것도 움직이지 않는 항목이다.

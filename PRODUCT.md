@@ -12,11 +12,12 @@ FastAPI backend (already built, `src/tms/`). Frontend delegated: server-rendered
 HTML + vanilla JS or a light framework, chosen at build time — must work behind
 the existing FastAPI app (`src/tms/web/`), no separate Node deployment.
 
-⛔ **Superseded on 2026-08-26 by DECISIONS.md D-016**: React 19 islands, built
-with Vite, are being introduced. What survives from the line above is the part
-that mattered — **no Node process at runtime**, and the server keeps owning
-page structure and navigation, because this console is opened when the cluster
-is broken and a screen that needs a bundle to load fails at the same time.
+⛔ **Superseded on 2026-08-26 by DECISIONS.md D-016**: the frontend is being
+rebuilt as a **React 19 SPA**, Vite-built to static assets that FastAPI serves.
+What survives from the line above is the part that mattered — **no Node process
+at runtime**; the deploy unit stays `pip install` + `systemctl restart`. What
+is deliberately given up, and the mitigations that go with it, is written out
+in D-016.
 
 ## Users
 
