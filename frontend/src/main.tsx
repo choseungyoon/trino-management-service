@@ -5,6 +5,11 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router";
 import { Shell } from "./Shell";
 import { Overview } from "./screens/Overview";
 import { Audit } from "./screens/Audit";
+import { Benchmark } from "./screens/Benchmark";
+import { BenchmarkRun } from "./screens/BenchmarkRun";
+import { QueryHistory } from "./screens/QueryHistory";
+import { QuerySet } from "./screens/QuerySet";
+import { QuerySets } from "./screens/QuerySets";
 import { Gateway } from "./screens/Gateway";
 import { Health } from "./screens/Health";
 import { Queries } from "./screens/Queries";
@@ -27,6 +32,12 @@ createRoot(document.getElementById("root")!).render(
           <Route path="health" element={<Health />} />
           <Route path="gateway" element={<Gateway />} />
           <Route path="workload" element={<Workload />} />
+          <Route path="benchmark" element={<Benchmark />} />
+          <Route path="benchmark/runs/:id" element={<BenchmarkRun />} />
+          <Route path="benchmark/sets" element={<QuerySets />} />
+          <Route path="benchmark/sets/:key" element={<QuerySet />} />
+          <Route path="benchmark/sets/:key/queries/:name/history"
+                 element={<QueryHistory />} />
           <Route path="work" element={<Work />} />
           <Route path="work/:key" element={<WorkItem />} />
           <Route path="audit" element={<Audit />} />

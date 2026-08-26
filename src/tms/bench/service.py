@@ -25,8 +25,9 @@ from tms.api.errors import (
 )
 from tms.api.permissions import MANAGE_HEALTH, VIEW_HEALTH, Principal
 from tms.bench import guard as guards
-from tms.bench.compare import NotComparable, compare
+from tms.bench.compare import NotComparable, compare, query_rows
 from tms.bench.queryset import MAX_QUERIES, refuse_name, refuse_statement
+from tms.bench import trend
 from tms.bench.runner import RUNNING
 from tms.bench.setstore import (
     DuplicateName,
@@ -171,6 +172,11 @@ class BenchmarkService:
             raise UpstreamUnavailable(str(exc))
         if found is None:
             raise NotFound("No such benchmark run: {}".format(run_id))
+        # Repetitions folded into per-query medians. Which executions belong
+        # together, and what the middle of them is, are decisions about the
+        # numbers - so they are made once here rather than in each caller.
+        found = dict(found)
+        found["by_query"] = query_rows(found)
         return found
 
     def comparable_runs(self, principal: Principal, run: Dict[str, Any],
@@ -262,6 +268,10 @@ class BenchmarkService:
             "query": current.as_dict(),
             "history": rows,
             "changed": any(r["differs"] for r in rows),
+            # Aggregated here rather than by the caller: which runs group
+            # together and what the middle of a run is are decisions about the
+            # numbers, not about how to draw them.
+            "trend": trend.build(rows),
         }
 
     def _run_snapshot(self, run_id) -> List[Dict[str, Any]]:

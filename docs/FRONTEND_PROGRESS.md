@@ -10,7 +10,7 @@
 |---|---|---|
 | 1 | JSON API 47개 | ✅ 완료 |
 | 2 | Vite + React 스캐폴드, FastAPI 정적 서빙 | ✅ 완료 |
-| 3 | 화면 12개 이전 | 🔄 **6 / 12** |
+| 3 | 화면 12개 이전 | 🔄 **9 / 12** — 남은 것은 Resource Groups · Fleet · Safe Restart |
 
 ## 화면
 
@@ -24,9 +24,9 @@
 | Fleet | ⬜ | 로그 스트리밍은 SSE 권장 |
 | Safe Restart | ⬜ | 진행 콘솔 라이브 |
 | Gateway | ✅ | |
-| Benchmark | ⬜ | 차트 포함. uPlot / ECharts 선택 필요 |
-| Query Sets | ⬜ | Benchmark 와 한 덩어리 |
-| Work Board | ⬜ | 칸반 |
+| Benchmark | ✅ | 클러스터 다중 선택 · 실행 상세 · 비교 · 추이 차트 |
+| Query Sets | ✅ | 세트 목록 · 세트 편집 · 쿼리 이력 |
+| Work Board | ✅ | 보드 + 항목 상세 |
 | Audit | ✅ | |
 
 ## 옮기면서 정한 것
@@ -39,11 +39,13 @@
 | `views.cluster_summary` | `GET /api/v1/overview` | `active_workers` 를 워커로 세는 건 표현이 아니라 정확성이다 |
 | `views.bottleneck_text` | `collector/resourcegroups.py` | 진단 코드를 만드는 곳 옆에 문장을 둔다. 사유를 하나 추가하는 데 프론트 릴리스가 필요하면 안 된다 |
 | `views.test_observed_text` | `health/observed.py` | 어떤 테스트가 있고 그 숫자가 뭘 뜻하는지는 서버 지식이다. 세그먼트 `[{text, strong}]` 로 돌려주고 클라이언트는 강조만 복원한다 |
+| `views.query_history_chart` | `bench/trend.py` | 픽셀은 없다. **어떤 실행이 한 점으로 묶이는지와 한 실행의 대푯값이 무엇인지**가 서버 지식이고, 그릴 수 있는지(`drawable`)도 마찬가지다 |
+| `views.benchmark_query_rows` | `bench/compare.py` 의 `query_rows` | 반복 실행을 중앙값으로 접는 건 숫자에 대한 결정이다. `GET /api/v1/benchmarks/{id}` 가 `by_query` 로 같이 준다 |
 
 **남은 후보** — 다음에 해당 화면을 옮길 때 같은 질문을 한다:
 
 - `order_groups` / `flatten_groups` (Workload) — **클라이언트에 남겼다.** 트리를 표로 펴는 것과 정렬은 화면이 하는 일이고, 정렬은 브라우저가 이미 들고 있는 숫자에 대한 질문이다
-- `benchmark_query_rows`, `query_history_chart`, `comparison_rows` (Benchmark) — 차트 라이브러리를 쓰면 집계만 남는다
+- ~~`benchmark_query_rows`, `query_history_chart`~~ — **옮겼다.** 아래 표 참조. `comparison_rows` 는 verdict → CSS 클래스 매핑뿐이라 클라이언트에 남겼다
 
 ## 옮기면서 찾은 버그
 
@@ -77,5 +79,5 @@
 
 - `src/tms/web/` 삭제는 **12개가 다 끝난 뒤**. 그때 `/app` → `/` 로 옮긴다
 - `tms.css` 는 아직 `web/static/` 에 있고 프론트가 상대경로로 읽는다. web/ 을 지울 때 같이 옮긴다
-- 차트 라이브러리 미결 (uPlot vs ECharts)
+- ~~차트 라이브러리 미결~~ — **안 쓴다.** 인라인 SVG (`components/LineChart.tsx`). 점 몇 개와 직선이고 숫자는 서버가 이미 집계해서 준다. 줌·브러시가 필요해지면 그때 라이브러리가 그 아래만 대체한다
 - 빌드 산출물 커밋이 전제다. **프론트를 고치면 `npm --prefix frontend run build` 하고 같이 커밋한다**

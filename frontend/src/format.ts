@@ -51,3 +51,8 @@ export function resourceGroup(path: string[] | string | null): string {
   if (!path) return "—";
   return Array.isArray(path) ? path.join(".") : path;
 }
+
+/** Thousands-separated count. An empty cell under a label reads as zero. */
+export function integer(value: number | null | undefined): string {
+  return value === null || value === undefined ? "—" : Math.round(value).toLocaleString();
+}

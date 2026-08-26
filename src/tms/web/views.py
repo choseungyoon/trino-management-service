@@ -478,34 +478,10 @@ def benchmark_rows(runs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 
 def benchmark_query_rows(run: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """One row per query name, with its repetitions folded in.
+    """Per-query rows. The folding lives in `bench.compare`; see it there."""
+    from tms.bench.compare import query_rows
 
-    A table with one row per execution is unreadable at five repetitions and
-    useless at twenty; what an operator wants is "how long does this query
-    take here", which is the median of its executions.
-    """
-    from tms.bench.compare import summarise_run
-
-    grouped = summarise_run(run or {})
-    rows = []
-    for name in sorted(grouped):
-        entry = grouped[name]
-        rows.append({
-            "name": name,
-            "runs": entry["runs"],
-            "failures": entry["failures"],
-            "median_ms": entry["median_ms"],
-            "fastest_ms": entry["fastest_ms"],
-            "median_cpu_ms": entry["median_cpu_ms"],
-            "rows_processed": entry["rows"],
-            "rows_varied": entry["rows_varied"],
-            "rows_range": entry["rows_range"],
-            # Every execution failed. Rendered differently from "slow", which
-            # is what a blank timing column would otherwise imply.
-            "all_failed": entry["failures"] == entry["runs"],
-            "error": _first_error(run, name),
-        })
-    return rows
+    return query_rows(run or {})
 
 
 def query_history_chart(history: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -594,13 +570,6 @@ def query_history_rows(history: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         row["failed"] = entry.get("state") == "FAILED"
         rows.append(row)
     return rows
-
-
-def _first_error(run: Dict[str, Any], name: str) -> Optional[str]:
-    for result in (run or {}).get("results") or []:
-        if result.get("query_name") == name and result.get("error"):
-            return result["error"]
-    return None
 
 
 def comparison_rows(comparison: Dict[str, Any]) -> Dict[str, Any]:

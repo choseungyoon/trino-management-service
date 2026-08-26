@@ -16,7 +16,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(_HERE), "src"))
 from tms.api.errors import Forbidden, InvalidRequest, NotFound  # noqa: E402
 from tms.api.permissions import Principal  # noqa: E402
 from tms.bench import guard as guards  # noqa: E402
-from tms.bench.compare import NotComparable, compare, median, summarise_run  # noqa: E402
+from tms.bench.compare import (  # noqa: E402
+    NotComparable, compare, median, query_rows, summarise_run)
 from tms.bench.queryset import QuerySetError, build_query_sets  # noqa: E402
 from tms.bench.runner import BenchmarkRunner, measurements  # noqa: E402
 from tms.bench.store import ActiveRunExists, InMemoryBenchmarkRepository  # noqa: E402
@@ -315,6 +316,31 @@ class ComparisonTest(unittest.TestCase):
         summary = summarise_run(run_of(1, "a", {"q": [1000, 100, 110]}))
         self.assertEqual(110, summary["q"]["median_ms"])
         self.assertEqual(100, summary["q"]["fastest_ms"])
+
+    def test_query_rows_folds_repetitions_and_keeps_the_failure(self):
+        """One row per query name - a row per execution is unreadable at 20."""
+        run = {"results": [
+            {"query_name": "scan", "state": "FINISHED", "elapsed_ms": 100,
+             "trino_cpu_ms": 10, "processed_rows": 5},
+            {"query_name": "scan", "state": "FINISHED", "elapsed_ms": 300,
+             "trino_cpu_ms": 30, "processed_rows": 9},
+            {"query_name": "broken", "state": "FAILED", "elapsed_ms": 4,
+             "error": "TABLE_NOT_FOUND"},
+        ]}
+        rows = {row["name"]: row for row in query_rows(run)}
+
+        self.assertEqual(2, rows["scan"]["runs"])
+        self.assertEqual(200, rows["scan"]["median_ms"])
+        self.assertEqual(100, rows["scan"]["fastest_ms"])
+        # Rows read varied between repetitions, so the median above is a median
+        # of different amounts of work - the screen has to be able to say so.
+        self.assertTrue(rows["scan"]["rows_varied"])
+        self.assertEqual((5, 9), rows["scan"]["rows_range"])
+
+        # A query where every execution failed must not render as "fast".
+        self.assertTrue(rows["broken"]["all_failed"])
+        self.assertIsNone(rows["broken"]["median_ms"])
+        self.assertEqual("TABLE_NOT_FOUND", rows["broken"]["error"])
 
     def test_median_of_an_even_number_of_samples(self):
         self.assertEqual(15.0, median([10, 20]))

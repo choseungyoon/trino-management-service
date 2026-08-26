@@ -217,3 +217,42 @@ def _warnings(baseline: Dict[str, Any], candidate: Dict[str, Any]) -> List[str]:
             "samples.".format(baseline.get("repetitions"),
                               candidate.get("repetitions")))
     return warnings
+
+
+def query_rows(run: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """One row per query name, with its repetitions folded in.
+
+    A table with one row per execution is unreadable at five repetitions and
+    useless at twenty; what an operator wants is "how long does this query
+    take here", which is the median of its executions. Folding them is a
+    decision about the numbers, so it happens here rather than in whatever is
+    drawing the table.
+    """
+    grouped = summarise_run(run or {})
+    rows = []
+    for name in sorted(grouped):
+        entry = grouped[name]
+        rows.append({
+            "name": name,
+            "runs": entry["runs"],
+            "failures": entry["failures"],
+            "median_ms": entry["median_ms"],
+            "fastest_ms": entry["fastest_ms"],
+            "median_cpu_ms": entry["median_cpu_ms"],
+            "rows_processed": entry["rows"],
+            "rows_varied": entry["rows_varied"],
+            "rows_range": entry["rows_range"],
+            # Every execution failed. Rendered differently from "slow", which
+            # is what a blank timing column would otherwise imply.
+            "all_failed": entry["failures"] == entry["runs"],
+            "error": first_error(run, name),
+        })
+    return rows
+
+
+def first_error(run: Dict[str, Any], name: str) -> Optional[str]:
+    """The first failure message for one query, or None."""
+    for result in (run or {}).get("results") or []:
+        if result.get("query_name") == name and result.get("error"):
+            return result["error"]
+    return None

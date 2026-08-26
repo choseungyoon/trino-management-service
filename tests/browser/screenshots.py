@@ -54,6 +54,12 @@ SHOTS = (
     ("37-console-workload", "/app/workload", None),
     ("38-console-work", "/app/work", None),
     ("39-console-work-item", "/app/work/REQ-1", None),
+    ("40-console-benchmark", "/app/benchmark", None),
+    ("41-console-benchmark-run", "/app/benchmark/runs/1", None),
+    ("42-console-query-sets", "/app/benchmark/sets", None),
+    ("43-console-query-set", "/app/benchmark/sets/adhoc", None),
+    ("44-console-query-history",
+     "/app/benchmark/sets/adhoc/queries/scan_narrow/history", None),
 )
 
 
