@@ -610,7 +610,9 @@ def create_app(config: Optional[Config] = None, service: Optional[TmsService] = 
     # is switched off rather than 404ing as though it never existed.
     from tms.api.routes import benchmark as benchmark_routes
     from tms.api.routes import fleet as fleet_routes
+    from tms.api.routes import observability as observability_routes
     from tms.api.routes import resource_groups as resource_group_routes
+    from tms.api.routes import restart as restart_routes
     from tms.api.routes import work as work_routes
     from tms.api.routes.deps import Deps
 
@@ -622,6 +624,8 @@ def create_app(config: Optional[Config] = None, service: Optional[TmsService] = 
     resource_group_routes.register(app, api_deps)
     work_routes.register(app, api_deps)
     fleet_routes.register(app, api_deps)
+    restart_routes.register(app, api_deps)
+    observability_routes.register(app, api_deps)
 
     # The operator console. Mounted last so its catch-all page routes never
     # shadow an /api/ path, and skipped entirely when local accounts are off —
