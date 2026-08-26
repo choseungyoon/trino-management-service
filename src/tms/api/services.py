@@ -496,6 +496,28 @@ class TmsService:
             )
         return envelope(oldest, rows, self._stale_threshold)
 
+    def overview(self, principal: Principal) -> Dict[str, Any]:
+        """One card per cluster, shaped as the landing screen reads it.
+
+        Assembled here rather than by the client because two of these numbers
+        are not arithmetic anyone should repeat:
+
+        ⛔ `active_workers` counts workers, not nodes. The coordinator's
+        ActiveNodeCount includes itself, so a 12-worker cluster reports 13 -
+        rendering that raw looks like a bug on the screen that is supposed to
+        tell you whether there is a bug.
+
+        ⛔ A missing snapshot is UNKNOWN, never healthy. Absence of a reading
+        must not read as an absence of problems.
+        """
+        require(principal, VIEW_HEALTH)
+        cards = []
+        for cluster in self.config.clusters:
+            health = self.get_health(principal, cluster.name)
+            queries = self.list_queries(principal, cluster.name, limit=1)
+            cards.append(cluster_card(cluster, health, queries))
+        return {"clusters": cards}
+
     def get_gateway(self, principal: Principal) -> Dict[str, Any]:
         """Gateway backends joined to what TMS monitors (FR-GW-01/02).
 
@@ -1006,3 +1028,39 @@ class TmsService:
             "error_message": record.error_message,
             "request_id": record.request_id,
         }
+
+
+def cluster_card(cluster, health_envelope: Dict[str, Any],
+                 queries_envelope: Dict[str, Any]) -> Dict[str, Any]:
+    """One Overview card. See TmsService.overview for the two rules it keeps."""
+    health = health_envelope.get("data") or {}
+    tests = health.get("tests") or []
+
+    active_workers = None
+    planned_out = 0
+    for test in tests:
+        if test.get("id") == "H-03" and isinstance(test.get("observed_value"), dict):
+            observed = test["observed_value"]
+            active_workers = observed.get("active_workers")
+            planned_out = observed.get("planned_out") or 0
+
+    failure_rate = None
+    for test in tests:
+        if test.get("id") == "H-05" and isinstance(test.get("observed_value"), (int, float)):
+            failure_rate = test["observed_value"]
+
+    summary = ((queries_envelope.get("data") or {}).get("summary") or {})
+    return {
+        "name": cluster.name,
+        "expected_workers": cluster.expected_workers,
+        "active_workers": active_workers,
+        "planned_out": planned_out,
+        "running": summary.get("running") or 0,
+        "queued": summary.get("queued") or 0,
+        "failure_rate": failure_rate,
+        "rollup_state": health.get("rollup_state", "UNKNOWN"),
+        "stale": bool(health_envelope.get("stale", True)),
+        "collected_at": health_envelope.get("collected_at"),
+        "tests": [{"id": t.get("id"), "name": t.get("name"), "state": t.get("state")}
+                  for t in tests],
+    }

@@ -147,3 +147,57 @@ class FleetApiTest(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(WEB_DEPS, "web dependencies are not installed")
+class OverviewApiTest(unittest.IsolatedAsyncioTestCase):
+    """The landing screen's card, assembled server-side.
+
+    Both assertions here are rules the client must never be asked to repeat.
+    """
+
+    async def signed_in(self):
+        config, service, _trino = build_service()
+        client = client_for(create_app(config=config, service=service))
+        await client.__aenter__()
+        await sign_in(client)
+        self.addAsyncCleanup(client.__aexit__, None, None, None)
+        return client
+
+    async def test_workers_are_counted_without_the_coordinator(self):
+        """⛔ ActiveNodeCount includes the coordinator: a 12-worker cluster
+        reports 13. The card carries what H-03 already resolved, not the raw
+        count - rendering 13/12 looks like a bug on the screen whose job is
+        telling you whether there is one."""
+        from tms.collector.snapshot import KIND_HEALTH, Snapshot, utcnow
+
+        config, service, _trino = build_service()
+        service.repository.save(Snapshot("prod-a", KIND_HEALTH, utcnow(), payload={
+            "rollup_state": "GOOD", "rollup_enabled": True,
+            "tests": [{"id": "H-03", "name": "Worker registration", "state": "GOOD",
+                       "observed_value": {"active_workers": 12,
+                                          "expected_workers": 12,
+                                          "planned_out": 1,
+                                          "unplanned_missing": 0},
+                       "advice": ""}]}))
+        client = client_for(create_app(config=config, service=service))
+        async with client:
+            await sign_in(client)
+            card = (await client.get("/api/v1/overview")).json()["clusters"][0]
+        self.assertEqual(12, card["active_workers"])
+        self.assertEqual(1, card["planned_out"],
+                         "planned draining is a separate fact from missing")
+
+    async def test_a_cluster_with_no_reading_is_unknown_not_healthy(self):
+        """⛔ Absence of a reading must not read as absence of problems."""
+        from tms.collector.snapshot import InMemorySnapshotRepository
+
+        config, service, _trino = build_service(with_data=False)
+        service.repository = InMemorySnapshotRepository()
+        client = client_for(create_app(config=config, service=service))
+        async with client:
+            await sign_in(client)
+            card = (await client.get("/api/v1/overview")).json()["clusters"][0]
+        self.assertEqual("UNKNOWN", card["rollup_state"])
+        self.assertTrue(card["stale"])
+        self.assertIsNone(card["active_workers"])

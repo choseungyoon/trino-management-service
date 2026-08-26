@@ -43,6 +43,9 @@ SHOTS = (
     ("20-query-history", "/benchmarks/sets/adhoc/queries/scan_narrow/history", None),
     ("21-benchmark-run", "/benchmarks/1", None),
     ("22-benchmark-compare", "/benchmarks/2?against=1", None),
+    # The React console, while it lives beside the server-rendered one.
+    ("30-console-overview", "/app/", None),
+    ("31-console-overview-dark", "/app/", "toggle_theme"),
 )
 
 

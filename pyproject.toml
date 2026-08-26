@@ -52,6 +52,10 @@ where = ["src"]
 # development because that runs straight from src/ on sys.path.
 [tool.setuptools.package-data]
 "tms.web" = ["static/*", "templates/*"]
+# The built React console. Committed rather than built at install time: the
+# deployment host has no Node on it (DECISIONS.md D-016), so anything absent
+# from the repository is absent from the server.
+"tms.ui" = ["assets/*", "assets/static/*"]
 
 [tool.ruff]
 target-version = "py39"

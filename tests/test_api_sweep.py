@@ -29,7 +29,7 @@ try:
 except ImportError:  # pragma: no cover - environment dependent
     WEB_DEPS = False
 
-from test_web_restart import EveryScreenTest  # noqa: E402
+import test_web_restart  # noqa: E402
 from test_web_routes import client_for, sign_in  # noqa: E402
 
 #: Path parameters the sweep can fill. A route whose parameter is missing here
@@ -59,10 +59,11 @@ def _path_params(path):
 
 @unittest.skipUnless(WEB_DEPS, "web dependencies are not installed")
 class ApiSweepTest(unittest.IsolatedAsyncioTestCase):
-    """Uses the fully-wired app from the screen sweep, so every feature is on."""
-
     def app(self):
-        app, _config = EveryScreenTest()._app()
+        # The fully-wired app from the screen sweep, so every feature is on.
+        # Imported as a module, not a class: importing the class makes
+        # pytest collect its tests a second time under this file's name.
+        app, _config = test_web_restart.EveryScreenTest()._app()
         return app
 
     def _api_routes(self, app, method):

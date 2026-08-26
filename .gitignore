@@ -26,6 +26,10 @@ htmlcov/
 node_modules/
 dist/
 build/
+# ⛔ src/tms/ui/assets/ is the exception: the built console IS committed.
+# Deployment is `git pull` + `pip install` onto a host with no Node on it, so
+# anything absent from the repository is absent from the server (D-016).
+!src/tms/ui/assets/
 
 # Editor / OS
 .DS_Store
@@ -45,3 +49,4 @@ PRODUCT.md.tmp
 
 # Disposable local verification rig (Trino/PostgreSQL/certs) — never commit
 scratchpad/
+*.tsbuildinfo

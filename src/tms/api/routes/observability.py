@@ -21,6 +21,16 @@ def register(app, deps: Deps) -> None:
     principal_of = deps.current_principal
     service = deps.service
 
+    @app.get("/api/v1/overview")
+    def overview(principal: Principal = Depends(principal_of)):
+        """The landing screen: one card per cluster.
+
+        Assembled server-side because two of the numbers are rules, not
+        arithmetic - workers are counted without the coordinator, and a
+        missing reading is UNKNOWN rather than healthy.
+        """
+        return service.overview(principal)
+
     @app.get("/api/v1/clusters/{cluster}/workload")
     def workload(cluster: str, principal: Principal = Depends(principal_of)):
         """Resource groups as the coordinator currently sees them.
