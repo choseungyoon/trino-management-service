@@ -167,7 +167,7 @@
 > | BM-01 표준 쿼리 세트 실행 | ✅ 착수 가능 — `ExecuteQuery` 부여됨 (D-012) |
 > | BM-03 실행 간 비교 | ✅ 착수 가능 |
 > | BM-04 프로덕션 보호 (라우팅 그룹 제외) | ✅ 착수 가능 — Gateway deactivate 재사용. **타협 불가** |
-> | BM-02 CPU/Net/Disk 시계열 | ⏸ Prometheus 미구축 (`NEXT_STEPS.md` W-6) |
+> | BM-02 CPU/Net/Disk 시계열 | ⏸ Prometheus 미구축 (`TODO.md` W-6) |
 > | BM-05 프로덕션 쿼리 샘플 | ⏸ 히스토리 프로젝트 통합 (D-001) |
 
 ### R3 — 운영 액션

@@ -147,7 +147,7 @@ FR-QUERY-HISTORY가 빠지면서 B4(대용량 히스토리 저장소)는 이월�
 > **2026-08-08 현황**: R1 5개 기능을 구현하고 사내 실환경에 배포해 운영 중이다.
 > 배포 과정에서 발견·수정한 결함은 `runbooks/deploy.md` 와 각 커밋에 기록했다.
 > **잔여 DoD**: NFR-PERF-03 실측(A-1), 테스트 커버리지 80% 확인, reviewer 체크리스트.
-> 셋 다 `docs/NEXT_STEPS.md` 로 이관했다.
+> 셋 다 `docs/TODO.md` 로 이관했다.
 
 | 항목 | 내용 |
 |---|---|
@@ -226,7 +226,7 @@ FR-QUERY-HISTORY가 빠지면서 B4(대용량 히스토리 저장소)는 이월�
 - [x] 쓰기 4개 전수: `reason` 없으면 400, 감사 기록 남음, DB 불가 시 503
 - [x] `audit_action` 대상 UPDATE/DELETE 코드 부재 + 마이그레이션에 `REVOKE` 포함 — 스캐너 + GRANT 검증
 - [x] `BAD`/`CONCERNING` 상태에 `advice` 빈 값 없음 — 엔진에서 강제 + 테스트
-- [ ] **NFR-PERF-03 실측 충족** (기존 EventListener 합산 기준) → `NEXT_STEPS.md` W-1
+- [ ] **NFR-PERF-03 실측 충족** (기존 EventListener 합산 기준) → `TODO.md` W-1
 - [x] **핵심 로직 테스트 커버리지 80%** — 2026-08-08 측정: 전체 **80%**. `formatting.py` 100%, `views.py` 92%, `routes.py` 70%. Postgres 어댑터 제외 시 83%
 - [ ] **`reviewer` 체크리스트 전 항목 통과** → 미수행
 - [x] 자격증명이 저장소에 없음 (**PUBLIC 저장소**) — 매 커밋 전 스캔

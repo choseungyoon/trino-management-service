@@ -107,7 +107,7 @@ workload:
 
 > **⛔ `resource-groups.json` 의 모든 그룹에 `"jmxExport": true` 가 필요하다.** 없는 그룹은 TMS 에 **보이지 않는다** (`TRINO_VERIFIED.md` §T1-4). 화면이 "활동한 그룹만 나온다"고 명시하지만, jmxExport 누락과 지연 생성은 화면에서 구별되지 않는다.
 >
-> **부하 주의**: 폴링마다 MBean 열거 1회 + 그룹당 읽기 1회다. NFR-PERF-03 프로덕션 실측(`NEXT_STEPS.md` W-1) 전이면 `poll_interval_seconds` 를 30 이상으로 시작하라.
+> **부하 주의**: 폴링마다 MBean 열거 1회 + 그룹당 읽기 1회다. NFR-PERF-03 프로덕션 실측(`TODO.md` W-1) 전이면 `poll_interval_seconds` 를 30 이상으로 시작하라.
 
 ### 4-2. Fleet
 
@@ -295,11 +295,11 @@ collector 를 먼저 올린다 — API 는 collector 가 쓴 스냅샷을 읽을
 
 ## 10. 확인해서 알려주면 다음 작업이 열리는 것
 
-배포와 무관하지만, 확인해 주면 막힌 항목이 풀린다. 상세는 `docs/NEXT_STEPS.md`.
+배포와 무관하지만, 확인해 주면 막힌 항목이 풀린다. 상세는 `docs/TODO.md`.
 
 - `system.runtime.nodes` 조회 권한(`ExecuteQuery`)을 TMS 에 줄 것인가 → **권고: 주지 않는다**
-- Gateway 라우팅을 least-loaded 로 바꿀 것인가 (`NEXT_STEPS.md` W-7)
-- NFR-PERF-03 프로덕션 실측 (`NEXT_STEPS.md` W-1) — Workload 폴링 주기를 낮출 근거
+- Gateway 라우팅을 least-loaded 로 바꿀 것인가 (`TODO.md` W-7)
+- NFR-PERF-03 프로덕션 실측 (`TODO.md` W-1) — Workload 폴링 주기를 낮출 근거
 
 ---
 

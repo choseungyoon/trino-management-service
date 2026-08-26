@@ -17,7 +17,7 @@ Starburst Enterprise 사용 불가 환경에서 동등한 운영 역량(모니�
 | 안전 재시작 (FR-CO-02) | 구현 완료. `manual` 실환경 검증 완료, `ansible` 모드 준비됨 |
 | Fleet 인벤토리 + graceful shutdown | 구현 완료 |
 
-**다음에 무엇을 하느냐**는 `docs/NEXT_STEPS.md` 하나만 보면 된다 — 결정(D)·확인(V)·작업(W) 으로 나뉘어 있다.
+**다음에 무엇을 하느냐**는 `docs/TODO.md` 하나만 보면 된다 — 사내에서 할 것 · 결정 · 타 팀으로 나뉘어 있다.
 **무엇을 했느냐**는 `docs/BOLTS.md`.
 
 ---
@@ -32,7 +32,7 @@ Starburst Enterprise 사용 불가 환경에서 동등한 운영 역량(모니�
 |---|---|
 | `CLAUDE.md` | ★ 진입점. 절대 규칙 · 환경 사실 |
 | `docs/TRINO_VERIFIED.md` | ★ **기술 사실의 유일한 출처.** 여기 없는 property/API 는 코드에 넣지 않는다 |
-| `docs/NEXT_STEPS.md` | 사람이 해야만 진행되는 것 전량 (D/V/W) |
+| `docs/TODO.md` | 사람이 해야만 진행되는 것 전량 |
 
 ### 무엇을 만들 것인가
 
@@ -152,4 +152,4 @@ Starburst Enterprise 사용 불가 환경에서 동등한 운영 역량(모니�
 | R5 | 클러스터를 찍어낼 수 있다 | 프로비저닝, Blue/Green 업그레이드 |
 | R6+ | 스스로 운영한다 | AIOps (`docs/AIOPS.md`) |
 
-> R2/R3 는 순서대로 끝나지 않았다. 실제로 무엇이 서 있는지는 맨 위 표를, 무엇이 남았는지는 `docs/NEXT_STEPS.md` D-4 를 본다.
+> R2/R3 는 순서대로 끝나지 않았다. 실제로 무엇이 서 있는지는 맨 위 표를, 무엇이 남았는지는 `docs/TODO.md` D-4 를 본다.

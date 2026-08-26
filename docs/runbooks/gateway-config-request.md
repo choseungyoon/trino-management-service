@@ -15,7 +15,7 @@
 | 2 | TMS 용 `API` 역할 계정 | 필요 | 🟡 |
 | 3 | `databaseCache.expireAfterWrite` | 10m → 상향 검토 | 🟡 |
 | 4 | S1 least-loaded 라우팅 + **CA 신뢰** | 미적용 | 🟡 |
-| 5 | Gateway DB 를 VM1 에서 분리 | SPOF | 🔴 (별건, `NEXT_STEPS.md` W-5) |
+| 5 | Gateway DB 를 VM1 에서 분리 | SPOF | 🔴 (별건, `TODO.md` W-5) |
 
 ---
 

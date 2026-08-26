@@ -9,7 +9,7 @@
 > | 지금 무엇을 보나 | 문서 |
 > |---|---|
 > | 현재 진행 상태 | `docs/BOLTS.md` |
-> | 사람이 할 일 (결정·확인·작업) | `docs/NEXT_STEPS.md` |
+> | 사람이 할 일 (결정·확인·작업) | `docs/TODO.md` |
 > | 기술 사실 (유일한 출처) | `docs/TRINO_VERIFIED.md` |
 > | 결정과 그 이유 | `docs/DECISIONS.md` |
 >
@@ -17,7 +17,7 @@
 >
 > **⛔ §3 의 `monitorType: UI_API` 권고를 따르지 않는다.** 2026-08-10 로컬 Gateway 19 실측 결과 `UI_API` 는 **401** 이다 — `/ui/api/stats` 는 폼 로그인 전용이라 basic auth 가 통하지 않는다. 실제로 동작하는 값은 **`METRICS`** 이며, 근거와 전체 실측표는 `docs/runbooks/gateway-config-request.md` §4-1 에 있다.
 >
-> **§3 의 SETUP 목록(S1~S8) 은 여기서 갱신되지 않는다.** 각 항목의 현재 상태와 담당은 `docs/NEXT_STEPS.md` 의 W 항목으로 옮겼다.
+> **§3 의 SETUP 목록(S1~S8) 은 여기서 갱신되지 않는다.** 각 항목의 현재 상태와 담당은 `docs/TODO.md` 의 W 항목으로 옮겼다.
 
 ---
 

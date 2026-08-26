@@ -65,7 +65,7 @@ SEED = (
      PLANNED, None, "W-11 선행", "docs/FRONTEND_PLAN.md"),
     ("D-2", DECISION, "restart_mode 를 ansible 로 전환할 것인가",
      NEEDS_DECISION, None,
-     "사람 결정 — TMS 호스트가 전 노드 SSH 를 갖는다", "docs/NEXT_STEPS.md"),
+     "사람 결정 — TMS 호스트가 전 노드 SSH 를 갖는다", "docs/TODO.md"),
 
     # ------------------------------------------------------- requirements
     ("FR-WL-07", REQUIREMENT, "리소스 그룹 설정 트리 조회 + 실행 상태 대조",
@@ -94,7 +94,7 @@ SEED = (
     ("FR-BM-06", REQUIREMENT, "쿼리 세트를 화면에서 관리 + 쿼리별 실행 이력",
      DONE, "R2", None, "docs/DECISIONS.md"),
     ("FR-BM-02", REQUIREMENT, "컴포넌트별 CPU/Net/Disk 시계열 수집",
-     BLOCKED, "R2", "Prometheus 미구축 (NEXT_STEPS W-6)", "docs/REQUIREMENTS.md"),
+     BLOCKED, "R2", "Prometheus 미구축 (TODO W-6)", "docs/REQUIREMENTS.md"),
     ("FR-BM-05", REQUIREMENT, "프로덕션 쿼리 샘플 기반 세트 생성",
      BLOCKED, "R2", "히스토리 프로젝트 통합 (D-001)", "docs/REQUIREMENTS.md"),
     ("FR-GW-04", REQUIREMENT, "Gateway databaseCache 폴백 표시",
@@ -117,34 +117,34 @@ SEED = (
      "TMS 가 쿼리 경로에 들어간다 · 분기 근거가 될 워크로드 데이터 없음",
      "docs/BACKLOG.md"),
     ("FR-OPA", REQUIREMENT, "OPA 정책 상태 가시성",
-     BLOCKED, "R4", "OPA 미배포 (NEXT_STEPS W-3)", "docs/REQUIREMENTS.md"),
+     BLOCKED, "R4", "OPA 미배포 (TODO W-3)", "docs/REQUIREMENTS.md"),
 
     # -------------------------------------------------------------- tasks
     # 010-017 are applied; 018/019 arrived afterwards, so this is not done.
     ("W-8", TASK, "마이그레이션 010~019 적용 + 보드 초기 적재",
      IN_PROGRESS, "R2", "010~017 적용 완료 · 018/019 미적용",
-     "docs/runbooks/onsite-checklist.md"),
+     "docs/TODO.md"),
     ("V-9", TASK, "리소스 그룹 편집 사내 검증 (010/011 선행)",
-     PLANNED, "R2", None, "docs/runbooks/onsite-checklist.md"),
+     PLANNED, "R2", None, "docs/TODO.md"),
     ("V-7", TASK, "작업 보드 사내 검증 (화면 + append-only)",
-     DONE, "R2", None, "docs/runbooks/onsite-checklist.md"),
+     DONE, "R2", None, "docs/TODO.md"),
     # Gateway is configured; what remains is ExecuteQuery and 018/019.
     ("V-8", TASK, "벤치마크 사내 검증 — 거부 경로부터",
      BLOCKED, "R2", "ExecuteQuery 부여 + 마이그레이션 018/019",
-     "docs/runbooks/onsite-checklist.md"),
+     "docs/TODO.md"),
     ("W-1", TASK, "NFR-PERF-03 프로덕션 실측 (피크 시간대)",
      PLANNED, "R1", "사람이 돌려야 한다 — R1 DoD 마지막 항목",
-     "docs/NEXT_STEPS.md"),
+     "docs/TODO.md"),
     ("W-2", TASK, "Gateway API 역할 계정 발급",
-     BLOCKED, "R2", "타 팀", "docs/NEXT_STEPS.md"),
+     BLOCKED, "R2", "타 팀", "docs/TODO.md"),
     ("W-3", TASK, "워커 OPA 배포",
      BLOCKED, "R3", "타 팀 · V-5(graceful shutdown 실증) 선행",
-     "docs/NEXT_STEPS.md"),
+     "docs/TODO.md"),
     ("W-5", TASK, "Gateway DB 를 VM1 에서 분리 + HA",
-     IN_PROGRESS, None, "인프라 — 사용자가 처리 중", "docs/NEXT_STEPS.md"),
+     IN_PROGRESS, None, "인프라 — 사용자가 처리 중", "docs/TODO.md"),
     ("W-6", TASK, "Prometheus + Grafana / 로그 수집",
      BLOCKED, "R2", "타 팀 · FR-BM-02 와 FR-LOG-DEEPLINK 의 선행",
-     "docs/NEXT_STEPS.md"),
+     "docs/TODO.md"),
 )
 
 
