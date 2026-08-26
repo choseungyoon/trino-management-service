@@ -60,7 +60,12 @@ def register(app, service, config, authenticator, codec, session_cookie: str,
     console still shows everything else.
     """
     from fastapi import Form, Query, Request
-    from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
+    from fastapi.responses import (
+        HTMLResponse,
+        JSONResponse,
+        PlainTextResponse,
+        RedirectResponse,
+    )
     from fastapi.staticfiles import StaticFiles
 
     from tms.core.localauth import AccountLocked, AuthError
@@ -1832,8 +1837,15 @@ def register(app, service, config, authenticator, codec, session_cookie: str,
 
     @app.exception_handler(Unauthenticated)
     async def _unauthenticated(request: Request, exc: Unauthenticated):
+        """A browser goes to the sign-in page; an API caller gets 401.
+
+        ⛔ The API branch returns the response rather than re-raising. Starlette
+        does not run its handler lookup again on an exception raised *inside* a
+        handler - re-raising sent every unauthenticated /api/ request to the
+        500 handler instead of the ApiError one.
+        """
         if request.url.path.startswith("/api/"):
-            raise exc
+            return JSONResponse(status_code=exc.status, content=exc.to_payload())
         return RedirectResponse("/login", status_code=303)
 
 
