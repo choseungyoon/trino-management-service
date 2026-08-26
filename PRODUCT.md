@@ -12,6 +12,12 @@ FastAPI backend (already built, `src/tms/`). Frontend delegated: server-rendered
 HTML + vanilla JS or a light framework, chosen at build time — must work behind
 the existing FastAPI app (`src/tms/web/`), no separate Node deployment.
 
+The reasoning, and what would reverse it, is in DECISIONS.md D-011. Read the
+2026-08-26 re-examination before quoting this line: the constraint it rests on
+is **not** that a JS toolchain is unavailable — the company runs one — it is
+that this console is opened when the cluster is broken, and a screen that
+needs a bundle to load is a screen that fails at the same time.
+
 ## Users
 
 Platform team operators at a company running OSS Trino for ~50,000 internal
