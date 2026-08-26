@@ -10,7 +10,7 @@
 |---|---|---|
 | 1 | JSON API 47개 | ✅ 완료 |
 | 2 | Vite + React 스캐폴드, FastAPI 정적 서빙 | ✅ 완료 |
-| 3 | 화면 12개 이전 | 🔄 **10 / 12** — 남은 것은 Fleet · Safe Restart |
+| 3 | 화면 12개 이전 | ✅ **12 / 12** |
 
 ## 화면
 
@@ -21,8 +21,8 @@
 | Health | ✅ | `test_observed_text` → `health/observed.py` 로 이동 완료 |
 | Workload | ✅ | 정렬은 클라이언트. `bottleneck_text` → 서버 |
 | Resource Groups | ✅ | 트리 인라인 편집 · 삭제 영향 · 셀렉터 · 이력/되돌리기. **htmx 를 안 쓴다** |
-| Fleet | ⬜ | 로그 스트리밍은 SSE 권장 |
-| Safe Restart | ⬜ | 진행 콘솔 라이브 |
+| Fleet | ✅ | 노드 인벤토리 · graceful shutdown · 잡 로그. 스트리밍은 폴링 (실행 중에만) |
+| Safe Restart | ✅ | 6단계 체크리스트 · 진행 콘솔 · force-drain/abort |
 | Gateway | ✅ | |
 | Benchmark | ✅ | 클러스터 다중 선택 · 실행 상세 · 비교 · 추이 차트 |
 | Query Sets | ✅ | 세트 목록 · 세트 편집 · 쿼리 이력 |
@@ -41,6 +41,8 @@
 | `views.test_observed_text` | `health/observed.py` | 어떤 테스트가 있고 그 숫자가 뭘 뜻하는지는 서버 지식이다. 세그먼트 `[{text, strong}]` 로 돌려주고 클라이언트는 강조만 복원한다 |
 | `views.query_history_chart` | `bench/trend.py` | 픽셀은 없다. **어떤 실행이 한 점으로 묶이는지와 한 실행의 대푯값이 무엇인지**가 서버 지식이고, 그릴 수 있는지(`drawable`)도 마찬가지다 |
 | `views.benchmark_query_rows` | `bench/compare.py` 의 `query_rows` | 반복 실행을 중앙값으로 접는 건 숫자에 대한 결정이다. `GET /api/v1/benchmarks/{id}` 가 `by_query` 로 같이 준다 |
+| `routes._counts_disagree` | `fleet/discovery.py` 의 `counts_disagree` | 코디네이터 쿼리 슬롯을 쓸지 말지의 게이트(D-012)다. 클라이언트마다 따로 판단할 문제가 아니라서 `can_identify` 로 payload 에 실어 보낸다 |
+| 재시작 6단계 미리보기 | `GET /api/v1/restarts` 의 `preview` | 라이브 체크리스트와 **같은 출처**. 손으로 쓴 두 번째 사본은 언젠가 코드가 더는 따르지 않는 절차를 설명하게 된다 |
 
 **남은 후보** — 다음에 해당 화면을 옮길 때 같은 질문을 한다:
 
@@ -75,9 +77,15 @@
 4. ⛔ staleness 는 **서버가 정한다.** 봉투의 `stale` 을 보여줄 뿐
 5. ⛔ 쓰기는 사유·감사·권한을 **서버가 강제한다.** 클라이언트 검증은 편의 — `useCapability` 로 버튼을 숨기는 건 헛클릭을 아끼는 것뿐이고, 아무것도 안 숨겨도 안전해야 한다
 
+## 옮기면서 찾은 두 번째 버그
+
+| | |
+|---|---|
+| **`/api/v1/restarts/{id}` 가 문자열을 받았다** | 컬럼은 정수다. `abc` 를 넣으면 Postgres 가 캐스팅에서 죽어 **500** 이 났다 — 오타에 대한 응답으로 "서버가 고장났다" 를 준다. 라우트 타입을 `int` 로 바꿔 경계에서 거부한다 |
+
 ## 남은 것
 
-- `src/tms/web/` 삭제는 **12개가 다 끝난 뒤**. 그때 `/app` → `/` 로 옮긴다
+- `src/tms/web/` 삭제 — **12개가 다 끝났으므로 이제 할 수 있다.** 그때 `/app` → `/` 로 옮긴다
 - `tms.css` 는 아직 `web/static/` 에 있고 프론트가 상대경로로 읽는다. web/ 을 지울 때 같이 옮긴다
 - ~~차트 라이브러리 미결~~ — **안 쓴다.** 인라인 SVG (`components/LineChart.tsx`). 점 몇 개와 직선이고 숫자는 서버가 이미 집계해서 준다. 줌·브러시가 필요해지면 그때 라이브러리가 그 아래만 대체한다
 - 빌드 산출물 커밋이 전제다. **프론트를 고치면 `npm --prefix frontend run build` 하고 같이 커밋한다**

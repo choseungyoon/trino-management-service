@@ -68,6 +68,11 @@ SHOTS = (
      "console_rg_bad_edit"),
     ("49-console-rg-delete", "/app/resource-groups?cluster=prod-a",
      "console_rg_delete"),
+    ("50-console-fleet", "/app/fleet?cluster=prod-a", None),
+    ("51-console-fleet-job", "/app/fleet/jobs/1", None),
+    ("52-console-restart", "/app/restart?cluster=prod-a", None),
+    ("53-console-restart-draining", "/app/restart?cluster=prod-a",
+     "console_restart_begin"),
 )
 
 
@@ -86,6 +91,14 @@ def _act(page, action):
         page.wait_for_selector("dialog[open] .modal__title")
         page.fill("#kill-reason", "blocking the nightly load for 40 minutes")
         page.wait_for_timeout(150)
+        return
+    if action == "console_restart_begin":
+        # prod-a has queries running, so the sequence stops at the drain -
+        # the state where the screen has the most to say.
+        page.fill("#reason", "applying the new memory configuration from CHG-4471")
+        page.click("button:has-text('Begin the restart sequence')")
+        page.wait_for_selector(".seq__act-why")
+        page.wait_for_timeout(400)
         return
     if action == "console_rg_edit":
         page.click("#rg-2 button:has-text('Edit')")
@@ -145,7 +158,7 @@ def main(out_dir):
     written = []
 
     with serve(workload_enabled=True, resource_groups=True,
-               fleet_jobs=True, benchmark=True,
+               fleet_jobs=True, benchmark=True, restarts=True,
                # On, so the Gateway screen shows its tables rather than only
                # the "integration is off" banner.
                gateway={"enabled": True, "base_url": "https://gw.invalid:8080"},

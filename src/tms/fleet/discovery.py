@@ -114,3 +114,24 @@ def _advice_for(exc) -> Optional[str]:
                 "deliberately - add `execute` to the `tms-svc` entry in OPA's "
                 "`queries` rules, above the catch-all.")
     return None
+
+
+def counts_disagree(fleet_data: Dict[str, Any]) -> bool:
+    """Does the coordinator see fewer nodes than the inventory lists?
+
+    `ActiveNodeCount` includes the coordinator (TRINO_VERIFIED T1-7-1), and so
+    does the inventory, so the two are directly comparable.
+
+    This gates the offer to run `identify`. A button that spends a query slot
+    to confirm what the screen already shows is a button people press out of
+    habit, and D-012 holds only while these stay rare.
+    """
+    counts = fleet_data.get("node_counts") or {}
+    active = counts.get("ActiveNodeCount")
+    listed = fleet_data.get("inventory_size")
+    if active is None or not listed:
+        return False
+    try:
+        return int(active) < int(listed)
+    except (TypeError, ValueError):
+        return False

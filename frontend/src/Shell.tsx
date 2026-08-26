@@ -31,6 +31,8 @@ const NAV = [
   { to: "/health", label: "Health", icon: "health" },
   { to: "/workload", label: "Workload", icon: "queries" },
   { to: "/resource-groups", label: "Resource Groups", icon: "board" },
+  { to: "/fleet", label: "Fleet", icon: "overview" },
+  { to: "/restart", label: "Safe Restart", icon: "history" },
   { to: "/gateway", label: "Gateway", icon: "trino" },
   { to: "/benchmark", label: "Benchmark", icon: "clock" },
   { to: "/work", label: "Work Board", icon: "board" },

@@ -31,6 +31,7 @@ from tms.api.permissions import MANAGE_HEALTH, Principal
 from tms.clients.errors import TrinoClientError
 from tms.clients.node import NodeClient
 from tms.collector.snapshot import KIND_FLEET
+from tms.fleet.discovery import counts_disagree
 from tms.core.audit import (
     ACTION_FLEET_JOB,
     ACTION_NODE_SHUTDOWN,
@@ -238,6 +239,9 @@ class FleetService:
             return envelope(
                 None,
                 {"nodes": [], "summary": {}, "notes": [], "enabled": enabled,
+                 # Nothing has been collected, so no disagreement has been
+                 # observed - and there is nothing to confirm.
+                 "can_identify": False,
                  "unavailable_reason": (
                      None if enabled else
                      "Fleet collection is off (fleet.enabled).")},
@@ -249,6 +253,8 @@ class FleetService:
             payload["unavailable_reason"] = snapshot.collection_error
             payload["advice"] = snapshot.advice
         payload["limits"] = self._limits(payload)
+        payload["can_identify"] = bool(
+            self.discovery_lookup_available and counts_disagree(payload))
         return envelope(snapshot, payload, self._stale_threshold)
 
     @staticmethod

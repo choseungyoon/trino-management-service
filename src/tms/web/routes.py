@@ -943,8 +943,7 @@ def register(app, service, config, authenticator, codec, session_cookie: str,
             # Only when the counts already disagree: a button that
             # spends a query slot to confirm what the screen already shows is
             # a button people press out of habit.
-            "can_identify": (fleet.discovery_lookup_available
-                             and _counts_disagree(data)),
+            "can_identify": data.get("can_identify", False),
             # Set when the confirm form is open for one node.
             "confirm_host": host,
             "error": error,
@@ -1853,23 +1852,6 @@ def _quote(value: str) -> str:
     from urllib.parse import quote
 
     return quote(value, safe="")
-
-
-def _counts_disagree(fleet_data: Dict[str, Any]) -> bool:
-    """Does the coordinator see fewer nodes than the inventory lists?
-
-    `ActiveNodeCount` includes the coordinator (TRINO_VERIFIED T1-7-1), and so
-    does the inventory, so the two are directly comparable.
-    """
-    counts = fleet_data.get("node_counts") or {}
-    active = counts.get("ActiveNodeCount")
-    listed = fleet_data.get("inventory_size")
-    if active is None or not listed:
-        return False
-    try:
-        return int(active) < int(listed)
-    except (TypeError, ValueError):
-        return False
 
 
 def _int_or_none(value) -> Optional[int]:

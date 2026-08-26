@@ -213,3 +213,24 @@ class LiveViewTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DiscoveryGateTest(unittest.TestCase):
+    """When the console should offer to spend a coordinator query slot."""
+
+    def test_only_when_the_coordinator_sees_fewer_nodes_than_the_inventory(self):
+        from tms.fleet.discovery import counts_disagree
+
+        self.assertTrue(counts_disagree(
+            {"node_counts": {"ActiveNodeCount": 11}, "inventory_size": 12}))
+        # Agreement is not a question worth a query.
+        self.assertFalse(counts_disagree(
+            {"node_counts": {"ActiveNodeCount": 12}, "inventory_size": 12}))
+        # More active than listed is a different problem, and this query does
+        # not answer it either - the inventory is what is wrong.
+        self.assertFalse(counts_disagree(
+            {"node_counts": {"ActiveNodeCount": 13}, "inventory_size": 12}))
+        # Nothing collected yet: no disagreement has been observed, so there is
+        # nothing to confirm.
+        self.assertFalse(counts_disagree({}))
+        self.assertFalse(counts_disagree({"inventory_size": 12}))

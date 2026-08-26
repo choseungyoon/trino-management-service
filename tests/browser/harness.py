@@ -112,7 +112,7 @@ def _query(qid, user, source, elapsed_ms, long_running=False, state="RUNNING"):
 
 def build_app(workload_enabled=False, seed=None, gateway=None,
               resource_groups=False, password=None, session_secret=None,
-              fleet_jobs=False, benchmark=False):
+              fleet_jobs=False, benchmark=False, restarts=False):
     repository = InMemorySnapshotRepository()
     now = utcnow()
 
@@ -386,6 +386,32 @@ def build_app(workload_enabled=False, seed=None, gateway=None,
                 build_query_sets(DEMO_QUERY_SETS)),
             gateway_client=DemoGateway())
 
+    restart_service = None
+    if restarts:
+        # In memory, because the real one needs PostgreSQL. Without this the
+        # restart screen is only ever reviewable as its "not available"
+        # banner - which is the one state that says nothing about the six
+        # steps the screen exists to show.
+        from tms.core.audit import AuditGuard as _Guard
+        from tms.ops.executor import ManualExecutor
+        from tms.ops.repository import InMemorySequenceRepository
+        from tms.ops.service import RestartService
+
+        class DemoRestartGateway:
+            @staticmethod
+            def list_backends(active_only=False):
+                return [{"name": "trino-prod-a-1", "active": True},
+                        {"name": "trino-prod-b-1", "active": True}]
+
+            @staticmethod
+            def set_active(name, active):
+                return None
+
+        restart_service = RestartService(
+            config=config, repository=InMemorySequenceRepository(),
+            snapshots=repository, gateway_client=DemoRestartGateway(),
+            audit_guard=_Guard(audit), executor=ManualExecutor())
+
     # The work board, seeded from the documents and given the kind of activity
     # a real board has after a week - a comment thread and one item that moved.
     from tms.work.items import IN_PROGRESS
@@ -413,6 +439,7 @@ def build_app(workload_enabled=False, seed=None, gateway=None,
 
     return create_app(config=config, service=service, fleet=fleet,
                       board=BoardService(board_repository),
+                      restarts=restart_service,
                       benchmark=bench_service), trino
 
 
@@ -437,14 +464,15 @@ def _free_port():
 
 @contextlib.contextmanager
 def serve(workload_enabled=False, seed=None, gateway=None,
-          resource_groups=False, fleet_jobs=False, benchmark=False):
+          resource_groups=False, fleet_jobs=False, benchmark=False,
+          restarts=False):
     """Run the console on a free port. Yields (base_url, stub_trino)."""
     import uvicorn
 
     app, trino = build_app(workload_enabled=workload_enabled, seed=seed,
                            resource_groups=resource_groups,
                            fleet_jobs=fleet_jobs, gateway=gateway,
-                           benchmark=benchmark)
+                           benchmark=benchmark, restarts=restarts)
     port = _free_port()
     with tempfile.TemporaryDirectory() as tmp:
         key, crt = _make_cert(tmp)

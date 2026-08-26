@@ -36,11 +36,21 @@ def register(app, deps: Deps) -> None:
         rotation is invisible on every other screen - the ones that remain
         look healthy while traffic is being refused.
         """
+        from tms.ops.sequence import checklist
+
         service = restarts()
-        return {"recent": service.recent(limit=limit), "active": service.active()}
+        return {
+            "recent": service.recent(limit=limit),
+            "active": service.active(),
+            # ⛔ The same source the live checklist comes from. A client that
+            # wrote its own copy of the six steps would eventually describe a
+            # procedure the code no longer follows, on the one screen that
+            # must not lie about the order.
+            "preview": checklist(),
+        }
 
     @app.get("/api/v1/restarts/{sequence_id}")
-    def get_sequence(sequence_id: str, principal: Principal = Depends(principal_of)):
+    def get_sequence(sequence_id: int, principal: Principal = Depends(principal_of)):
         """One sequence, re-observed.
 
         Reading refreshes what the coordinator says, so the step a caller sees
@@ -56,7 +66,7 @@ def register(app, deps: Deps) -> None:
         return restarts().start(principal, cluster, reason=body.get("reason"))
 
     @app.post("/api/v1/restarts/{sequence_id}/force-drain")
-    def force_drain(sequence_id: str, body: Dict[str, Any] = Body(...),
+    def force_drain(sequence_id: int, body: Dict[str, Any] = Body(...),
                     principal: Principal = Depends(principal_of)):
         """Declare it drained while queries are still running.
 
@@ -68,23 +78,23 @@ def register(app, deps: Deps) -> None:
                                       override_reason=body.get("reason"))
 
     @app.post("/api/v1/restarts/{sequence_id}/restart")
-    def execute(sequence_id: str, principal: Principal = Depends(principal_of)):
+    def execute(sequence_id: int, principal: Principal = Depends(principal_of)):
         """Run the restart, where TMS is configured to run it."""
         return restarts().restart(principal, sequence_id)
 
     @app.post("/api/v1/restarts/{sequence_id}/restarted")
-    def mark_restarted(sequence_id: str,
+    def mark_restarted(sequence_id: int,
                        principal: Principal = Depends(principal_of)):
         """The operator restarted it themselves. Records who said so."""
         return restarts().mark_restarted(principal, sequence_id)
 
     @app.post("/api/v1/restarts/{sequence_id}/complete")
-    def complete(sequence_id: str, principal: Principal = Depends(principal_of)):
+    def complete(sequence_id: int, principal: Principal = Depends(principal_of)):
         """Final step: put the cluster back in rotation."""
         return restarts().complete(principal, sequence_id)
 
     @app.post("/api/v1/restarts/{sequence_id}/abort")
-    def abort(sequence_id: str, body: Dict[str, Any] = Body(...),
+    def abort(sequence_id: int, body: Dict[str, Any] = Body(...),
               principal: Principal = Depends(principal_of)):
         """⛔ Abort restores traffic. It is "put it back", not "stop".
 

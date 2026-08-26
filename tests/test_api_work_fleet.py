@@ -144,6 +144,17 @@ class FleetApiTest(unittest.IsolatedAsyncioTestCase):
         response = await c.get("/api/v1/clusters/nope/fleet")
         self.assertEqual(404, response.status_code)
 
+    async def test_the_payload_says_whether_to_offer_the_discovery_lookup(self):
+        """The gate travels with the data, not with one screen.
+
+        Running `system.runtime.nodes` costs the coordinator a query slot and
+        D-012 holds only while these stay rare, so "should this be offered"
+        cannot be a decision each client makes for itself.
+        """
+        c = await self.signed_in()
+        response = await c.get("/api/v1/clusters/prod-a/fleet")
+        self.assertIn("can_identify", response.json()["data"])
+
 
 if __name__ == "__main__":
     unittest.main()
