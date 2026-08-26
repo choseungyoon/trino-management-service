@@ -1,13 +1,9 @@
 """Storage for benchmark runs and their measurements.
 
-Append-only where it matters, the same grade as the audit log: a measurement
-someone can edit afterwards is not a measurement, and the entire value of
-keeping these is comparing today's numbers against numbers taken before
-somebody changed something.
-
-There is no delete. A run that should not have happened still happened, and
-`benchmark_run.guard` records the state of the cluster that made it valid or
-worthless.
+⛔ Append-only, the same grade as the audit log. The point of keeping these is
+comparing today's numbers against numbers taken before something changed, and
+a measurement that can be edited afterwards is not a measurement. There is no
+delete: `benchmark_run.guard` records what made a run worth trusting.
 
 Python 3.9 compatible.
 """
@@ -239,13 +235,9 @@ class PostgresBenchmarkRepository:
                           limit: int = 100) -> List[Dict[str, Any]]:
         """Every execution of one named query, newest first.
 
-        Scoped to the set, not just the name: `q1` in `nightly` and `q1` in
-        `adhoc` are different statements, and a chart that mixed them would be
-        a chart of nothing.
-
-        The statement itself is deliberately not joined in. It is in
-        `benchmark_run.queries` per run, which is the only copy that is true
-        for that row - the editable one in `benchmark_query` is today's.
+        Scoped to the set: `q1` in two sets are different statements. The
+        statement is not joined in - `benchmark_run.queries` holds the copy
+        that is true for each row; `benchmark_query` holds today's.
         """
         columns = ("run_id", "query_name", "iteration", "trino_query_id", "state",
                    "elapsed_ms", "trino_elapsed_ms", "trino_cpu_ms",
@@ -273,13 +265,11 @@ class PostgresBenchmarkRepository:
     def reconcile_orphans(self) -> int:
         """Mark runs left RUNNING by a previous process as UNKNOWN.
 
-        Called once at startup. A row still saying RUNNING after tms-api has
-        restarted describes a worker thread that no longer exists; left alone
-        it blocks the cluster's unique index forever and tells an operator a
-        benchmark is still going.
+        Called once at startup. Such a row describes a worker thread that no
+        longer exists, and it blocks the cluster's unique index forever.
 
-        UNKNOWN rather than FAILED: the measurements already written are real.
-        What is not known is whether the rest of the set ever ran.
+        UNKNOWN rather than FAILED: the measurements already written are real;
+        what is unknown is whether the rest of the set ran.
         """
         try:
             with self._cursor() as cursor:

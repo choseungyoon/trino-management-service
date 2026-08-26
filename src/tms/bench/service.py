@@ -1,16 +1,12 @@
 """What the benchmark harness will and will not do.
 
-Starting a run is a write in the full sense: it consumes a real cluster's
-capacity on somebody's say-so. Reason, audit record, administrator.
+Starting a run consumes a real cluster's capacity, so it needs a reason, an
+audit record, and an administrator.
 
-Whether the cluster was quiet is recorded, not required: these are run against
-serving clusters on purpose, to watch performance over time. What that costs
-and how it is paid for is in guard.py.
-
-⛔ It never takes a cluster out of rotation, and removing the requirement did
-not change that. A "run benchmark" button that could deactivate a backend is
-the shortcut around the safe restart sequence, renamed - the operator excludes
-the cluster if they want it quiet, and this service only ever looks.
+⛔ It never takes a cluster out of rotation. Stopping intake belongs to the
+safe restart sequence, which drains queries first; a benchmark button that
+could deactivate a backend would be that sequence's shortcut under another
+name. Whether the cluster was quiet is recorded instead - see guard.py.
 
 Python 3.9 compatible.
 """
@@ -99,9 +95,9 @@ class BenchmarkService:
     def _all_sets(self) -> List[Any]:
         """Every set, or an empty list if storage is down.
 
-        Tolerated rather than raised: the benchmark page's other half is the
-        run history, and a database blip should not replace the whole screen
-        with an error when part of it still has something to say.
+        Tolerated rather than raised so a database blip does not replace the
+        whole page with an error while the run history still has something
+        to say.
         """
         try:
             return list(self.query_sets.values())
@@ -112,10 +108,9 @@ class BenchmarkService:
     def _not_while_running(self, key: str) -> None:
         """⛔ Refuse to edit a set that is being executed right now.
 
-        The runner reads the statements once, at start, so an edit mid-run
-        would not change what executes - it would change what the set *says*
-        executed, which is worse: the run would finish and record numbers
-        against text that never ran.
+        The runner reads the statements once, at start. An edit mid-run would
+        not change what executes - it would change what the set claims
+        executed.
         """
         try:
             active = self.repository.active()
@@ -135,12 +130,7 @@ class BenchmarkService:
     # ------------------------------------------------------------ reading
 
     def overview(self, principal: Principal) -> Dict[str, Any]:
-        """Every cluster at once, each with its own readiness.
-
-        One page rather than one per cluster: the question that brings anyone
-        here is "is A slower than B", and answering it used to mean typing two
-        URLs and running the set twice by hand.
-        """
+        """Every cluster at once, each with its own readiness."""
         self._require_view(principal)
         try:
             recent = self.repository.recent(limit=25)
@@ -156,9 +146,8 @@ class BenchmarkService:
             clusters.append({
                 "name": cluster,
                 "guard": guard.as_dict(),
-                # Selectable unless a benchmark is already on it. Two runs on
-                # one cluster measure each other; production traffic is a
-                # caveat on the numbers, not a reason to refuse.
+                # Two runs on one cluster measure each other. Production
+                # traffic is a caveat on the numbers, not a refusal.
                 "ready": cluster not in running,
                 "exclusive": guard.ok,
                 "caveat": guard.caveat(),
@@ -300,16 +289,9 @@ class BenchmarkService:
             raise InvalidRequest(
                 "Repetitions must be between 1 and {}.".format(ceiling))
 
-        # Whether the cluster was exclusive is recorded, not enforced. Runs
-        # against live clusters are the point - performance is watched over
-        # time, not only when a cluster can be taken out of rotation.
-        #
-        # ⛔ What the old gate protected is still real: a heavy set on a
-        # serving cluster competes with production for the same workers and
-        # can cause the slowdown it is measuring. So the answer travels with
-        # the run - the run page says it, and a comparison spanning the
-        # difference warns, because a number taken on an idle cluster and one
-        # taken under load are not two measurements of the same thing.
+        # ⛔ Recorded, not enforced. A heavy set on a serving cluster competes
+        # with production for the same workers and can cause the slowdown it
+        # is measuring - so the condition travels with the run instead.
         guard = self.guard_for(cluster)
 
         try:
@@ -357,12 +339,9 @@ class BenchmarkService:
                    label: Optional[str] = None) -> Dict[str, Any]:
         """Start the same set on several clusters. Report each outcome.
 
-        ⛔ One cluster being refused does not cancel the others. The remaining
-        refusal is "a benchmark is already running here"; cancelling the whole
-        request over it would mean the operator waits, comes back, and runs
-        the others a second time - and the second numbers are the ones they
-        would compare, from clusters whose caches are now warm. Started is
-        started; refused is named.
+        ⛔ One refusal does not cancel the others. Cancelling everything would
+        mean re-running the rest later, on clusters whose caches are now warm -
+        and those are the numbers that would get compared.
         """
         self._require_admin(principal)
         if not clusters:
@@ -424,12 +403,7 @@ class BenchmarkService:
     def create_set(self, principal: Principal, key: str, title: str,
                    description: str, name: str, statement: str,
                    reason: str) -> Dict[str, Any]:
-        """A set and its first query, in one step.
-
-        Creating an empty set and then adding a query was two screens, and the
-        first one had no field to type SQL into - so the obvious reading of it
-        was that a query set *is* a name and a description.
-        """
+        """A set and its first query, in one step."""
         self._require_admin(principal)
         refusal = refuse_name(key, "set key")
         if refusal:
@@ -515,12 +489,10 @@ class BenchmarkService:
             raise NotFound("No query named {!r} in {!r}.".format(name, key))
 
     def _audited(self, principal: Principal, target: str, reason: str, write):
-        """Rule 3 around one edit: reason, audit record, administrator.
+        """Reason, audit record, administrator, around one edit.
 
-        The audit row carries who, when and why. What the statement said before
-        is not copied here - `benchmark_run.queries` already holds every
-        version that was ever executed, which is the version anyone asking the
-        question actually needs.
+        The previous statement is not copied into the audit row:
+        `benchmark_run.queries` already holds every version that was executed.
         """
         try:
             with self.audit.action(

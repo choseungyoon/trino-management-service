@@ -166,18 +166,15 @@ class FleetConfig:
     poll_interval_seconds: float = 60.0
     inventories: Dict[str, str] = field(default_factory=dict)
     node_url_template: str = ""
-    # Playbooks TMS may run on request (FR-FL-04). Empty by default, and empty
-    # means the feature does not appear at all - the same stance as
-    # `cluster_ops.restart_mode`, and for the same reason: this uses the TMS
-    # host's SSH access to every node (D-009).
+    # Playbooks TMS may run on request. Empty means the feature does not
+    # appear at all - running one uses the TMS host's SSH access to every node.
     #
-    # ⛔ Never point one of these at a playbook that restarts anything. Nothing
-    # here checks that a cluster was drained, so a restart declared as a job is
-    # a way around CLAUDE.md rule 5. tms-config-check refuses that one case.
+    # ⛔ Never point one at a playbook that restarts anything. Nothing here
+    # checks that the cluster was drained. tms-config-check refuses that case.
     jobs: Dict[str, Any] = field(default_factory=dict)
-    # Trino needs at least 2 x shutdown.grace-period plus running tasks before
-    # a worker exits - four minutes on the defaults (TRINO_VERIFIED T1-2). A
-    # shorter deadline times out on a perfectly healthy shutdown.
+    # Trino needs 2 x shutdown.grace-period plus running tasks before a worker
+    # exits - four minutes on the defaults. A shorter deadline times out on a
+    # healthy shutdown.
     shutdown_timeout_seconds: float = 900.0
 
 
@@ -193,18 +190,13 @@ class AnsibleConfig:
     playbook: str = ""
     binary: str = "ansible-playbook"
     timeout_seconds: float = 1800.0
-    # ⛔ Ansible refuses to start without a writable HOME. Measured on
-    # ansible-core 2.21: it aborts at import time with exit code 5,
-    # "Unable to create local directories '~/.ansible/tmp'", before it even
-    # parses arguments. The tms-api unit sets ProtectHome=true, so the service
-    # account's real home is inaccessible - this directory is what TMS points
-    # HOME at instead.
+    # ⛔ Ansible aborts at import time without a writable HOME - measured on
+    # ansible-core 2.21: exit 5, "Unable to create local directories
+    # '~/.ansible/tmp'". tms-api runs under ProtectHome=true, so HOME points
+    # here instead.
     #
-    # systemd creates it from `StateDirectory=` in the unit. That setting takes
-    # a *name*, not a path - it is always relative to /var/lib - so the unit and
-    # this value have to be kept in agreement by hand. They disagree silently:
-    # the unit still creates its directory, TMS still looks in a different one,
-    # and the failure only shows up as a blocked restart.
+    # Must match `StateDirectory=` in the systemd unit, which takes a name
+    # relative to /var/lib. They disagree silently: the restart just blocks.
     state_dir: str = "/var/lib/trino-management-service"
     inventories: Dict[str, str] = field(default_factory=dict)
     extra_vars: Dict[str, str] = field(default_factory=dict)

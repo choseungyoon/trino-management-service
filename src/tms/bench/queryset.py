@@ -1,29 +1,15 @@
 """Query sets, and what a benchmark statement is allowed to be.
 
-A set is a named list of named statements. It used to be written into config
-like `fleet.jobs`; it now lives in the database (`bench/setstore.py`) and an
-administrator edits it in the console. This module is what a set *is* and what
-may go in one - the rules, not the storage.
+A set is a named list of named statements. Storage lives in
+`bench/setstore.py`; this module is what a set *is* and what may go in one.
 
-⛔ **The rules got more load-bearing when the storage moved.** While sets lived
-in YAML, the allowlist below was a startup check on a file somebody had
-reviewed and committed. Now it is the only thing between a pasted `DELETE` and
-N unattended executions on a cluster whose defining property, at that moment,
-is that nobody is watching it. So it is enforced twice - `refuse_statement` on
-the way in, and again in the runner on the way out - and the two are not
-redundant: a row can reach the table through psql. See DECISIONS.md D-014.
+⛔ Read-only statements only. A benchmark runs a statement N times unattended
+against a cluster nobody is watching, so a pasted `DELETE` would run N times.
+The allowlist is enforced twice - here on write, and again in the runner
+before each execution - because a row can reach the table through psql.
 
-**Read-only statements only.** Not because a write benchmark is illegitimate,
-but because a benchmark runs a statement N times unattended.
-
-This is still not a SQL editor (CLAUDE.md non-goal). The difference is not the
-text box - it is that nothing here ever shows a result row. A run returns
-timings; the rows Trino produced are counted and discarded. A screen that
-displays what the query selected is the non-goal, whatever it is called.
-
-⛔ **No query set ships with TMS.** A default set would have to name a catalog,
-and which catalogs exist is a fact about the deployment - `tpch` is present on
-a stock Trino and absent on plenty of real ones. A shipped set that fails on
+⛔ No query set ships by default. A bundled set would have to name a catalog,
+and which catalogs exist is a fact about the deployment; one that fails on
 first use teaches the operator that the feature is broken.
 
 Python 3.9 compatible.
@@ -111,9 +97,7 @@ def _without_comments(sql: str) -> str:
 def refuse_statement(sql: str) -> Optional[str]:
     """None if this may be benchmarked, else why not, in a sentence.
 
-    The public form of the allowlist. Called on every write and
-    again by the runner before each execution - see the module header for why
-    twice is not once too many.
+    Called on every write, and again by the runner before each execution.
     """
     return _statement_is_read_only(sql)
 

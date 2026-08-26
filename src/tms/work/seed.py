@@ -41,8 +41,8 @@ SEED = (
      DONE, "R3", None, "docs/DECISIONS.md"),
     ("D-010", DECISION, "리소스 그룹을 db 매니저로. TMS PostgreSQL 전용 schema",
      DONE, "R2", None, "docs/DECISIONS.md"),
-    # D-016 이 대체했다. 지우지 않는 이유는 D-013 과 같다 — 뒤집힌 결정도
-    # 기록이고, "왜 그때는 그렇게 정했나" 는 다음에 같은 질문이 왔을 때 답이다.
+    # Superseded, kept: a reversed decision is still the record of why it was
+    # made, which is the answer when the same question comes back.
     ("D-011", DECISION, "UI 는 서버 렌더. SPA 미도입 — D-016 으로 대체됨",
      DONE, None, None, "docs/DECISIONS.md"),
     ("D-012", DECISION, "tms-svc 에 ExecuteQuery 부여. A1 강제를 코드로 이동",
@@ -79,7 +79,7 @@ SEED = (
      DONE, "R3", None, "docs/REQUIREMENTS.md"),
     ("FR-FL-05", REQUIREMENT, "실행 이력 및 진행 상태 추적",
      DONE, "R3", None, "docs/REQUIREMENTS.md"),
-    # 게이트에서 라벨로 (D-015). 제목이 남아 있으면 강제하는 것으로 읽힌다.
+    # Retitled when it stopped being a gate - the old title read as enforcement.
     ("FR-BM-04", REQUIREMENT, "벤치마크 실행 조건 기록 — Quiet / Serving traffic",
      DONE, "R2", None, "docs/runbooks/benchmark.md"),
     ("FR-BM-01", REQUIREMENT, "표준 쿼리 세트 실행",
@@ -115,8 +115,7 @@ SEED = (
      BLOCKED, "R4", "OPA 미배포 (NEXT_STEPS W-3)", "docs/REQUIREMENTS.md"),
 
     # -------------------------------------------------------------- tasks
-    # 010~017 은 2026-08-25 사내 적용 완료. 018/019 는 그 뒤에 FR-BM-06 과 함께
-    # 생겼으므로 이 항목은 아직 끝나지 않았다.
+    # 010-017 are applied; 018/019 arrived afterwards, so this is not done.
     ("W-8", TASK, "마이그레이션 010~019 적용 + 보드 초기 적재",
      IN_PROGRESS, "R2", "010~017 적용 완료 · 018/019 미적용",
      "docs/runbooks/onsite-checklist.md"),
@@ -124,8 +123,7 @@ SEED = (
      PLANNED, "R2", None, "docs/runbooks/onsite-checklist.md"),
     ("V-7", TASK, "작업 보드 사내 검증 (화면 + append-only)",
      DONE, "R2", None, "docs/runbooks/onsite-checklist.md"),
-    # Gateway 설정은 2026-08-25 완료. 남은 선행은 ExecuteQuery 와, FR-BM-06 이
-    # 새로 들여온 018/019.
+    # Gateway is configured; what remains is ExecuteQuery and 018/019.
     ("V-8", TASK, "벤치마크 사내 검증 — 거부 경로부터",
      BLOCKED, "R2", "ExecuteQuery 부여 + 마이그레이션 018/019",
      "docs/runbooks/onsite-checklist.md"),

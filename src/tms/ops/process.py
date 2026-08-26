@@ -24,15 +24,12 @@ from typing import Any, Callable, Dict, List, Optional
 
 log = logging.getLogger(__name__)
 
-# The leading `[\w-]*` matters: Ansible's own secret variables are almost never
-# bare words. `vault_password`, `ansible_ssh_pass` and `become_password` all
-# failed a `\bpassword\b` anchor, because there is no word boundary inside
-# `vault_password` - so the most likely secrets in this output were the ones
-# that got through.
+# ⛔ The leading `[\w-]*` matters. Ansible's secrets are rarely bare words, and
+# `\bpassword\b` misses `vault_password` and `become_password` - there is no
+# word boundary inside them.
 #
-# `pass` is the one keyword pinned to the end of the word (`ansible_ssh_pass`).
-# Letting it take a suffix too would redact `passed: 3`, and hiding a line the
-# operator needs is its own kind of failure.
+# `pass` is pinned to the end of a word (`ansible_ssh_pass`); letting it take a
+# suffix too would redact `passed: 3`.
 _REDACT = re.compile(
     r"(?i)\b([\w-]*(?:password|passwd|secret|token|api[_-]?key)[\w-]*|[\w-]*pass)\b"
     r"(\s*[:=]\s*)(\S+)")

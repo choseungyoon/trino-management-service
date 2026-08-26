@@ -57,13 +57,10 @@ TRAFFIC_STOPPED = (DRAINING, DRAINED, RESTARTING, VERIFYING, ABORTING)
 
 STEP_ORDER = (PENDING, DRAINING, DRAINED, RESTARTING, VERIFYING, COMPLETED)
 
-# Log levels. `output` is verbatim text from whatever performed the restart -
-# rendered as a terminal rather than as prose, and never mistaken for something
-# TMS is asserting.
+# Log levels. `output` is verbatim text from whatever performed the restart.
 #
-# ⛔ Mirrored by the CHECK constraint on restart_sequence_event.level. Adding a
-# level here without a migration makes every save fail once it is first used,
-# so `tests/test_safe_sequence.py` compares the two.
+# ⛔ Mirrored by the CHECK constraint on restart_sequence_event.level. Adding
+# one without a migration makes every save fail once it is first used.
 LEVEL_INFO = "info"
 LEVEL_WARN = "warn"
 LEVEL_ERROR = "error"
@@ -85,13 +82,9 @@ STATE_LABELS = {
     ABORTED: "Aborted — traffic restored",
 }
 
-# CHECKLIST_LABELS answers "what does this step do" - the six lines beside the
-# ticks. Each names the action taken to *leave* that state, which is what a
-# tick against it should mean.
-#
-# Deliberately silent about who performs the restart: with an automated
-# executor TMS does it, with a manual one the operator does, and a checklist
-# that hard-codes either is wrong half the time. The action panel says who.
+# Each label names the action taken to *leave* that state, which is what a
+# tick against it means. Silent about who performs it - that depends on the
+# executor, and the action panel says.
 CHECKLIST_LABELS = {
     PENDING: "Stop new queries reaching it, in the Gateway",
     DRAINING: "Wait for every running query to finish",
@@ -229,13 +222,9 @@ class RestartSequence:
             self._record(DRAINED, "All running queries have finished. "
                                   "{} is empty.".format(self.cluster))
         elif self.state == DRAINING and running_queries > 0 and running_queries != previous:
-            # Progress, not a state change - the operator wants to watch the
-            # queue drain rather than stare at an unchanging screen.
-            #
-            # Only on change: the live view re-observes every couple of seconds,
-            # and repeating "waiting for 3 queries" thirty times a minute buries
-            # the lines that mean something in a log that is also the record of
-            # what was done to production.
+            # Progress, not a state change. Only on change: the live view
+            # re-observes every couple of seconds, and repeating the same line
+            # would bury the ones that mean something.
             self.log("Waiting for {} running quer{} to finish.".format(
                 running_queries, "y" if running_queries == 1 else "ies"))
 

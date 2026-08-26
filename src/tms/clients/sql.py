@@ -163,13 +163,9 @@ class SqlClient:
 
     @staticmethod
     def _payload(response, path: str) -> Dict[str, Any]:
-        # `text()`, not `text`. HttpResponse exposes it as a method, and the
-        # attribute form silently handed json.loads a bound method - truthy, so
-        # the `or "{}"` never fired and it failed with "the JSON object must be
-        # str, bytes or bytearray, not method" on the first real request.
-        # Found by running a benchmark against a live Trino 477; the unit test
-        # had a fake whose `.text` was a string, so it had agreed with the bug
-        # since the module was written.
+        # ⛔ `text()`, not `text`. HttpResponse exposes it as a method; the
+        # attribute form is truthy, so `or "{}"` never fires and json.loads
+        # dies on a bound method.
         try:
             payload = json.loads(response.text() or "{}")
         except ValueError as exc:

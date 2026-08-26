@@ -145,15 +145,11 @@ class ClusterPoller:
         self.long_running_seconds = long_running_seconds
         self.response_backoff_bytes = response_backoff_bytes
         self.response_backoff_interval = response_backoff_interval
-        # The cross-check needs a *contemporaneous* JMX reading, not merely a
-        # recent one. Queries are polled far more often than JMX (3s vs 15s by
-        # default), so on most ticks the stored JMX snapshot predates the query
-        # list by most of a JMX interval - long enough for queries to start and
-        # finish in between, which is indistinguishable from filtering. Bound
-        # the age to one query interval: the cross-check then runs only on the
-        # ticks that just refreshed JMX, and simply abstains on the rest.
-        # Abstaining costs nothing, because a denied `queries` rule persists
-        # and will still be caught on the next JMX-bearing tick.
+        # The cross-check needs a contemporaneous JMX reading. Queries are
+        # polled far more often than JMX (3s vs 15s), and a stale JMX snapshot
+        # lets queries start and finish in between - indistinguishable from
+        # being filtered out. Bounding the age means the check runs only on
+        # ticks that just refreshed JMX and abstains on the rest.
         self.jmx_cross_check_max_age = (
             jmx_cross_check_max_age
             if jmx_cross_check_max_age is not None

@@ -1,27 +1,20 @@
 """Geometry for the small line charts, computed on the server.
 
-There is no charting library here and no client-side rendering, which is the
-same decision as everywhere else in this console (DECISIONS.md D-011): the
-page arrives finished. What that costs is that the arithmetic has to live
-somewhere, and Jinja is a bad place to do arithmetic - so it lives here, where
-it can be tested without a browser.
+Kept in Python rather than in a template so it can be tested without a
+browser.
 
-⛔ One y-axis, always. Two measures of different scale get two charts, never a
-second axis - a dual-axis chart lets whoever drew it decide which line looks
-higher.
+⛔ One y-axis, always. Two measures of different scale get two charts - a
+dual-axis chart lets whoever drew it decide which line looks higher.
 
 Python 3.9 compatible.
 """
 
 from typing import Any, Dict, List, Optional, Sequence
 
-#: Series colours, in fixed order, never cycled. Slot 1 is the console accent.
-#: Both lists are validated against their own surface (light on #FFFFFF, dark
-#: on the panel) for the lightness band, chroma floor, colour-vision
-#: separation and contrast - re-run that check before adding a fifth.
-#:
-#: Status hues (good/warn/bad) are deliberately absent: they mean a state, and
-#: a series that borrowed one would look like a verdict.
+#: Series colours, in fixed order, never cycled. Validated against their own
+#: surface for lightness band, chroma floor, colour-vision separation and
+#: contrast - re-run that check before adding a fifth. Status hues are absent
+#: on purpose: a series wearing one would read as a verdict.
 SERIES_LIGHT = ("#C40090", "#2A4FC0", "#0E93B4", "#6E42C4")
 SERIES_DARK = ("#ED43AE", "#3D63D6", "#2E9DC2", "#8C63E0")
 

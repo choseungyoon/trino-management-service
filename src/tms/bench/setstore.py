@@ -1,14 +1,9 @@
 """Storage for query sets an administrator edits in the console.
 
-Deliberately *not* append-only, unlike `store.py` next door. A query set is
-configuration - it says what to measure - and the thing this replaced was a
-block of YAML that anyone could edit and redeploy. The measurements stay
-evidence: `benchmark_result` holds the numbers and `benchmark_run.queries`
-holds the statement that produced each one, both copied by value. Deleting a
-query removes it from future runs and takes nothing away from past ones.
-
-The read interface is `get()` / `values()` so it drops straight into the seat
-the config-built dict used to occupy in `BenchmarkService`.
+Editable, unlike the measurements in `store.py`: a set is configuration. Past
+runs are unaffected because they hold the set by value - `benchmark_result`
+keeps the numbers and `benchmark_run.queries` keeps the statement that
+produced each one.
 
 Python 3.9 compatible.
 """

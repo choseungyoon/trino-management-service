@@ -1,34 +1,17 @@
-"""Whether a cluster was exclusive when a run was taken.
+"""Was a cluster out of rotation and idle when a benchmark ran?
 
-This used to be a gate: no run started unless the cluster was out of rotation
-and idle. It is now a **label**. Benchmarks are run against live clusters on
-purpose - periodically, to watch performance over time - and a gate would make
-that the one thing the feature could not do.
+A label, not a gate: benchmarks run against live clusters on purpose. The
+answer is stored on the run (`benchmark_run.guard`) and shown next to the
+numbers, because a result taken on a quiet cluster and one taken under load
+are not two measurements of the same thing.
 
-⛔ **What the gate was protecting is still real.** A set of heavy queries on a
-cluster serving production competes with that traffic for the same workers: it
-can cause the slowdown it is measuring, and its numbers include whatever else
-was running. So the answer is recorded rather than enforced: every run stores
-what this module found in `benchmark_run.guard`, the run page says so, and a
-comparison that spans the difference warns - a number taken on an idle cluster
-and one taken under load are not two measurements of the same thing.
+⛔ Routing state is read from the Gateway live, not from the snapshot. A
+snapshot one poll old can call a backend deactivated twenty seconds after it
+was re-activated. The backend->cluster mapping still comes from the snapshot;
+only "is it active" is asked live.
 
-**It never deactivates anything, and that has not changed.** CLAUDE.md is
-explicit that intake can only be stopped as step 1 of the safe restart
-sequence, because an independent way to stop intake *is* the path around
-absolute rule 5. A "run benchmark" button that quietly took a cluster out of
-rotation would be exactly that button with a different label.
-
-**The check reads the Gateway, not TMS's snapshot.** A snapshot up to a poll
-interval old can say "deactivated" about a backend that was re-activated
-twenty seconds ago, and the label would then describe the past. The
-backend->cluster mapping still comes from the snapshot, because that join is
-the only source of truth for which backend is which cluster; but whether it is
-active is asked live, every time.
-
-Six months from now, `benchmark_run.guard` is the only way to tell a result
-taken on a quiet cluster from one taken while production traffic was landing
-on the same coordinator.
+⛔ This module never deactivates anything. Stopping intake belongs to the safe
+restart sequence, which drains queries first.
 
 Python 3.9 compatible.
 """
@@ -60,10 +43,8 @@ ADVICE = {
     GATEWAY_UNREACHABLE: (
         "The Gateway did not answer, so its routing state is unknown. An "
         "unknown routing state is recorded as a serving one."),
-    # These read as conditions, not instructions. Nothing here has to be
-    # fixed before running - they describe what the numbers will contain. No
-    # internal rule numbers either: whoever is holding the console gets
-    # nothing from "rule 5".
+    # Conditions, not instructions: nothing here has to be fixed before
+    # running. They describe what the numbers will contain.
     STILL_ROUTED: (
         "This cluster is in rotation, so production queries are landing on it "
         "while the benchmark runs. To measure it quiet instead, exclude it in "
@@ -84,14 +65,9 @@ ADVICE = {
 class GuardResult:
     """What the cluster looked like when the run started.
 
-    Kept as data rather than an exception so the same object can be shown on
-    the screen *before* anyone presses anything, and stored on the run
-    afterwards.
-
-    The serialised key is still `ok` and the codes are still called
-    `refusals` - both are written into `benchmark_run.guard`, and renaming them
-    would make every row taken before this change read as though the cluster
-    had been live. `ok` now means "was exclusive", not "may run".
+    ⛔ `ok` and `refusals` are serialised into `benchmark_run.guard`. Renaming
+    them would make every row written before they changed meaning read as
+    though the cluster had been live. `ok` means "was quiet", not "may run".
     """
 
     __slots__ = ("cluster", "refusals", "backends", "running_queries",

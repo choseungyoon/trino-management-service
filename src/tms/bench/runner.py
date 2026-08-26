@@ -151,11 +151,9 @@ class BenchmarkRunner:
         from tms.clients.errors import TrinoClientError
         from tms.clients.sql import QueryFailed
 
-        # ⛔ The allowlist, checked again. The service already refused this
-        # text when it was written, so reaching here means the row
-        # was changed underneath - by psql, by a restore, by a migration
-        # somebody wrote. This is the last place before N executions on a
-        # cluster nobody is watching, and it costs a regex.
+        # ⛔ The allowlist again. Reaching here means the row changed after it
+        # was written - psql, a restore, a hand-written migration. Last gate
+        # before N unattended executions, and it costs a regex.
         refusal = refuse_statement(query.sql)
         if refusal is not None:
             log.error("refusing to benchmark %r: %s", query.name, refusal)

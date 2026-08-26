@@ -154,14 +154,11 @@ class AnsibleRestartExecutor(RestartExecutor):
             if runner is None and not os.path.isfile(path):
                 raise AnsibleError(
                     "inventory not found for {!r}: {}".format(cluster, path))
-        # ⛔ Checked here, not at run time. Discovering that ansible-playbook
-        # is not on this host's PATH *during* a restart means finding out with
-        # the cluster already drained and out of rotation. At construction it
-        # is just a config error, and build_executor falls back to manual.
+        # ⛔ Checked at construction, not at run time: discovering this during
+        # a restart means discovering it with the cluster already drained.
         #
-        # systemd gives a minimal PATH, so an Ansible installed into a venv or
-        # a user-local bin is invisible to the service even when it works fine
-        # in the operator's shell. Give the absolute path in that case.
+        # systemd gives a minimal PATH, so an Ansible in a venv or ~/bin is
+        # invisible to the service. Give the absolute path in that case.
         if runner is None and shutil.which(binary) is None and not os.path.isfile(binary):
             raise AnsibleError(
                 "cluster_ops.ansible.binary {!r} was not found on this host. "
