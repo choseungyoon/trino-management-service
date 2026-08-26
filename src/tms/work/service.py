@@ -36,6 +36,7 @@ from tms.work.items import (
     WorkItemError,
     group_by_status,
     summarise,
+    timeline,
     validate,
 )
 from tms.work.store import BoardUnavailable, DuplicateKey
@@ -85,7 +86,9 @@ class BoardService:
                 "The work board is not reachable: {}".format(exc))
         if found is None:
             raise NotFound("No such item: {}".format(key))
-        return found
+        # Interleaved here rather than by the caller. Two clients doing it
+        # themselves are two copies of a rule nobody wrote down.
+        return dict(found, timeline=timeline(found))
 
     # ------------------------------------------------------------- writing
 

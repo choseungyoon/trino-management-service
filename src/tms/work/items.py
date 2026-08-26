@@ -149,3 +149,35 @@ def summarise(items: List[Dict[str, Any]]) -> Dict[str, int]:
             counts[item["status"]] += 1
     counts["open"] = sum(counts[s] for s in OPEN_STATUSES)
     return counts
+
+
+def timeline(item: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Comments and status changes, interleaved, oldest first.
+
+    One stream rather than two lists: "moved to blocked" and the comment
+    saying what blocked it are the same event to whoever is reading, and
+    separating them makes them reconstruct the order from timestamps.
+
+    Built here rather than by the caller so the rule has one home and one
+    test - a client that interleaved them itself would be a second copy of
+    a decision nobody wrote down.
+    """
+    entries: List[Dict[str, Any]] = []
+    for comment in item.get("comments") or []:
+        entries.append({"kind": "comment", "at": comment.get("created_at"),
+                        "actor": comment.get("author"),
+                        "body": comment.get("body")})
+    for event in item.get("events") or []:
+        entries.append({
+            "kind": "status", "at": event.get("occurred_at"),
+            "actor": event.get("actor"),
+            "from_status": event.get("from_status"),
+            "to_status": event.get("to_status"),
+            "from_label": STATUS_LABELS.get(event.get("from_status"),
+                                            event.get("from_status")),
+            "to_label": STATUS_LABELS.get(event.get("to_status"),
+                                          event.get("to_status")),
+        })
+    # Undated entries sort last rather than crashing the comparison: rows
+    # written before the column existed have no time.
+    return sorted(entries, key=lambda e: (e["at"] is None, e["at"]))

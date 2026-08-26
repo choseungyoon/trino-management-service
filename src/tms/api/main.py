@@ -609,7 +609,9 @@ def create_app(config: Optional[Config] = None, service: Optional[TmsService] = 
     # shadowed by a page route, and each one 503s with a name when its feature
     # is switched off rather than 404ing as though it never existed.
     from tms.api.routes import benchmark as benchmark_routes
+    from tms.api.routes import fleet as fleet_routes
     from tms.api.routes import resource_groups as resource_group_routes
+    from tms.api.routes import work as work_routes
     from tms.api.routes.deps import Deps
 
     api_deps = Deps(config=config, service=service,
@@ -618,6 +620,8 @@ def create_app(config: Optional[Config] = None, service: Optional[TmsService] = 
                     benchmark=benchmark)
     benchmark_routes.register(app, api_deps)
     resource_group_routes.register(app, api_deps)
+    work_routes.register(app, api_deps)
+    fleet_routes.register(app, api_deps)
 
     # The operator console. Mounted last so its catch-all page routes never
     # shadow an /api/ path, and skipped entirely when local accounts are off —
