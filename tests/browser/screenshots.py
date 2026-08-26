@@ -25,7 +25,7 @@ SHOTS = (
     ("02-overview-dark", "/", "toggle_theme"),
     ("03-queries", "/queries", None),
     ("04-kill", "/queries", "kill"),
-    ("05-health", "/health", None),
+    ("05-health", "/cluster-health", None),
     ("06-workload", "/workload", None),
     ("07-gateway", "/gateway", None),
     ("08-audit", "/audit", None),

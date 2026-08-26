@@ -177,7 +177,7 @@ export function Gateway() {
                         <td>
                           {b.cluster ? (
                             <>
-                              <Link to={`/health?cluster=${encodeURIComponent(b.cluster)}`}>
+                              <Link to={`/cluster-health?cluster=${encodeURIComponent(b.cluster)}`}>
                                 {b.cluster}
                               </Link>
                               {b.matched_by === "name" ? (

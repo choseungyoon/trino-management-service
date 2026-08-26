@@ -327,7 +327,7 @@ function Live({ sequenceId }: { sequenceId: string | number }) {
               Back to {sequence.cluster}
             </Link>
             <Link className="btn btn--ghost"
-                  to={`/health?cluster=${encodeURIComponent(sequence.cluster)}`}>
+                  to={`/cluster-health?cluster=${encodeURIComponent(sequence.cluster)}`}>
               Check health
             </Link>
           </div>

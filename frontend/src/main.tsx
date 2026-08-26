@@ -40,7 +40,10 @@ createRoot(document.getElementById("root")!).render(
         <Route element={<Shell />}>
           <Route index element={<Overview />} />
           <Route path="queries" element={<Queries />} />
-          <Route path="health" element={<Health />} />
+          {/* ⛔ Not /health: that is the server's liveness probe, registered
+              before the console's catch-all and documented in deploy.md. It
+              wins, and the screen was simply unreachable. */}
+          <Route path="cluster-health" element={<Health />} />
           <Route path="gateway" element={<Gateway />} />
           <Route path="workload" element={<Workload />} />
           <Route path="restart" element={<Restart />} />

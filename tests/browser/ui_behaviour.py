@@ -46,7 +46,7 @@ from tests.browser.harness import serve, sign_in  # noqa: E402
 #: checks - which is how three server-rendered screens once shipped with no
 #: render test at all.
 SCREENS = (
-    "/", "/queries", "/health", "/workload", "/gateway",
+    "/", "/queries", "/cluster-health", "/workload", "/gateway",
     "/resource-groups?cluster=prod-a", "/resource-groups/history?cluster=prod-a",
     "/fleet", "/fleet/jobs/1", "/restart?cluster=prod-a",
     "/benchmark", "/benchmark/runs/1", "/benchmark/sets",
@@ -175,8 +175,12 @@ class UiBehaviourTest(unittest.TestCase):
 
     def test_theme_toggle_persists_across_navigation(self):
         sign_in(self.page, self.base)
+        # The shell applies the theme on mount, so wait for it to be there.
+        self.page.wait_for_selector(".sidebar__foot")
         before = self.page.get_attribute("html", "data-theme")
-        self.page.locator(".sidebar__foot .icon-btn").first.click()
+        # ⛔ By label. The footer has two icon buttons and the other one signs
+        # you out - which is exactly what this test used to do to itself.
+        self.page.click("button[aria-label^='Switch to']")
         self.page.wait_for_timeout(300)
         after = self.page.get_attribute("html", "data-theme")
         self.assertNotEqual(before, after)
@@ -195,8 +199,12 @@ class UiBehaviourTest(unittest.TestCase):
         sign_in(self.page, self.base)
         for path in SCREENS:
             self.page.goto(self.base + path)
-            self.page.wait_for_selector(".topbar", timeout=10000)
+            try:
+                self.page.wait_for_selector(".topbar", timeout=10000)
+            except Exception as exc:  # noqa: BLE001 - name the screen
+                self.fail("{} never rendered: {} {}".format(path, exc, errors))
             self.page.wait_for_timeout(200)
+            self.assertEqual([], errors, "on {}".format(path))
         self.assertEqual([], errors)
 
 

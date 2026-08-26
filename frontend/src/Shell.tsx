@@ -30,7 +30,7 @@ interface ExternalLink {
 const NAV = [
   { to: "/", label: "Overview", icon: "overview", end: true },
   { to: "/queries", label: "Live Queries", icon: "queries" },
-  { to: "/health", label: "Health", icon: "health" },
+  { to: "/cluster-health", label: "Health", icon: "health" },
   { to: "/workload", label: "Workload", icon: "queries" },
   { to: "/resource-groups", label: "Resource Groups", icon: "board" },
   { to: "/fleet", label: "Fleet", icon: "overview" },

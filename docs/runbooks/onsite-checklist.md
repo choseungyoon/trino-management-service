@@ -103,6 +103,7 @@ ls venv/bin/tms-*    # tms-api  tms-collector  tms-config-check  tms-work-export
 > | `/clusters/<c>/restart` | `/restart?cluster=<c>` |
 > | `/benchmarks/sets` | `/benchmark/sets` |
 > | `/benchmarks/<id>` | `/benchmark/runs/<id>` |
+> | `/clusters/<c>/health` | `/cluster-health?cluster=<c>` — ⛔ `/health` 는 liveness 프로브다 |
 >
 > ⛔ **번들은 저장소에 커밋돼 있다.** 배포 호스트에 Node 는 없고 필요하지도 않다 —
 > `git pull` + `pip install` 이면 화면이 따라온다. 화면이 옛날 그대로라면

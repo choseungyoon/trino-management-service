@@ -115,7 +115,7 @@ export function Overview() {
                     <Link
                       key={test.id}
                       className={`test-chip test-chip--${statusClass(test.state)}`}
-                      to={`/health?cluster=${cluster.name}#${test.id}`}
+                      to={`/cluster-health?cluster=${cluster.name}#${test.id}`}
                       title={`${test.name} — ${test.state}`}
                     >
                       <i aria-hidden="true" />
@@ -130,7 +130,7 @@ export function Overview() {
                   <Icon name="queries" size={12} />
                   Live queries
                 </Link>
-                <Link className="btn btn--sm" to={`/health?cluster=${cluster.name}`}>
+                <Link className="btn btn--sm" to={`/cluster-health?cluster=${cluster.name}`}>
                   <Icon name="health" size={12} />
                   Health detail
                 </Link>

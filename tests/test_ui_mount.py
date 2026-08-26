@@ -6,6 +6,8 @@ the app must not 404 just because the server does not know the client's routes.
 """
 
 import os
+import pathlib
+import re
 import sys
 import unittest
 
@@ -92,6 +94,40 @@ class ConsoleMountTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(200, (await client.get("/api/v1/me")).status_code)
             await client.post("/api/v1/logout")
             self.assertEqual(401, (await client.get("/api/v1/me")).status_code)
+
+    async def test_no_server_route_shadows_a_screen(self):
+        """⛔ The console owns / and is mounted last, so any route registered
+        before it wins - silently. `/health` is the liveness probe, and the
+        health screen sat behind it returning `{"status":"ok"}` to a browser
+        until this test was written.
+
+        The screen list is read out of the router, not typed here: a new screen
+        that collides has to be caught by the check that already exists.
+        """
+        app = self.app()
+        server_paths = {
+            getattr(route, "path", "") for route in app.routes
+            if "GET" in (getattr(route, "methods", set()) or set())
+            and "spa_path" not in getattr(route, "path", "")
+        }
+        server_paths.discard("/")
+
+        router = pathlib.Path(
+            _HERE, "..", "frontend", "src", "main.tsx").resolve()
+        screens = {"/" + m for m in re.findall(r'<Route path="([a-z][a-z0-9/-]*)"',
+                                               router.read_text(encoding="utf-8"))}
+        self.assertTrue(screens, "no screens found in main.tsx")
+
+        # Guard the guard: /health is a real server route, so a screen there
+        # must be reported.
+        self.assertIn("/health", server_paths)
+        self.assertEqual(["/health"], sorted({"/health"} & server_paths))
+
+        collisions = sorted(screens & server_paths)
+        self.assertEqual(
+            [], collisions,
+            "these console screens are shadowed by a server route and will "
+            "never render: {}".format(collisions))
 
     def test_a_checkout_without_a_build_still_starts(self):
         """Working on the backend must not require a Node toolchain."""
