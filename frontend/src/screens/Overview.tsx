@@ -1,7 +1,7 @@
 import { Link } from "react-router";
 
 import { Icon } from "../components/Icon";
-import { Status } from "../components/Status";
+import { Status, statusClass } from "../components/Status";
 import { relativeTime } from "../format";
 import { useApi } from "../useApi";
 
@@ -114,7 +114,7 @@ export function Overview() {
                   {cluster.tests.map((test) => (
                     <Link
                       key={test.id}
-                      className={`test-chip test-chip--${test.state.toLowerCase()}`}
+                      className={`test-chip test-chip--${statusClass(test.state)}`}
                       to={`/health?cluster=${cluster.name}#${test.id}`}
                       title={`${test.name} — ${test.state}`}
                     >

@@ -46,6 +46,8 @@ SHOTS = (
     # The React console, while it lives beside the server-rendered one.
     ("30-console-overview", "/app/", None),
     ("31-console-overview-dark", "/app/", "toggle_theme"),
+    ("32-console-queries", "/app/queries", None),
+    ("33-console-kill", "/app/queries", "console_kill"),
 )
 
 
@@ -58,6 +60,13 @@ def _login(page, base_url):
 
 
 def _act(page, action):
+    if action == "console_kill":
+        page.wait_for_selector("table.table tbody tr")
+        page.click(".row-btn--kill")
+        page.wait_for_selector("dialog[open] .modal__title")
+        page.fill("#kill-reason", "blocking the nightly load for 40 minutes")
+        page.wait_for_timeout(150)
+        return
     if action == "toggle_theme":
         page.click(".icon-btn")
         page.wait_for_timeout(300)
