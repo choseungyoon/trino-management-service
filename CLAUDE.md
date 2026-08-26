@@ -119,6 +119,7 @@ TMS가 완전히 다운되어도 모든 쿼리는 정상 실행되어야 한다.
 | `docs/BACKLOG.md` | 작업 범위 확인 시. 항목별 SETUP/BUILD/DELEGATE/REJECT 판정 |
 | `docs/DESIGN_R2.md` | R2 착수 시. 설계 + 착수 가능 여부 판정 |
 | `docs/DESIGN_WL07.md` | 리소스 그룹 편집(FR-WL-07~10). **검증 규칙 전량(V1~V11 · W1~W5)은 여기가 출처** |
+| `docs/FRONTEND_PLAN.md` | **프론트 전환 착수 시.** 화면 12개 × 필요한 API 목록 + `views.py` 의 어떤 로직이 넘어가는지 (D-016) |
 
 ### 어떻게 만들었나 (구현 참조)
 
