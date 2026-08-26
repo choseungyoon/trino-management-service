@@ -31,7 +31,7 @@ from tms.collector.snapshot import (  # noqa: E402
 )
 from tms.core.audit import ACTION_BENCHMARK_QUERY_CHANGE  # noqa: E402
 
-from test_web_routes import build_service  # noqa: E402
+from console import build_service  # noqa: E402
 
 ADMIN = Principal("admin1", ["admin"])
 VIEWER = Principal("viewer1", ["viewer"])

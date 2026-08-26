@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
-import { NavLink, Outlet } from "react-router";
+import { Link, NavLink, Outlet, useLocation } from "react-router";
+
+import { api } from "./api";
 
 import { Icon } from "./components/Icon";
 import { applyTheme, currentTheme, type Theme } from "./theme";
@@ -39,6 +41,45 @@ const NAV = [
   { to: "/audit", label: "Audit Log", icon: "audit" },
 ];
 
+interface ActiveRestart {
+  id: number;
+  cluster: string;
+  actor: string;
+  label: string;
+  traffic_stopped: boolean;
+}
+
+/**
+ * A restart in progress, on every screen.
+ *
+ * ⛔ A cluster held out of rotation is invisible everywhere else: the clusters
+ * that remain are green, so the console looks healthy while traffic is being
+ * refused. This follows the operator until the sequence finishes.
+ */
+function RestartAlerts() {
+  const { pathname } = useLocation();
+  const { data } = useApi<{ active: ActiveRestart[] }>("/restarts", 10_000);
+  // Not on the restart screen itself, where the same thing is the whole page.
+  const active = pathname.startsWith("/restart") ? [] : (data?.active ?? []);
+  if (!active.length) return null;
+
+  return (
+    <div className="restart-alert-bar">
+      {active.map((restart) => (
+        <div className="restart-alert" role="status" key={restart.id}>
+          <Icon name="concerning" size={15} stroke={2} />
+          <div>
+            <b>{restart.cluster} is being restarted</b> by {restart.actor} —{" "}
+            {restart.label}
+            {restart.traffic_stopped ? ". It is receiving no queries" : ""}.
+          </div>
+          <Link className="btn btn--sm" to={`/restarts/${restart.id}`}>Open</Link>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function Shell() {
   const [theme, setTheme] = useState<Theme>(currentTheme);
   const [navOpen, setNavOpen] = useState(false);
@@ -52,6 +93,14 @@ export function Shell() {
   if (me.error?.unauthenticated) {
     window.location.href = "/login";
     return null;
+  }
+
+  async function signOut() {
+    // The cookie is HttpOnly, so only the server can clear it. A full reload
+    // afterwards, not a client route change: nothing in memory should survive
+    // a sign-out.
+    await api.post("/logout").catch(() => undefined);
+    window.location.href = "/login";
   }
 
   const initials = (me.data?.user ?? "").slice(0, 2).toUpperCase();
@@ -102,10 +151,19 @@ export function Shell() {
           <div className="avatar" aria-hidden="true">
             {initials}
           </div>
-          <div className="whoami">
+          <Link className="whoami" to="/account" title="Change your password">
             <div className="whoami__user">{me.data?.user ?? "…"}</div>
             <div className="whoami__role">{me.data?.roles?.join(", ")}</div>
-          </div>
+          </Link>
+          <button
+            className="icon-btn"
+            type="button"
+            title="Sign out"
+            aria-label="Sign out"
+            onClick={signOut}
+          >
+            <Icon name="lock" size={13} />
+          </button>
           <button
             className="icon-btn"
             type="button"
@@ -119,6 +177,7 @@ export function Shell() {
       </aside>
 
       <div className="main">
+        <RestartAlerts />
         <Outlet context={{ setNavOpen }} />
       </div>
     </div>

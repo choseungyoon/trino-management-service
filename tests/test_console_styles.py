@@ -1,0 +1,85 @@
+"""Every class the console uses must exist in the stylesheet.
+
+Written after shipping a screen whose KPI block referenced class names that
+were never in `tms.css`. It rendered - as unstyled text, in production, looking
+like a broken page rather than a missing rule. Nothing catches it otherwise:
+TypeScript checks the code, not the strings inside `className`.
+
+⛔ This is the guard on the rule that has been broken three times while porting
+screens: read the real class name out of the stylesheet, do not invent one that
+sounds right.
+
+The check is deliberately one-directional. Unused CSS is untidy; a class that
+exists only in a component is a visibly broken screen.
+"""
+
+import os
+import pathlib
+import re
+import unittest
+
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+FRONTEND = pathlib.Path(_ROOT, "frontend", "src")
+STYLESHEET = FRONTEND / "tms.css"
+
+#: Applied by a library or by the browser rather than written in a component.
+EXTERNAL = {"is-long"}
+
+#: `className={`chart__series--${slot}`}` yields a prefix whose tail is a
+#: number. The numbered variants are declared; the bare prefix is not a class.
+_TEMPLATE_HOLE = re.compile(r"\$\{[^}]*\}")
+
+
+def declared_classes():
+    css = STYLESHEET.read_text(encoding="utf-8")
+    # Strip declaration blocks so property values cannot look like selectors.
+    selectors = re.sub(r"\{[^{}]*\}", " ", css)
+    return set(re.findall(r"\.([a-zA-Z][a-zA-Z0-9_-]*)", selectors)) | EXTERNAL
+
+
+def used_classes():
+    """`className="..."` and `className={`...`}` across every component.
+
+    A template hole is replaced by a space, so only the literal parts are
+    checked. `chart__series--` on its own is dropped by the trailing-dash rule
+    below - the dynamic tail is covered by the tests that render real payloads.
+    """
+    used = {}
+    for path in sorted(FRONTEND.rglob("*.tsx")):
+        text = path.read_text(encoding="utf-8")
+        literals = re.findall(r'className="([^"]*)"', text)
+        literals += re.findall(r"className=\{`([^`]*)`\}", text)
+        # Lookup tables of state -> class, which several screens use instead of
+        # a chain of ternaries in the markup.
+        literals += re.findall(r'(?:klass|className):\s*"((?:status|banner|test-chip)[^"]*)"',
+                               text)
+        for attr in literals:
+            for name in _TEMPLATE_HOLE.sub(" ", attr).split():
+                name = name.strip()
+                if not name or name.endswith("-") or not re.match(r"^[a-zA-Z]", name):
+                    continue
+                used.setdefault(name, str(path.relative_to(FRONTEND)))
+    return used
+
+
+class StylesheetTest(unittest.TestCase):
+    def test_every_class_the_console_uses_is_styled(self):
+        declared = declared_classes()
+        missing = {name: where for name, where in used_classes().items()
+                   if name not in declared}
+        self.assertEqual(
+            {}, missing,
+            "these classes appear in components but not in tms.css, so they "
+            "render unstyled: {}".format(missing))
+
+    def test_the_check_reads_something(self):
+        """A guard that scans nothing passes for the wrong reason."""
+        self.assertGreater(len(used_classes()), 100)
+
+    def test_the_check_would_notice_an_invented_class(self):
+        """Guard the guard - it is worthless if it cannot fail."""
+        self.assertNotIn("totally-invented-class", declared_classes())
+
+
+if __name__ == "__main__":
+    unittest.main()

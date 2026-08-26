@@ -23,14 +23,12 @@ sys.path.insert(0, os.path.dirname(_HERE))
 try:
     import httpx  # noqa: F401
     from fastapi import FastAPI  # noqa: F401
-    import multipart  # noqa: F401
 
     WEB_DEPS = True
 except ImportError:  # pragma: no cover - environment dependent
     WEB_DEPS = False
 
-import test_web_restart  # noqa: E402
-from test_web_routes import client_for, sign_in  # noqa: E402
+from console import client_for, fully_wired_app, sign_in  # noqa: E402
 
 #: Path parameters the sweep can fill. A route whose parameter is missing here
 #: fails loudly rather than being skipped - an unwalked route is the one that
@@ -57,13 +55,12 @@ def _path_params(path):
     return re.findall(r"{(\w+)}", path)
 
 
-@unittest.skipUnless(WEB_DEPS, "web dependencies are not installed")
+@unittest.skipUnless(WEB_DEPS, "fastapi/httpx not installed")
 class ApiSweepTest(unittest.IsolatedAsyncioTestCase):
     def app(self):
-        # The fully-wired app from the screen sweep, so every feature is on.
-        # Imported as a module, not a class: importing the class makes
-        # pytest collect its tests a second time under this file's name.
-        app, _config = test_web_restart.EveryScreenTest()._app()
+        # Every feature on. A route whose service is None answers 503 and the
+        # sweep proves nothing about it.
+        app, _config = fully_wired_app()
         return app
 
     def _api_routes(self, app, method):

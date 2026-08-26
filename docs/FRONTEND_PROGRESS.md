@@ -83,9 +83,28 @@
 |---|---|
 | **`/api/v1/restarts/{id}` 가 문자열을 받았다** | 컬럼은 정수다. `abc` 를 넣으면 Postgres 가 캐스팅에서 죽어 **500** 이 났다 — 오타에 대한 응답으로 "서버가 고장났다" 를 준다. 라우트 타입을 `int` 로 바꿔 경계에서 거부한다 |
 
+## 컷오버 (2026-08-27) — 끝났다
+
+| | |
+|---|---|
+| 주소 | `/app` → **`/`**. `vite.config.ts` 의 `base`, `BrowserRouter` 의 `basename`, `ui/mount.py` 세 곳 |
+| `src/tms/web/` | **삭제.** 템플릿 41개 · `routes.py` 1,887줄 · `views.py` · `chart.py` · `formatting.py` · `tms.js` · `htmx.min.js` |
+| `tms.css` | `frontend/src/tms.css` 로. Vite 가 해시를 붙이므로 캐시된 옛 스타일시트가 나올 일이 없다 |
+| 로그인 | `Login.tsx` → `POST /api/v1/login`. 계정 화면도 `Account.tsx` 로 |
+| 테스트 | `test_web_*` 6개 삭제·이동. 헬퍼는 `tests/console.py`(테스트 아님), 재시작 화면 테스트는 `tests/test_api_restart.py` 로 **번역**했다 — 렌더된 문장 대신 payload 를 본다 |
+
+**컷오버가 잡아낸 것 세 가지.** 전부 서버 렌더가 있는 동안은 가려져 있었다:
+
+| | |
+|---|---|
+| **`GET /api/v1/restarts/{id}` 가 `get()` 을 썼다** | 웹 라우트는 `refresh()` 를 썼다. `get()` 은 executor 를 폴링하지 않는다 — 자동 재시작이라면 로그가 영원히 비어 있고 시퀀스가 RESTARTING 에서 안 나온다. 서버 렌더가 사라지면서 유일한 클라이언트가 된 순간 드러났다 |
+| **`sequence_id` 가 `str` 이었다** | 컬럼은 정수다. `/api/v1/restarts/abc` 는 Postgres 캐스팅 에러 = **500**. 오타에 "서버가 고장났다" 를 답한다 |
+| **abort 실패가 500 이었다** | Gateway 가 안 되면 `RuntimeError` 가 그대로 라우트를 빠져나갔다. 고쳐야 할 방법을 적은 한 문장은 로그에만 있었다. 이제 503 + 그 문장 |
+
+**전역 재시작 배너가 빠져 있었다.** 서버 렌더 `base.html` 이 모든 화면에 그리던 것을 SPA 로 옮기면서 놓쳤다 — `Shell.tsx` 의 `RestartAlerts` 로 복구했다. 라우팅에서 빠진 클러스터는 다른 모든 화면에서 보이지 않는다는 게 이게 있는 이유다.
+
 ## 남은 것
 
-- `src/tms/web/` 삭제 — **12개가 다 끝났으므로 이제 할 수 있다.** 그때 `/app` → `/` 로 옮긴다
-- `tms.css` 는 아직 `web/static/` 에 있고 프론트가 상대경로로 읽는다. web/ 을 지울 때 같이 옮긴다
+- 없다. 프론트 전환은 끝났다
 - ~~차트 라이브러리 미결~~ — **안 쓴다.** 인라인 SVG (`components/LineChart.tsx`). 점 몇 개와 직선이고 숫자는 서버가 이미 집계해서 준다. 줌·브러시가 필요해지면 그때 라이브러리가 그 아래만 대체한다
 - 빌드 산출물 커밋이 전제다. **프론트를 고치면 `npm --prefix frontend run build` 하고 같이 커밋한다**

@@ -66,7 +66,7 @@ def main(port=None):
             "this repository). Set it before hosting this anywhere.")
 
     app, _trino = build_app(workload_enabled=True, resource_groups=True,
-                            fleet_jobs=True, benchmark=True,
+                            fleet_jobs=True, benchmark=True, restarts=True,
                             password=password, session_secret=secret)
 
     scheme = "https" if tls else "http"
@@ -75,15 +75,16 @@ def main(port=None):
     print("  sign in    {} / {}".format(
         USER, PASSWORD if password == PASSWORD else "(TMS_DEMO_PASSWORD)"))
     print("")
-    print("  Resource Groups is at /clusters/prod-a/resource-groups")
-    print("  Fleet jobs are at    /clusters/prod-a/fleet")
-    print("  Work Board is at     /work")
-    print("  Benchmark is at      /benchmark  (both clusters on one page)")
-    print("                       Both are refused on purpose, for different")
-    print("                       reasons - prod-b is still in rotation, and")
-    print("                       both have queries running. That is the guard.")
-    print("  Query sets are at    /benchmarks/sets")
-    print("  prod-b deliberately has no rows loaded, so you can see that state.")
+    print("  Resource Groups   /resource-groups?cluster=prod-a")
+    print("  Fleet             /fleet?cluster=prod-a")
+    print("  Safe Restart      /restart?cluster=prod-a")
+    print("  Work Board        /work")
+    print("  Benchmark         /benchmark   (every cluster on one page)")
+    print("                    prod-a is serving traffic and prod-b is quiet,")
+    print("                    so the picker shows both conditions at once.")
+    print("  Query sets        /benchmark/sets")
+    print("  prod-b deliberately has no resource group rows loaded, so you can")
+    print("  see that state.")
     print("")
     print("  Nothing is persisted; restarting resets the tree.")
     print("")

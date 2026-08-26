@@ -89,10 +89,24 @@ ls venv/bin/tms-*    # tms-api  tms-collector  tms-config-check  tms-work-export
 > 넷 중 하나라도 없으면 `pip install` 을 다시 한다. `tms-work-export` 가 없으면
 > §7 의 보드 내보내기가 통째로 안 된다.
 >
-> **의존성이 하나 늘었다** — `MarkupSafe`. 원래도 Jinja2 를 따라 들어오고 있었지만
-> `pyproject.toml` 에 선언돼 있지 않았다. `--no-deps` 로 재설치하면(`deploy.md` §UI 파일 문제)
-> 이게 빠진 venv 가 만들어지고 `tms-api` 가 기동조차 못 한다. 이번 `pip install` 은
-> `--no-deps` 없이 한다.
+> **의존성이 셋 줄었다 (2026-08-27)** — `Jinja2` · `MarkupSafe` · `python-multipart`.
+> 서버 렌더 콘솔이 삭제되면서(D-016) 템플릿도 폼 파싱도 없어졌다. venv 에 남아
+> 있어도 해롭지 않으니 지우지 않아도 된다.
+>
+> **대신 이번 배포는 화면이 통째로 바뀐다.** 콘솔은 `/` 의 React SPA 이고,
+> 주소가 몇 개 옮겨졌다 — 아래 표를 보고 북마크를 바꾼다.
+>
+> | 전 | 후 |
+> |---|---|
+> | `/clusters/<c>/resource-groups` | `/resource-groups?cluster=<c>` |
+> | `/clusters/<c>/fleet` | `/fleet?cluster=<c>` |
+> | `/clusters/<c>/restart` | `/restart?cluster=<c>` |
+> | `/benchmarks/sets` | `/benchmark/sets` |
+> | `/benchmarks/<id>` | `/benchmark/runs/<id>` |
+>
+> ⛔ **번들은 저장소에 커밋돼 있다.** 배포 호스트에 Node 는 없고 필요하지도 않다 —
+> `git pull` + `pip install` 이면 화면이 따라온다. 화면이 옛날 그대로라면
+> `pip install` 이 안 된 것이지 빌드가 필요한 것이 아니다.
 
 - [ ] `018` `019` 를 **번호순으로** `tms_owner` 로 적용
       <br>*(`009` 기준 환경이라면 `010`부터 `019`까지 전부. 이미 올라간 번호는 다시 돌리지 않는다)*
@@ -180,7 +194,7 @@ ls venv/bin/tms-*    # tms-api  tms-collector  tms-config-check  tms-work-export
       세트는 `018` 부터 DB 에 있고 화면에서 만든다 (FR-BM-06 · D-014).
       *2026-08-25 기준 사내 설정에는 없다 — 이대로 두면 된다*
 
-> 쿼리 세트는 기동 시점에 선언하지 않는다. `/benchmarks/sets` 에서 만들고, 규칙은
+> 쿼리 세트는 기동 시점에 선언하지 않는다. `/benchmark/sets` 에서 만들고, 규칙은
 > `benchmark.md` §2 에 있다. 저장할 때와 실행 직전에 각각 검사한다.
 
 ---
@@ -304,7 +318,7 @@ ls venv/bin/tms-*    # tms-api  tms-collector  tms-config-check  tms-work-export
 - [ ] 쿼리 하나의 SQL 을 고친다 (사유 필수)
 - [ ] 고치기 전 실행 화면을 다시 연다 → **그 실행이 쓴 SQL 은 그대로다**
 - [ ] 다시 한 번 실행한 뒤 이전 실행과 비교 → 그 쿼리 행에 **변경됨** 표시와 경고
-- [ ] `/benchmarks/sets/<키>/queries/<이름>/history` → 실행 한 건마다 그때 SQL 이 지금과 같은지 표시
+- [ ] `/benchmark/sets/<키>/queries/<이름>/history` → 실행 한 건마다 그때 SQL 이 지금과 같은지 표시
 - [ ] 실행 중에 같은 세트를 고쳐 본다 → **거부된다**
 
 **append-only 확인** (`tms_app`, 둘 다 실패해야 정상)

@@ -3,6 +3,8 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router";
 
 import { Shell } from "./Shell";
+import { Account } from "./screens/Account";
+import { Login } from "./screens/Login";
 import { Overview } from "./screens/Overview";
 import { Audit } from "./screens/Audit";
 import { Benchmark } from "./screens/Benchmark";
@@ -22,15 +24,19 @@ import { Work } from "./screens/Work";
 import { WorkItem } from "./screens/WorkItem";
 import { Workload } from "./screens/Workload";
 
-// The approved design system, unchanged. It is the same file the server-
-// rendered console uses — one source of truth while both exist, and the file
-// moves here when that one is deleted.
-import "../../src/tms/web/static/tms.css";
+// The approved design system, unchanged. Vite hashes it into the bundle, so
+// a stylesheet change cannot be served from a browser cache that still holds
+// the previous one.
+import "./tms.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <BrowserRouter basename="/app">
+    <BrowserRouter>
       <Routes>
+        {/* Outside the Shell: there is no navigation to offer someone who is
+            not signed in, and every screen inside it would 401 on its first
+            read. */}
+        <Route path="/login" element={<Login />} />
         <Route element={<Shell />}>
           <Route index element={<Overview />} />
           <Route path="queries" element={<Queries />} />
@@ -52,6 +58,7 @@ createRoot(document.getElementById("root")!).render(
           <Route path="work" element={<Work />} />
           <Route path="work/:key" element={<WorkItem />} />
           <Route path="audit" element={<Audit />} />
+          <Route path="account" element={<Account />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>

@@ -15,17 +15,12 @@ dependencies = [
     "fastapi>=0.110",
     "uvicorn[standard]>=0.27",
     "PyYAML>=6.0",
-    "Jinja2>=3.1",
-    # Imported directly by web/views.py, not only through Jinja2. It arrives
-    # anyway as a Jinja2 dependency, which is why this was missing for so
-    # long without breaking - but deploy.md tells the operator to reinstall
-    # with --no-deps, and that is a route to a venv with Jinja2 and no
-    # markupsafe. Declare what we import.
-    "MarkupSafe>=2.0",
     "httpx>=0.27",
     "psycopg[binary]>=3.1",
-    "python-multipart>=0.0.9",
 ]
+# Jinja2, MarkupSafe and python-multipart were dropped on 2026-08-27 with the
+# server-rendered console (D-016). Nothing renders a template or parses a form
+# any more - the console is a static bundle and every write is JSON.
 
 [project.optional-dependencies]
 dev = [
@@ -46,15 +41,15 @@ tms-work-export = "tms.work.export:run"
 [tool.setuptools.packages.find]
 where = ["src"]
 
-# The UI is served from files, not from Python. Without this they are simply
-# absent from the wheel and tms-api dies at startup with
-# "Directory 'tms/web/static' does not exist" - which never shows up in
-# development because that runs straight from src/ on sys.path.
+# The console is served from files, not from Python. Without this they are
+# simply absent from the wheel and tms-api dies at startup with
+# "Directory 'tms/ui/assets/static' does not exist" - which never shows up in
+# development, because that runs straight from src/ on sys.path.
+#
+# Committed rather than built at install time: the deployment host has no Node
+# on it (DECISIONS.md D-016), so anything absent from the repository is absent
+# from the server.
 [tool.setuptools.package-data]
-"tms.web" = ["static/*", "templates/*"]
-# The built React console. Committed rather than built at install time: the
-# deployment host has no Node on it (DECISIONS.md D-016), so anything absent
-# from the repository is absent from the server.
 "tms.ui" = ["assets/*", "assets/static/*"]
 
 [tool.ruff]

@@ -16,7 +16,6 @@ sys.path.insert(0, os.path.dirname(_HERE))
 try:
     import httpx  # noqa: F401
     from fastapi import FastAPI  # noqa: F401
-    import multipart  # noqa: F401
 
     WEB_DEPS = True
 except ImportError:  # pragma: no cover - environment dependent
@@ -27,10 +26,10 @@ from tms.work.seed import seed as seed_board  # noqa: E402
 from tms.work.service import BoardService  # noqa: E402
 from tms.work.store import InMemoryBoardRepository  # noqa: E402
 
-from test_web_routes import build_service, client_for, sign_in  # noqa: E402
+from console import build_service, client_for, sign_in  # noqa: E402
 
 
-@unittest.skipUnless(WEB_DEPS, "web dependencies are not installed")
+@unittest.skipUnless(WEB_DEPS, "fastapi/httpx not installed")
 class WorkApiTest(unittest.IsolatedAsyncioTestCase):
     def build(self, roles=("admin",)):
         config, service, _trino = build_service(roles=roles)
@@ -108,7 +107,7 @@ class WorkApiTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(body["error"])
 
 
-@unittest.skipUnless(WEB_DEPS, "web dependencies are not installed")
+@unittest.skipUnless(WEB_DEPS, "fastapi/httpx not installed")
 class FleetApiTest(unittest.IsolatedAsyncioTestCase):
     def build(self):
         from tms.fleet.service import FleetService
@@ -160,7 +159,7 @@ if __name__ == "__main__":
     unittest.main()
 
 
-@unittest.skipUnless(WEB_DEPS, "web dependencies are not installed")
+@unittest.skipUnless(WEB_DEPS, "fastapi/httpx not installed")
 class OverviewApiTest(unittest.IsolatedAsyncioTestCase):
     """The landing screen's card, assembled server-side.
 

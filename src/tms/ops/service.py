@@ -432,12 +432,15 @@ class RestartService:
         except Exception as exc:  # noqa: BLE001
             # Leave the sequence in ABORTING: it is still holding traffic back
             # and must stay visible until someone fixes it.
-            stored.sequence.log(
+            message = (
                 "Could not restore traffic: {}. {} is still receiving no queries "
-                "- reactivate it in the Gateway.".format(exc, stored.sequence.cluster),
-                level=LEVEL_ERROR)
+                "- reactivate it in the Gateway.".format(exc, stored.sequence.cluster))
+            stored.sequence.log(message, level=LEVEL_ERROR)
             self.repository.save(stored)
-            raise
+            # ⛔ An ApiError, not the transport's exception. Raw, this left the
+            # route as a 500 with a traceback, and the one sentence naming the
+            # fix stayed buried in the log.
+            raise UpstreamUnavailable(message)
 
         stored.sequence.finish_abort()
         self.repository.save(stored)

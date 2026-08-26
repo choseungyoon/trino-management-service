@@ -817,6 +817,10 @@ dialog::backdrop { background: rgba(4, 6, 10, .55); backdrop-filter: blur(1px); 
 }
 .restart-alert svg { stroke: var(--warn); flex: none; }
 .restart-alert a { margin-left: auto; white-space: nowrap; }
+/* Above every screen rather than inside one: the shell owns it, and each
+   screen renders its own .content below. Padding matches .content so the
+   banner lines up with the panels under it. */
+.restart-alert-bar { display: grid; gap: 10px; padding: 18px 18px 0; }
 
 /* ── Utilities ──────────────────────────────────────────────────────── */
 

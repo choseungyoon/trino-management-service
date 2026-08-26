@@ -6,7 +6,7 @@ import react from "@vitejs/plugin-react";
 // anything not in the repository is not on the server. See DECISIONS.md D-016.
 export default defineConfig({
   plugins: [react()],
-  base: "/app/",
+  base: "/",
   build: {
     outDir: "../src/tms/ui/assets",
     emptyOutDir: true,

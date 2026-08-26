@@ -142,6 +142,23 @@ def group_by_status(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     ]
 
 
+def statuses() -> List[Dict[str, Any]]:
+    """Every status a work item can be moved to, in order, with its meaning.
+
+    ⛔ Sent to the client rather than written there. A hand-written copy of
+    this list is a second definition of what the statuses are, and the two
+    drift the first time one is added.
+    """
+    return [{"value": status, "label": STATUS_LABELS[status],
+             "meaning": STATUS_MEANINGS[status]}
+            for status in STATUS_ORDER]
+
+
+def kinds() -> List[Dict[str, Any]]:
+    """The item kinds, for the board's filter. Same reason as `statuses`."""
+    return [{"value": kind, "label": label} for kind, label in KIND_LABELS.items()]
+
+
 def summarise(items: List[Dict[str, Any]]) -> Dict[str, int]:
     counts = {status: 0 for status in STATUS_ORDER}
     for item in items or []:

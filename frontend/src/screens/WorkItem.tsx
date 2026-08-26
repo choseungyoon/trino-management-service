@@ -26,16 +26,10 @@ interface Item {
   created_by: string;
   created_at: string;
   timeline: TimelineEntry[];
+  /* ⛔ From the server. A hand-written copy here is a second definition of
+     what the statuses are, and the two drift the first time one is added. */
+  statuses: { value: string; label: string; meaning: string }[];
 }
-
-const STATUSES = [
-  ["needs_decision", "Needs a decision", "Waiting on a person"],
-  ["blocked", "Blocked", "Waiting on something named"],
-  ["in_progress", "In progress", "Being built now"],
-  ["planned", "Planned", "Agreed and unblocked"],
-  ["done", "Done", "Built and in the repository"],
-  ["dropped", "Dropped", "Decided against"],
-] as const;
 
 export function WorkItem() {
   const { key = "" } = useParams();
@@ -123,7 +117,8 @@ export function WorkItem() {
               <div className="fact__value">
                 <span className={`board__mark board__mark--${data.status}`}
                       aria-hidden="true" />
-                {STATUSES.find((s) => s[0] === data.status)?.[1] ?? data.status}
+                {data.statuses.find((s) => s.value === data.status)?.label
+                  ?? data.status}
               </div>
               <div className="fact__key">Status</div>
             </div>
@@ -150,7 +145,7 @@ export function WorkItem() {
             <div className="panel__title">Move it</div>
             <div className="panel__sub">Your note is kept as a comment</div>
           </div>
-          <MoveForm current={data.status} busy={busy}
+          <MoveForm current={data.status} statuses={data.statuses} busy={busy}
                     onSubmit={(status, note) =>
                       run(() => api.put(`/work/${encodeURIComponent(data.key)}/status`,
                                         { status, note }))} />
@@ -195,7 +190,8 @@ export function WorkItem() {
   );
 }
 
-function MoveForm({ current, busy, onSubmit }: {
+function MoveForm({ current, statuses, busy, onSubmit }: {
+  statuses: Item["statuses"];
   current: string;
   busy: boolean;
   onSubmit: (status: string, note: string) => void;
@@ -210,9 +206,9 @@ function MoveForm({ current, busy, onSubmit }: {
         Status
         <select className="input" value={status}
                 onChange={(e) => setStatus(e.target.value)}>
-          {STATUSES.map(([value, label, meaning]) => (
-            <option key={value} value={value}>
-              {label} — {meaning}
+          {statuses.map((choice) => (
+            <option key={choice.value} value={choice.value}>
+              {choice.label} — {choice.meaning}
             </option>
           ))}
         </select>

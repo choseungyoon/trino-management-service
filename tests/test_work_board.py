@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(_HERE), "src"))
 
 from tms.api.errors import Forbidden, InvalidRequest, NotFound, UpstreamUnavailable  # noqa: E402
 from tms.api.permissions import Principal  # noqa: E402
-from tms.web import views  # noqa: E402
+from tms.work import items  # noqa: E402
 from tms.work.items import (  # noqa: E402
     BLOCKED,
     DONE,
@@ -159,7 +159,7 @@ class BoardServiceTest(unittest.TestCase):
         self.board.comment(ADMIN, "W-1", "before")
         self.board.set_status(ADMIN, "W-1", IN_PROGRESS)
         self.board.comment(ADMIN, "W-1", "after")
-        timeline = views.work_timeline(self.board.item(ADMIN, "W-1"))
+        timeline = items.timeline(self.board.item(ADMIN, "W-1"))
         self.assertEqual(["comment", "status", "comment"],
                          [entry["kind"] for entry in timeline])
 
@@ -233,21 +233,34 @@ class MarkdownExportTest(unittest.TestCase):
         self.assertIn("Prometheus 미구축", self.text)
 
 
-class ViewShapingTest(unittest.TestCase):
-    def test_kind_chips_count_what_is_on_screen(self):
+class VocabularyTest(unittest.TestCase):
+    """What the statuses and kinds *are* is server knowledge.
+
+    ⛔ The console is handed these rather than writing them down. A
+    hand-written copy in a screen is a second definition, and the two drift
+    the first time one is added - which is what happened to the release plan
+    and BACKLOG.md.
+    """
+
+    def test_every_status_comes_with_its_label_and_meaning(self):
+        choices = items.statuses()
+        self.assertEqual(list(STATUS_ORDER), [c["value"] for c in choices])
+        for choice in choices:
+            self.assertTrue(choice["label"])
+            self.assertTrue(choice["meaning"])
+
+    def test_every_kind_comes_with_its_label(self):
+        listed = items.kinds()
+        self.assertEqual(sorted(items.KIND_LABELS), sorted(k["value"] for k in listed))
+        for kind in listed:
+            self.assertTrue(kind["label"])
+
+    def test_the_board_carries_the_kinds_its_filter_needs(self):
         repository = InMemoryBoardRepository()
         seed(repository)
-        columns = group_by_status(repository.list_items())
-        chips = views.kind_chips(None, columns)
-        total = next(chip for chip in chips if chip["label"] == "All")
-        self.assertEqual(len(SEED), total["count"])
-        self.assertEqual(len(SEED), sum(chip["count"] for chip in chips
-                                        if chip["label"] != "All"))
-
-    def test_status_choices_include_the_current_one(self):
-        choices = views.status_choices(BLOCKED)
-        self.assertEqual(len(STATUS_ORDER), len(choices))
-        self.assertEqual([BLOCKED], [c["value"] for c in choices if c["selected"]])
+        board = BoardService(repository).board(ADMIN)
+        self.assertEqual(len(SEED), sum(len(c["cards"]) for c in board["columns"]))
+        self.assertEqual(items.kinds(), board["kinds"])
 
 
 if __name__ == "__main__":

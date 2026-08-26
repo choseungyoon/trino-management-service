@@ -35,6 +35,8 @@ from tms.work.items import (
     STATUS_LABELS,
     WorkItemError,
     group_by_status,
+    kinds,
+    statuses,
     summarise,
     timeline,
     validate,
@@ -68,13 +70,15 @@ class BoardService:
         except BoardUnavailable as exc:
             log.warning("work board unavailable: %s", exc)
             return {"available": False, "error": str(exc),
-                    "columns": [], "summary": {}, "kind": kind}
+                    "columns": [], "summary": {}, "kind": kind,
+                    "kinds": kinds()}
         return {
             "available": True,
             "error": None,
             "columns": group_by_status(items),
             "summary": summarise(items),
             "kind": kind,
+            "kinds": kinds(),
         }
 
     def item(self, principal: Principal, key: str) -> Dict[str, Any]:
@@ -88,7 +92,9 @@ class BoardService:
             raise NotFound("No such item: {}".format(key))
         # Interleaved here rather than by the caller. Two clients doing it
         # themselves are two copies of a rule nobody wrote down.
-        return dict(found, timeline=timeline(found))
+        # `statuses` travels with the item so the editor never holds its own
+        # copy of what the statuses are.
+        return dict(found, timeline=timeline(found), statuses=statuses())
 
     # ------------------------------------------------------------- writing
 

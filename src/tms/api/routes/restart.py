@@ -53,11 +53,16 @@ def register(app, deps: Deps) -> None:
     def get_sequence(sequence_id: int, principal: Principal = Depends(principal_of)):
         """One sequence, re-observed.
 
-        Reading refreshes what the coordinator says, so the step a caller sees
-        is the step the server would allow - not the one it allowed last time
-        somebody looked.
+        ⛔ `refresh`, not `get`. Reading is what drives an automated restart:
+        a finished playbook advances the sequence and its output is pulled into
+        the log on the same call. With `get` the console polled forever, the
+        log stayed empty and the sequence never left RESTARTING.
+
+        It also re-observes the cluster, so the step a caller sees is the step
+        the server would allow - not the one it allowed last time somebody
+        looked.
         """
-        return restarts().get(principal, sequence_id)
+        return restarts().refresh(principal, sequence_id)
 
     @app.post("/api/v1/clusters/{cluster}/restarts", status_code=201)
     def start(cluster: str, body: Dict[str, Any] = Body(...),

@@ -198,7 +198,13 @@ catch-all 행은 시각적으로 구분하고 **삭제 버튼을 주지 않는�
 
 ---
 
-## 6. htmx
+## 6. htmx — ⛔ 대체됨 (D-016, 2026-08-27)
+
+> **이 절은 현재 상태가 아니다.** htmx 와 `web/static/` 은 삭제됐고, 이 화면은
+> `frontend/src/screens/ResourceGroups.tsx` 다. 아래를 남겨 두는 이유는 **왜 htmx
+> 였는지** 가 기록이기 때문이다 — `<form>` 이 `<tr>` 을 감쌀 수 없다는 제약이
+> 이유였고, React 에는 그 제약이 없다. **검증 규칙(§1~§5)은 전부 유효하다.**
+
 
 `web/static/htmx.min.js` 로 vendoring 한다 (D-011, 사내에서 파일 커밋 가능 확인됨). npm·빌드·Node 없음.
 

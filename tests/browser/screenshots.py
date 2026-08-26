@@ -21,58 +21,33 @@ from tests.browser.harness import PASSWORD, USER, serve  # noqa: E402
 #: (filename, path, what to do first). Each shot is a state worth being able to
 #: look at, not just a page - the interesting ones are mid-interaction.
 SHOTS = (
-    ("01-tree", "/clusters/prod-a/resource-groups", None),
-    ("02-edit-row", "/clusters/prod-a/resource-groups", "edit"),
-    ("03-validation-refused", "/clusters/prod-a/resource-groups", "bad_edit"),
-    ("04-saved", "/clusters/prod-a/resource-groups", "good_edit"),
-    ("05-delete-impact", "/clusters/prod-a/resource-groups", "delete"),
-    ("06-history", "/clusters/prod-a/resource-groups/history", None),
-    ("07-not-loaded", "/clusters/prod-b/resource-groups", None),
-    ("08-dark-theme", "/clusters/prod-a/resource-groups", "toggle_theme"),
-    ("09-fleet-jobs", "/clusters/prod-a/fleet", None),
-    ("10-job-log", "/fleet/jobs/1", None),
-    ("11-work-board", "/work", None),
-    ("12-work-item", "/work/REQ-1", None),
-    ("13-work-decision", "/work/D-2", None),
-    ("14-work-board-dark", "/work", "toggle_theme"),
-    ("15-benchmark", "/benchmark", None),
-    ("16-benchmark-dark", "/benchmark", "toggle_theme"),
-    ("17-query-sets", "/benchmarks/sets", None),
-    ("18-query-set", "/benchmarks/sets/adhoc", None),
-    ("19-query-edit", "/benchmarks/sets/adhoc?edit=join_three", None),
-    ("20-query-history", "/benchmarks/sets/adhoc/queries/scan_narrow/history", None),
-    ("21-benchmark-run", "/benchmarks/1", None),
-    ("22-benchmark-compare", "/benchmarks/2?against=1", None),
-    # The React console, while it lives beside the server-rendered one.
-    ("30-console-overview", "/app/", None),
-    ("31-console-overview-dark", "/app/", "toggle_theme"),
-    ("32-console-queries", "/app/queries", None),
-    ("33-console-kill", "/app/queries", "console_kill"),
-    ("34-console-health", "/app/health", None),
-    ("35-console-gateway", "/app/gateway", None),
-    ("36-console-audit", "/app/audit", None),
-    ("37-console-workload", "/app/workload", None),
-    ("38-console-work", "/app/work", None),
-    ("39-console-work-item", "/app/work/REQ-1", None),
-    ("40-console-benchmark", "/app/benchmark", None),
-    ("41-console-benchmark-run", "/app/benchmark/runs/1", None),
-    ("42-console-query-sets", "/app/benchmark/sets", None),
-    ("43-console-query-set", "/app/benchmark/sets/adhoc", None),
-    ("44-console-query-history",
-     "/app/benchmark/sets/adhoc/queries/scan_narrow/history", None),
-    ("45-console-resource-groups", "/app/resource-groups?cluster=prod-a", None),
-    ("46-console-rg-history",
-     "/app/resource-groups/history?cluster=prod-a", None),
-    ("47-console-rg-edit", "/app/resource-groups?cluster=prod-a", "console_rg_edit"),
-    ("48-console-rg-refused", "/app/resource-groups?cluster=prod-a",
-     "console_rg_bad_edit"),
-    ("49-console-rg-delete", "/app/resource-groups?cluster=prod-a",
-     "console_rg_delete"),
-    ("50-console-fleet", "/app/fleet?cluster=prod-a", None),
-    ("51-console-fleet-job", "/app/fleet/jobs/1", None),
-    ("52-console-restart", "/app/restart?cluster=prod-a", None),
-    ("53-console-restart-draining", "/app/restart?cluster=prod-a",
-     "console_restart_begin"),
+    ("01-overview", "/", None),
+    ("02-overview-dark", "/", "toggle_theme"),
+    ("03-queries", "/queries", None),
+    ("04-kill", "/queries", "kill"),
+    ("05-health", "/health", None),
+    ("06-workload", "/workload", None),
+    ("07-gateway", "/gateway", None),
+    ("08-audit", "/audit", None),
+    ("10-resource-groups", "/resource-groups?cluster=prod-a", None),
+    ("11-rg-edit", "/resource-groups?cluster=prod-a", "rg_edit"),
+    ("12-rg-refused", "/resource-groups?cluster=prod-a", "rg_bad_edit"),
+    ("13-rg-delete", "/resource-groups?cluster=prod-a", "rg_delete"),
+    ("14-rg-history", "/resource-groups/history?cluster=prod-a", None),
+    ("20-fleet", "/fleet?cluster=prod-a", None),
+    ("21-fleet-job", "/fleet/jobs/1", None),
+    ("22-restart", "/restart?cluster=prod-a", None),
+    ("23-restart-draining", "/restart?cluster=prod-a", "restart_begin"),
+    ("30-benchmark", "/benchmark", None),
+    ("31-benchmark-run", "/benchmark/runs/1", None),
+    ("32-query-sets", "/benchmark/sets", None),
+    ("33-query-set", "/benchmark/sets/adhoc", None),
+    ("34-query-history",
+     "/benchmark/sets/adhoc/queries/scan_narrow/history", None),
+    ("40-work-board", "/work", None),
+    ("41-work-item", "/work/REQ-1", None),
+    ("42-work-decision", "/work/D-2", None),
+    ("43-work-board-dark", "/work", "toggle_theme"),
 )
 
 
@@ -81,18 +56,19 @@ def _login(page, base_url):
     page.fill("input[name=username]", USER)
     page.fill("input[name=password]", PASSWORD)
     page.click("button[type=submit]")
+    page.wait_for_url(lambda url: "/login" not in url, timeout=10000)
     page.wait_for_load_state("networkidle")
 
 
 def _act(page, action):
-    if action == "console_kill":
+    if action == "kill":
         page.wait_for_selector("table.table tbody tr")
         page.click(".row-btn--kill")
         page.wait_for_selector("dialog[open] .modal__title")
         page.fill("#kill-reason", "blocking the nightly load for 40 minutes")
         page.wait_for_timeout(150)
         return
-    if action == "console_restart_begin":
+    if action == "restart_begin":
         # prod-a has queries running, so the sequence stops at the drain -
         # the state where the screen has the most to say.
         page.fill("#reason", "applying the new memory configuration from CHG-4471")
@@ -100,11 +76,11 @@ def _act(page, action):
         page.wait_for_selector(".seq__act-why")
         page.wait_for_timeout(400)
         return
-    if action == "console_rg_edit":
+    if action == "rg_edit":
         page.click("#rg-2 button:has-text('Edit')")
         page.wait_for_selector("#rg-2 input[aria-label='Group name']")
         return
-    if action == "console_rg_bad_edit":
+    if action == "rg_bad_edit":
         page.click("#rg-2 button:has-text('Edit')")
         page.wait_for_selector("#rg-2 input[aria-label='Group name']")
         # 0 concurrency stops the group entirely. Trino accepts it; TMS does
@@ -114,40 +90,13 @@ def _act(page, action):
         page.click("#rg-2 button:has-text('Save')")
         page.wait_for_selector(".banner--bad")
         return
-    if action == "console_rg_delete":
+    if action == "rg_delete":
         page.click("#rg-1 button:has-text('Delete')")
         page.wait_for_selector("#rg-1 .confirm__impact")
         return
     if action == "toggle_theme":
-        page.click(".icon-btn")
+        page.click("button[aria-label^='Switch to']")
         page.wait_for_timeout(300)
-        return
-    if action == "edit":
-        page.click("#rg-2 button:has-text('Edit')")
-        page.wait_for_selector("#rg-2 input[name=name]")
-        return
-    if action == "bad_edit":
-        page.click("#rg-2 button:has-text('Edit')")
-        page.wait_for_selector("#rg-2 input[name=name]")
-        # 0 concurrency stops the group entirely. Trino accepts it; TMS does
-        # not, because it is a delete wearing a tuning value's clothes.
-        page.fill("#rg-2 input[name=hard_concurrency_limit]", "0")
-        page.fill("#rg-2 input[name=reason]", "trying a zero limit")
-        page.click("#rg-2 button:has-text('Save')")
-        page.wait_for_selector("#rg-notices .banner--bad")
-        return
-    if action == "good_edit":
-        page.click("#rg-2 button:has-text('Edit')")
-        page.wait_for_selector("#rg-2 input[name=name]")
-        page.fill("#rg-2 input[name=hard_concurrency_limit]", "12")
-        page.fill("#rg-2 input[name=reason]",
-                  "Superset dashboards were queueing behind one another")
-        page.click("#rg-2 button:has-text('Save')")
-        page.wait_for_selector("#rg-notices .banner--good")
-        return
-    if action == "delete":
-        page.click("#rg-1 button:has-text('Delete')")
-        page.wait_for_selector("#rg-1 .confirm")
         return
 
 

@@ -627,21 +627,11 @@ def create_app(config: Optional[Config] = None, service: Optional[TmsService] = 
     restart_routes.register(app, api_deps)
     observability_routes.register(app, api_deps)
 
-    # The React console, where it has been built. Its catch-all is scoped to
-    # /app, so it cannot shadow an /api/ path.
+    # ⛔ The console, mounted last. Its catch-all answers every address that is
+    # not an API route, so anything registered after it would be unreachable.
     from tms.ui import mount as ui
 
     ui.mount(app)
-
-    # The server-rendered console. Mounted last so its catch-all page routes
-    # never shadow an /api/ path, and skipped entirely when local accounts are
-    # off — a UI with no way to sign in is worse than no UI.
-    if codec is not None:
-        from tms.web.routes import register as register_web
-
-        register_web(app, service, config, authenticator, codec, SESSION_COOKIE,
-                     restarts=restarts, fleet=fleet, board=board,
-                     benchmark=benchmark)
 
     return app
 

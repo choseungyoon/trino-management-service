@@ -34,7 +34,6 @@ export function Icon({ name, size = 15, stroke = 1.7 }: {
 }) {
   return (
     <svg
-      className="ic"
       viewBox="0 0 24 24"
       width={size}
       height={size}

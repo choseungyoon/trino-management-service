@@ -16,7 +16,6 @@ sys.path.insert(0, _HERE)
 try:
     import httpx  # noqa: F401
     from fastapi import FastAPI  # noqa: F401
-    import multipart  # noqa: F401
 
     WEB_DEPS = True
 except ImportError:  # pragma: no cover - environment dependent
@@ -35,7 +34,7 @@ from tms.collector.snapshot import (  # noqa: E402
     utcnow,
 )
 
-from test_web_routes import build_service, client_for, sign_in  # noqa: E402
+from console import build_service, client_for, sign_in  # noqa: E402
 
 SETS = {"smoke": {"title": "Smoke", "queries": [
     {"name": "a", "sql": "SELECT 1"},
@@ -65,7 +64,7 @@ class RecordingRunner:
         self.aborted.append(run_id)
 
 
-@unittest.skipUnless(WEB_DEPS, "web dependencies are not installed")
+@unittest.skipUnless(WEB_DEPS, "fastapi/httpx not installed")
 class BenchmarkApiTest(unittest.IsolatedAsyncioTestCase):
     def build(self, roles=("admin",)):
         config, service, _trino = build_service(roles=roles,

@@ -22,13 +22,12 @@ sys.path.insert(0, os.path.dirname(_HERE))
 try:
     import httpx
     from fastapi import FastAPI  # noqa: F401
-    import multipart  # noqa: F401
 
     WEB_DEPS = True
 except ImportError:  # pragma: no cover - environment dependent
     WEB_DEPS = False
 
-from test_web_resource_groups import (  # noqa: E402
+from rgapp import (  # noqa: E402
     ADMIN,
     GLOBAL,
     PASSWORD,
@@ -40,7 +39,7 @@ from test_web_resource_groups import (  # noqa: E402
 )
 
 
-@unittest.skipUnless(WEB_DEPS, "web dependencies not installed")
+@unittest.skipUnless(WEB_DEPS, "fastapi/httpx not installed")
 class ResourceGroupApiTest(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         from tests.browser.rgstore import InMemoryResourceGroupStore
@@ -53,8 +52,8 @@ class ResourceGroupApiTest(unittest.IsolatedAsyncioTestCase):
             transport=httpx.ASGITransport(app=self.app),
             base_url="https://tms.test", follow_redirects=False)
         await client.__aenter__()
-        await client.post("/login", data={"username": USER, "password": PASSWORD,
-                                          "next": "/"})
+        await client.post("/api/v1/login",
+                          json={"username": USER, "password": PASSWORD})
         self.addAsyncCleanup(client.__aexit__, None, None, None)
         return client
 

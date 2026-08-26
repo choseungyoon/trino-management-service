@@ -16,7 +16,6 @@ sys.path.insert(0, _HERE)
 try:
     import httpx  # noqa: F401
     from fastapi import FastAPI  # noqa: F401
-    import multipart  # noqa: F401
 
     WEB_DEPS = True
 except ImportError:  # pragma: no cover - environment dependent
@@ -25,10 +24,10 @@ except ImportError:  # pragma: no cover - environment dependent
 from tms.api.main import create_app  # noqa: E402
 from tms.ui import mount as ui  # noqa: E402
 
-from test_web_routes import build_service, client_for  # noqa: E402
+from console import build_service, client_for, sign_in  # noqa: E402
 
 
-@unittest.skipUnless(WEB_DEPS, "web dependencies are not installed")
+@unittest.skipUnless(WEB_DEPS, "fastapi/httpx not installed")
 class ConsoleMountTest(unittest.IsolatedAsyncioTestCase):
     def app(self):
         config, service, _trino = build_service()
@@ -41,7 +40,7 @@ class ConsoleMountTest(unittest.IsolatedAsyncioTestCase):
             self.skipTest("the console is not built in this checkout")
         client = client_for(self.app())
         async with client:
-            for path in ("/app", "/app/", "/app/benchmark/sets/nightly"):
+            for path in ("/", "/login", "/benchmark/sets/nightly"):
                 response = await client.get(path)
                 self.assertEqual(200, response.status_code, path)
                 self.assertIn('id="root"', response.text, path)
@@ -53,17 +52,46 @@ class ConsoleMountTest(unittest.IsolatedAsyncioTestCase):
             self.skipTest("the console is not built in this checkout")
         client = client_for(self.app())
         async with client:
-            response = await client.get("/app")
+            response = await client.get("/")
         self.assertIn("no-store", response.headers.get("cache-control", ""))
 
     async def test_the_console_never_shadows_the_api(self):
-        """⛔ Its catch-all is scoped to /app. An /api/ path reaching the SPA
-        would answer HTML to a client expecting JSON."""
+        """⛔ The catch-all owns / now, so this is the property that keeps the
+        API usable: an /api/ path reaching the SPA would answer HTML to a
+        client expecting JSON, turning "wrong endpoint" into a parse error."""
         client = client_for(self.app())
         async with client:
-            response = await client.get("/api/v1/me")
-        self.assertEqual(401, response.status_code)
-        self.assertIn("application/json", response.headers["content-type"])
+            unauthenticated = await client.get("/api/v1/me")
+            self.assertEqual(401, unauthenticated.status_code)
+            self.assertIn("application/json",
+                          unauthenticated.headers["content-type"])
+
+            await sign_in(client)
+            missing = await client.get("/api/v1/no-such-thing")
+            self.assertEqual(404, missing.status_code)
+            self.assertIn("application/json", missing.headers["content-type"])
+
+    async def test_the_session_ceremony_survived_the_cutover(self):
+        """Sign-in, cookie flags, sign-out. The console has no other way in.
+
+        `Secure` matters: the whole HTTPS deployment requirement rests on it.
+        """
+        client = client_for(self.app())
+        async with client:
+            refused = await sign_in(client, password="wrong")
+            self.assertEqual(401, refused.status_code)
+            self.assertNotIn("tms_session", client.cookies)
+
+            accepted = await sign_in(client)
+            self.assertEqual(200, accepted.status_code)
+            cookie = accepted.headers.get("set-cookie", "")
+            self.assertIn("tms_session", cookie)
+            self.assertIn("Secure", cookie)
+            self.assertIn("HttpOnly", cookie)
+
+            self.assertEqual(200, (await client.get("/api/v1/me")).status_code)
+            await client.post("/api/v1/logout")
+            self.assertEqual(401, (await client.get("/api/v1/me")).status_code)
 
     def test_a_checkout_without_a_build_still_starts(self):
         """Working on the backend must not require a Node toolchain."""

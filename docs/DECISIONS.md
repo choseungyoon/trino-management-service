@@ -45,7 +45,7 @@
 | | |
 |---|---|
 | 프레임워크 | **React 19** — 생태계·인수인계 (사용률 85%, npm 주간 25~50M, 사내 벤치 최다) |
-| 빌드 | **Vite**, 정적 산출물이 `web/static/` 으로 |
+| 빌드 | **Vite**, 정적 산출물이 `src/tms/ui/assets/` 로 (커밋한다) |
 | 서빙 | **FastAPI.** 같은 출처, 배포 단위 하나 |
 | 런타임 | **⛔ Node 프로세스 없음.** 배포는 그대로 `pip install` + `systemctl restart` |
 
@@ -86,7 +86,22 @@ SPA 전환에서 조용히 무너지기 쉬운 것들이다. 전부 서버가 �
 1. **번들 로딩 실패로 실제 장애 대응이 지연된 사례가 나오면** — 그때는 D-011 이 옳았던 것이고, SSR 이나 아일랜드로 되돌린다
 2. 런타임 Node 를 요구하는 요구가 생기면 그건 이 결정을 다시 여는 것이다
 
-**관련**: `docs/DECISIONS.md` D-011(대체됨), `PRODUCT.md` Stack, `docs/API_R1.md`(확장 대상), `src/tms/web/`(대체 대상)
+### 수행 결과 (2026-08-27, 완료)
+
+| | |
+|---|---|
+| API | 47개. `src/tms/api/routes/` |
+| 화면 | **12 / 12.** `frontend/src/screens/` |
+| `src/tms/web/` | **삭제됐다.** Jinja 템플릿 41개 · htmx · `tms.js` · `views.py` · `chart.py` 전부 |
+| 주소 | 콘솔이 `/` 를 갖는다. `/app` 은 병행 기간 동안만 쓰던 임시 주소였다 |
+| `tms.css` | `frontend/src/tms.css` 로 옮겼다. Vite 가 해시를 붙인다 |
+| 로그인 | 서버 렌더 페이지 대신 `Login.tsx` → `POST /api/v1/login`. 쿠키 규약은 그대로다 |
+
+**포기한 것 2번("두 번째 테스트 스택")은 예상보다 작게 끝났다.** 옮기기 전에 "API 가 해야 하나" 를 물어 규칙을 서버로 되돌렸기 때문이다 — `FRONTEND_PROGRESS.md` 의 표가 전량이다. 브라우저에서만 확인되는 것은 `tests/browser/ui_behaviour.py` 로 좁혀졌다.
+
+**대신 클래스 이름 가드가 살아남았다.** `tests/test_console_styles.py` 가 `.tsx` 의 `className` 을 `tms.css` 와 대조한다 — 옮기는 동안 없는 클래스를 지어낸 게 세 번이었고, 그 중 둘(`stale-badge`·`ic`)은 이 가드가 켜지는 순간 잡혔다.
+
+**관련**: `docs/DECISIONS.md` D-011(대체됨), `PRODUCT.md` Stack, `docs/API_R1.md`, `frontend/`, `src/tms/ui/`
 
 ---
 
@@ -138,7 +153,7 @@ SPA 전환에서 조용히 무너지기 쉬운 것들이다. 전부 서버가 �
 
 **배경**: FR-BM-01 을 만들 때 세트를 `benchmark.query_sets` 에 두었다. 근거는 지금도 유효한 쪽이 있었다 — SQL 을 요청으로 받으면 그건 비목표인 "웹 SQL 에디터"이고, YAML 은 PR 리뷰를 공짜로 준다. 그런데 실제로 쓰려니 **쿼리 하나 추가하는 데 배포가 필요했다.** 벤치마크는 "왜 A 가 B 보다 느린가" 를 그 자리에서 파고드는 도구인데, 한 번 파고들 때마다 배포를 기다리면 도구가 아니다.
 
-**결정**: 세트를 `benchmark_query_set` · `benchmark_query` 테이블로 옮기고 `/benchmarks/sets` 에서 편집한다. `benchmark.query_sets` 는 **무시가 아니라 거부**한다 — 남아 있으면 두 개의 진실이 되고 화면 쪽이 조용히 이긴다.
+**결정**: 세트를 `benchmark_query_set` · `benchmark_query` 테이블로 옮기고 `/benchmark/sets` 에서 편집한다. `benchmark.query_sets` 는 **무시가 아니라 거부**한다 — 남아 있으면 두 개의 진실이 되고 화면 쪽이 조용히 이긴다.
 
 **⛔ 이것이 SQL 에디터가 아닌 이유는 텍스트 박스가 아니다**
 

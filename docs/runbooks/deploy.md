@@ -85,7 +85,11 @@ EOF
 ls -l /etc/trino-management-service/venv/bin/tms-api /etc/trino-management-service/venv/bin/tms-collector
 ```
 
-설치되는 의존성: `fastapi`, `uvicorn[standard]`, `PyYAML`, `Jinja2`, `httpx`, `psycopg[binary]`, `python-multipart`.
+설치되는 의존성: `fastapi`, `uvicorn[standard]`, `PyYAML`, `httpx`, `psycopg[binary]`.
+
+> **2026-08-27 에 셋이 빠졌다** — `Jinja2` · `MarkupSafe` · `python-multipart`. 서버 렌더
+> 콘솔이 삭제되면서(D-016) 템플릿을 그리는 코드도 폼을 파싱하는 코드도 없어졌다.
+> 기존 venv 에 남아 있어도 해롭지는 않다.
 
 > **⚠️ Python 3.9 가 하한이다.** 일부 대상 호스트가 아직 3.9 다. 3.8 이하에서는 설치가 거부된다.
 
@@ -453,12 +457,12 @@ curl -s http://127.0.0.1:8500/ready      # {"status":"ready"}
 
 | 증상 | 원인 | 조치 |
 |---|---|---|
-| `Directory 'tms/web/static' does not exist` | **UI 파일이 설치되지 않았다** | 아래 |
+| `Directory 'tms/ui/assets/static' does not exist` | **콘솔 번들이 설치되지 않았다** | 아래 |
 | `226/NAMESPACE` | 샌드박스 마운트 실패 | §9-3 |
 | `permission denied ... config.secret.yaml` | 파일 소유자가 `root` | §8 |
 | 기동은 되는데 `/` 가 404 | `portal.local_users` 비어 있음 | §8 |
 
-`static`/`templates` 가 설치되지 않는 문제는 **0.1.0 최초 배포판의 패키징 버그**였다 (2026-08-07 수정). `pip install` 로 만들어지는 패키지에 UI 파일이 빠져 있었다. 최신 코드로 재설치하면 해결된다.
+UI 파일이 설치되지 않는 문제는 **0.1.0 최초 배포판의 패키징 버그**였다 (2026-08-07 수정). `pip install` 로 만들어지는 패키지에 UI 파일이 빠져 있었다. 최신 코드로 재설치하면 해결된다. 지금 대상은 Jinja 템플릿이 아니라 `tms/ui/assets/` 의 React 번들이지만, 원인과 조치는 같다 — `pyproject.toml` 의 `package-data` 선언이다 (`tests/test_packaging.py` 가 지킨다).
 
 ```bash
 cd /etc/trino-management-service && sudo -u tms git pull
@@ -471,10 +475,10 @@ sudo systemctl restart tms-api
 
 ```bash
 SP=$(/etc/trino-management-service/venv/bin/python -c "import tms,os;print(os.path.dirname(os.path.dirname(tms.__file__)))")
-ls "$SP/tms/web/static" "$SP/tms/web/templates"
+ls "$SP/tms/ui/assets" "$SP/tms/ui/assets/static"
 ```
 
-기대: `static` 2개(`tms.css`, `tms.js`), `templates` 14개.
+기대: `assets` 에 `index.html`, `assets/static` 에 해시 붙은 `.js` 와 `.css` 각 1개.
 
 ---
 
