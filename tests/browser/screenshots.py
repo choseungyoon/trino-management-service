@@ -48,6 +48,7 @@ SHOTS = (
     ("31-console-overview-dark", "/app/", "toggle_theme"),
     ("32-console-queries", "/app/queries", None),
     ("33-console-kill", "/app/queries", "console_kill"),
+    ("34-console-health", "/app/health", None),
 )
 
 

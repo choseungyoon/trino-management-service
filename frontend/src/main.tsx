@@ -4,6 +4,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router";
 
 import { Shell } from "./Shell";
 import { Overview } from "./screens/Overview";
+import { Health } from "./screens/Health";
 import { Queries } from "./screens/Queries";
 
 // The approved design system, unchanged. It is the same file the server-
@@ -18,6 +19,7 @@ createRoot(document.getElementById("root")!).render(
         <Route element={<Shell />}>
           <Route index element={<Overview />} />
           <Route path="queries" element={<Queries />} />
+          <Route path="health" element={<Health />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>

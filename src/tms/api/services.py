@@ -48,6 +48,7 @@ from tms.collector.snapshot import (
     Snapshot,
     utcnow,
 )
+from tms.health.observed import observed_segments
 from tms.core.audit import (
     ACTION_AUDIT_EXPORT,
     ACTION_HEALTH_ROLLUP_TOGGLE,
@@ -811,6 +812,9 @@ class TmsService:
             )
         payload = dict(snapshot.payload or {})
         for test in payload.get("tests") or []:
+            # The sentence an operator reads, built where the test catalog
+            # lives. See health/observed.py.
+            test["observed"] = observed_segments(test)
             links = {}
             log_url = build_log_url(
                 self.config.deeplinks.log_template,
