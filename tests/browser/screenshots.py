@@ -60,6 +60,14 @@ SHOTS = (
     ("43-console-query-set", "/app/benchmark/sets/adhoc", None),
     ("44-console-query-history",
      "/app/benchmark/sets/adhoc/queries/scan_narrow/history", None),
+    ("45-console-resource-groups", "/app/resource-groups?cluster=prod-a", None),
+    ("46-console-rg-history",
+     "/app/resource-groups/history?cluster=prod-a", None),
+    ("47-console-rg-edit", "/app/resource-groups?cluster=prod-a", "console_rg_edit"),
+    ("48-console-rg-refused", "/app/resource-groups?cluster=prod-a",
+     "console_rg_bad_edit"),
+    ("49-console-rg-delete", "/app/resource-groups?cluster=prod-a",
+     "console_rg_delete"),
 )
 
 
@@ -78,6 +86,24 @@ def _act(page, action):
         page.wait_for_selector("dialog[open] .modal__title")
         page.fill("#kill-reason", "blocking the nightly load for 40 minutes")
         page.wait_for_timeout(150)
+        return
+    if action == "console_rg_edit":
+        page.click("#rg-2 button:has-text('Edit')")
+        page.wait_for_selector("#rg-2 input[aria-label='Group name']")
+        return
+    if action == "console_rg_bad_edit":
+        page.click("#rg-2 button:has-text('Edit')")
+        page.wait_for_selector("#rg-2 input[aria-label='Group name']")
+        # 0 concurrency stops the group entirely. Trino accepts it; TMS does
+        # not, because it is a delete wearing a tuning value's clothes.
+        page.fill("#rg-2 input[aria-label='Concurrency limit']", "0")
+        page.fill("#rg-2 input[aria-label='Reason']", "trying a zero limit")
+        page.click("#rg-2 button:has-text('Save')")
+        page.wait_for_selector(".banner--bad")
+        return
+    if action == "console_rg_delete":
+        page.click("#rg-1 button:has-text('Delete')")
+        page.wait_for_selector("#rg-1 .confirm__impact")
         return
     if action == "toggle_theme":
         page.click(".icon-btn")

@@ -10,6 +10,8 @@ import { BenchmarkRun } from "./screens/BenchmarkRun";
 import { QueryHistory } from "./screens/QueryHistory";
 import { QuerySet } from "./screens/QuerySet";
 import { QuerySets } from "./screens/QuerySets";
+import { ResourceGroupHistory } from "./screens/ResourceGroupHistory";
+import { ResourceGroups } from "./screens/ResourceGroups";
 import { Gateway } from "./screens/Gateway";
 import { Health } from "./screens/Health";
 import { Queries } from "./screens/Queries";
@@ -32,6 +34,8 @@ createRoot(document.getElementById("root")!).render(
           <Route path="health" element={<Health />} />
           <Route path="gateway" element={<Gateway />} />
           <Route path="workload" element={<Workload />} />
+          <Route path="resource-groups" element={<ResourceGroups />} />
+          <Route path="resource-groups/history" element={<ResourceGroupHistory />} />
           <Route path="benchmark" element={<Benchmark />} />
           <Route path="benchmark/runs/:id" element={<BenchmarkRun />} />
           <Route path="benchmark/sets" element={<QuerySets />} />

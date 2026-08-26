@@ -23,6 +23,7 @@ const PATHS: Record<string, string> = {
   superset: "M12 3 3 8l9 5 9-5zM3 14l9 5 9-5",
   grafana: "M3 17l5-6 4 3 5-7 4 4",
   history: "M12 7v5l4 2M4 12a8 8 0 1 0 3-6M4 5v4h4",
+  info: "M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0M12 11v5M12 8h.01",
 };
 
 export function Icon({ name, size = 15, stroke = 1.7 }: {

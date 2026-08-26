@@ -10,7 +10,7 @@
 |---|---|---|
 | 1 | JSON API 47개 | ✅ 완료 |
 | 2 | Vite + React 스캐폴드, FastAPI 정적 서빙 | ✅ 완료 |
-| 3 | 화면 12개 이전 | 🔄 **9 / 12** — 남은 것은 Resource Groups · Fleet · Safe Restart |
+| 3 | 화면 12개 이전 | 🔄 **10 / 12** — 남은 것은 Fleet · Safe Restart |
 
 ## 화면
 
@@ -20,7 +20,7 @@
 | Live Queries | ✅ | 칩 필터 · kill 다이얼로그 |
 | Health | ✅ | `test_observed_text` → `health/observed.py` 로 이동 완료 |
 | Workload | ✅ | 정렬은 클라이언트. `bottleneck_text` → 서버 |
-| Resource Groups | ⬜ | 가장 인터랙티브. 트리 인라인 편집 |
+| Resource Groups | ✅ | 트리 인라인 편집 · 삭제 영향 · 셀렉터 · 이력/되돌리기. **htmx 를 안 쓴다** |
 | Fleet | ⬜ | 로그 스트리밍은 SSE 권장 |
 | Safe Restart | ⬜ | 진행 콘솔 라이브 |
 | Gateway | ✅ | |
@@ -73,7 +73,7 @@
 2. 네이티브 요소를 먼저 본다. `<dialog>` 는 포커스 트랩·Esc·배경 비활성을 공짜로 준다
 3. ⛔ 상태는 **색만으로 표현하지 않는다.** 단어를 항상 함께
 4. ⛔ staleness 는 **서버가 정한다.** 봉투의 `stale` 을 보여줄 뿐
-5. ⛔ 쓰기는 사유·감사·권한을 **서버가 강제한다.** 클라이언트 검증은 편의
+5. ⛔ 쓰기는 사유·감사·권한을 **서버가 강제한다.** 클라이언트 검증은 편의 — `useCapability` 로 버튼을 숨기는 건 헛클릭을 아끼는 것뿐이고, 아무것도 안 숨겨도 안전해야 한다
 
 ## 남은 것
 

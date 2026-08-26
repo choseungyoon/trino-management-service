@@ -30,6 +30,7 @@ const NAV = [
   { to: "/queries", label: "Live Queries", icon: "queries" },
   { to: "/health", label: "Health", icon: "health" },
   { to: "/workload", label: "Workload", icon: "queries" },
+  { to: "/resource-groups", label: "Resource Groups", icon: "board" },
   { to: "/gateway", label: "Gateway", icon: "trino" },
   { to: "/benchmark", label: "Benchmark", icon: "clock" },
   { to: "/work", label: "Work Board", icon: "board" },
