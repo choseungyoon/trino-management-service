@@ -479,6 +479,59 @@ Trino 477 문서 소스 트리(`docs/src/main/sphinx/sql/`)에 카탈로그 관�
 
 ---
 
+### T1-8. 설정 파일 배포의 실제 동작 — **실측 2026-08-27 (로컬 Trino 477)**
+
+**왜 쟀나**: UI 에서 config·catalog 를 고쳐 전 노드에 배포하는 기능(FR-CO-01/FR-CATALOG)의 설계가 이 셋에 달려 있다. 특히 첫 번째는 **"모르면 전체에 배포한다"가 안전한 기본값인지**를 결정한다.
+
+#### T1-8-1. ⛔ 모르는 프로퍼티가 있으면 **기동을 거부한다**
+
+`etc/config.properties` 에 존재하지 않는 이름을 한 줄 넣고 기동:
+
+```
+ERROR   main  io.trino.server.Server  Configuration is invalid
+Errors:
+  1) Configuration property 'this-property-does-not-exist' was not used
+```
+
+**서버가 뜨지 않는다.** 경고가 아니라 거부다.
+
+> **설계에 미치는 영향**: 오타 하나가 배포된 **모든 노드를 동시에 못 뜨게 한다.** 위험한 것은 대상을 잘못 고르는 것이 아니라 **이름을 잘못 쓰는 것**이며, 배포 전에 이름을 검증하는 것이 이 기능의 핵심 안전장치다.
+
+#### T1-8-2. 코디네이터용 프로퍼티를 워커에 넣어도 **기동한다**
+
+`coordinator=false` 인 노드의 `config.properties` 에 `query.max-memory=100GB` 를 넣고 기동 → `======== SERVER STARTED ========`. `was not used` 오류 없음. Bootstrap 덤프에도 `query.max-memory  20GB  100GB` (이름 / 기본값 / **현재값**) 으로 반영돼 나온다.
+
+> **설계에 미치는 영향**: "코디 전용 값이 워커에 가면 워커가 죽는다" 는 **사실이 아니다.** 역할별 분류는 정확성(의미 없는 값이 노드에 남는 것)의 문제이지 가용성의 문제가 아니다. 두 위험을 같은 무게로 다루면 안 된다.
+
+#### T1-8-3. Trino 는 기동 시 **유효한 프로퍼티 전량**을 로그에 찍는다
+
+기동 로그의 `Bootstrap` 라인이 **447개**(이 빌드·이 플러그인 구성 기준) 나온다. 형식은 탭 구분의 `이름 / 기본값 / 현재값 / 설명`:
+
+```
+Bootstrap  node-scheduler.include-coordinator   true    true
+Bootstrap  query.max-memory                     20GB    100GB
+Bootstrap  announcer.http-client....             [REDACTED]
+```
+
+> **설계에 미치는 영향**: T1-8-1 이 요구하는 "이름 검증" 의 **권위 있는 출처가 손으로 만든 표가 아니라 클러스터 자신**이다. 이 목록은 **그 빌드·그 플러그인 구성**에 정확히 대응하므로, 버전이 다른 두 클러스터에서 서로 다르게 나오는 것도 그대로 반영된다. 비밀은 `[REDACTED]` 로 나오므로 값 수집이 자격증명을 옮기지 않는다.
+>
+> ⛔ **기동 시점에만 찍힌다.** 재시작 없이 갱신되지 않는데, 설정은 어차피 재시작 없이 안 바뀌므로 문제가 아니다.
+
+#### T1-8-4. static 카탈로그는 **기동 시에만 읽는다**
+
+`etc/catalog/` 에 파일을 추가해도 재시작 전에는 로드되지 않는다. `StaticCatalogManager` 는 기동 때 있던 것만 기록한다:
+
+```
+io.trino.connector.StaticCatalogManager  -- Added catalog tpch using connector tpch --
+io.trino.connector.StaticCatalogManager  -- Added catalog memory using connector memory --
+```
+
+추가한 `probe_new.properties` 에 대한 줄은 **없다.**
+
+> **설계에 미치는 영향**: `catalog.management=static`(기본값) 에서 **카탈로그 추가·삭제는 예외 없이 재시작을 요구한다.** "무중단 카탈로그 추가" 는 `dynamic` + `CREATE CATALOG` 뿐인데 그건 experimental 이고 §T1-6 의 경고가 붙는다.
+
+---
+
 ### T1-7. JMX 노출 방식 및 주요 MBean — **확인**
 
 **JMX/RMI 활성화** (`config.properties`) — **확인**
