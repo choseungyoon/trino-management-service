@@ -52,13 +52,14 @@ class InMemoryBenchmarkRepository:
         return datetime.now(timezone.utc)
 
     def create(self, cluster, query_set, actor, roles, reason, repetitions,
-               guard, label=None, queries=None):
+               guard, label=None, queries=None, schedule_id=None):
         if any(r["state"] == RUNNING and r["cluster"] == cluster for r in self.runs):
             raise ActiveRunExists(cluster)
         run = {"id": self._next, "cluster": cluster, "query_set": query_set,
                "label": label, "state": RUNNING, "reason": reason, "actor": actor,
                "actor_roles": list(roles or []), "repetitions": int(repetitions),
                "guard": dict(guard or {}), "queries": list(queries or []),
+               "schedule_id": schedule_id,
                "started_at": self._now(), "finished_at": None, "error": None}
         self._next += 1
         self.runs.append(run)
@@ -133,18 +134,19 @@ class PostgresBenchmarkRepository:
             raise BenchmarkStoreUnavailable(str(exc))
 
     def create(self, cluster, query_set, actor, roles, reason, repetitions,
-               guard, label=None, queries=None):
+               guard, label=None, queries=None, schedule_id=None):
         try:
             with self._cursor() as cursor:
                 cursor.execute(
                     "INSERT INTO benchmark_run"
                     " (cluster, query_set, label, state, reason, actor,"
-                    "  actor_roles, repetitions, guard, queries)"
-                    " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb)"
+                    "  actor_roles, repetitions, guard, queries, schedule_id)"
+                    " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb,"
+                    "         %s::jsonb, %s)"
                     " RETURNING id, started_at",
                     (cluster, query_set, label, RUNNING, reason, actor,
                      list(roles or []), int(repetitions), json.dumps(guard or {}),
-                     json.dumps(list(queries or []))))
+                     json.dumps(list(queries or [])), schedule_id))
                 row = cursor.fetchone()
         except self._psycopg.errors.UniqueViolation:
             # The partial unique index. Two runs on one cluster measure each

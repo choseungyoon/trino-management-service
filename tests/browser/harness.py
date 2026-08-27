@@ -387,12 +387,37 @@ def build_app(workload_enabled=False, seed=None, gateway=None,
                             "peak_memory_bytes": 33554432, "error": None})
                 bench_repository.finish(past["id"], "SUCCEEDED")
 
+        # One healthy schedule and one TMS paused, so the three states the
+        # screen distinguishes are all on it. A demo where everything is green
+        # never shows the state worth acting on.
+        from tms.bench.schedules import InMemoryScheduleRepository
+
+        schedule_store = InMemoryScheduleRepository()
+        schedule_store.create(
+            name="nightly-adhoc", query_set="adhoc",
+            clusters=["prod-a", "prod-b"], repetitions=3, label="nightly",
+            reason="Watching the ad-hoc profile for drift",
+            interval_minutes=1440, next_run_at=now + timedelta(hours=17),
+            created_by="sre.kim")
+        broken = schedule_store.create(
+            name="hourly-smoke", query_set="adhoc", clusters=["prod-a"],
+            repetitions=1, label=None,
+            reason="Catch a regression within the hour",
+            interval_minutes=60, next_run_at=now + timedelta(minutes=20),
+            created_by="syhcho")
+        schedule_store.update(
+            broken["id"], enabled=False, consecutive_failures=3,
+            last_run_at=now - timedelta(minutes=40),
+            last_outcome="Cannot record this run, so it will not be started",
+            paused_reason=("Paused after 3 failures in a row. Last: cannot "
+                           "record this run, so it will not be started"))
+
         bench_service = BenchmarkService(
             config=config, snapshots=repository, audit_guard=AuditGuard(audit),
             repository=bench_repository, runner=DemoRunner(),
             query_sets=InMemoryQuerySetRepository(
                 build_query_sets(DEMO_QUERY_SETS)),
-            gateway_client=DemoGateway())
+            gateway_client=DemoGateway(), schedules=schedule_store)
 
     restart_service = None
     if restarts:

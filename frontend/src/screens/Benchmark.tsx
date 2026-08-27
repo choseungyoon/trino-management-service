@@ -23,6 +23,7 @@ interface QuerySet {
 
 interface Run {
   id: number;
+  schedule_id: number | null;
   cluster: string;
   query_set: string;
   label: string | null;
@@ -89,6 +90,9 @@ export function Benchmark() {
       <header className="topbar">
         <span className="topbar__title">Benchmark</span>
         <span className="spacer" />
+        <Link className="btn btn--sm" to="/benchmark/schedules">
+          <Icon name="clock" size={12} /> Schedules
+        </Link>
         {data?.can_edit ? (
           <Link className="btn btn--primary btn--sm" to="/benchmark/sets">
             New query set
@@ -328,7 +332,17 @@ export function Benchmark() {
                         )}
                       </td>
                       <td className="wrap">{run.reason}</td>
-                      <td>{run.actor}</td>
+                      <td>
+                        {run.actor}
+                        {/* Started by a schedule, not by a person sitting
+                            there. The actor is still the schedule's owner —
+                            that is what makes the run legal — but "who was at
+                            the keyboard" and "whose schedule" are different
+                            questions. */}
+                        {run.schedule_id ? (
+                          <div className="dim">on a schedule</div>
+                        ) : null}
+                      </td>
                     </tr>
                   ))}
                 </tbody>

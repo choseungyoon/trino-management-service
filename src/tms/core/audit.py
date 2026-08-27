@@ -63,6 +63,12 @@ ACTION_BENCHMARK_RUN = "BENCHMARK_RUN"
 # that a pull request used to provide has to come from somewhere.
 ACTION_BENCHMARK_QUERY_CHANGE = "BENCHMARK_QUERY_CHANGE"
 
+#: Creating, pausing or deleting a benchmark schedule. Its own type
+#: because a schedule authorises future unattended runs - "who set this
+#: cluster up to be benchmarked every night" is a question worth being
+#: able to answer without reading every run.
+ACTION_BENCHMARK_SCHEDULE_CHANGE = "BENCHMARK_SCHEDULE_CHANGE"
+
 ALLOWED_ACTION_TYPES = frozenset(
     [
         ACTION_QUERY_KILL,
@@ -77,6 +83,7 @@ ALLOWED_ACTION_TYPES = frozenset(
         ACTION_FLEET_JOB,
         ACTION_BENCHMARK_RUN,
         ACTION_BENCHMARK_QUERY_CHANGE,
+        ACTION_BENCHMARK_SCHEDULE_CHANGE,
     ]
 )
 

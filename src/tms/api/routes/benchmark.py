@@ -80,6 +80,50 @@ def register(app, deps: Deps) -> None:
                 principal: Principal = Depends(principal_of)):
         return bench().compare(principal, baseline_id, candidate_id)
 
+    @app.get("/api/v1/benchmark/schedules")
+    def list_schedules(principal: Principal = Depends(principal_of)):
+        """What runs by itself, and when it next will.
+
+        Off when migration 020 has not been applied: the payload says
+        `available: false` rather than 404ing, so the screen can explain
+        instead of losing the section.
+        """
+        return bench().list_schedules(principal)
+
+    @app.post("/api/v1/benchmark/schedules", status_code=201)
+    def create_schedule(body: Dict[str, Any] = Body(...),
+                        principal: Principal = Depends(principal_of)):
+        """⛔ `reason` is not paperwork. Nobody is present when a scheduled run
+        executes, so this is the only explanation its audit record will carry -
+        every run this schedule starts is recorded with it."""
+        return bench().create_schedule(
+            principal,
+            name=str(body.get("name") or ""),
+            query_set=str(body.get("query_set") or ""),
+            clusters=list(body.get("clusters") or []),
+            interval_minutes=body.get("interval_minutes"),
+            repetitions=body.get("repetitions", 1),
+            label=body.get("label"),
+            starts_at=body.get("starts_at"),
+            reason=body.get("reason"))
+
+    @app.post("/api/v1/benchmark/schedules/{schedule_id}/enabled")
+    def set_schedule_enabled(schedule_id: int, body: Dict[str, Any] = Body(...),
+                             principal: Principal = Depends(principal_of)):
+        """Switch one on or off. Enabling clears the failure count TMS paused
+        it on - the operator is saying they dealt with the cause."""
+        return bench().set_schedule_enabled(
+            principal, schedule_id, enabled=bool(body.get("enabled")),
+            reason=body.get("reason"))
+
+    @app.delete("/api/v1/benchmark/schedules/{schedule_id}", status_code=204)
+    def delete_schedule(schedule_id: int, reason: Optional[str] = Query(None),
+                        principal: Principal = Depends(principal_of)):
+        """The runs it started are untouched - the measurements outlive the
+        reason they were taken."""
+        bench().delete_schedule(principal, schedule_id, reason=reason)
+        return None
+
     # ------------------------------------------------------------ writing
 
     @app.post("/api/v1/benchmark", status_code=201)

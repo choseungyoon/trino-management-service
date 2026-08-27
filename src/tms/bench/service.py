@@ -12,6 +12,8 @@ Python 3.9 compatible.
 """
 
 import logging
+from contextlib import contextmanager
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from tms.api.errors import (
@@ -23,10 +25,12 @@ from tms.api.errors import (
     ReasonRequiredError,
     UpstreamUnavailable,
 )
-from tms.api.permissions import MANAGE_HEALTH, VIEW_HEALTH, Principal
+from tms.api.permissions import (
+    MANAGE_HEALTH, ROLE_ADMIN, VIEW_HEALTH, Principal)
 from tms.bench import guard as guards
 from tms.bench.compare import NotComparable, compare, query_rows
 from tms.bench.queryset import MAX_QUERIES, refuse_name, refuse_statement
+from tms.bench import schedules as scheduling
 from tms.bench import trend
 from tms.bench.runner import RUNNING
 from tms.bench.setstore import (
@@ -39,6 +43,7 @@ from tms.bench.store import ActiveRunExists, BenchmarkStoreUnavailable
 from tms.core.audit import (
     ACTION_BENCHMARK_QUERY_CHANGE,
     ACTION_BENCHMARK_RUN,
+    ACTION_BENCHMARK_SCHEDULE_CHANGE,
     TARGET_BENCHMARK_SET,
     TARGET_CLUSTER,
     AuditGuard,
@@ -49,10 +54,20 @@ from tms.core.audit import (
 log = logging.getLogger(__name__)
 
 
+class BenchmarkAlreadyRunning(InvalidRequest):
+    """A run is already going on this cluster.
+
+    Still a 400 over HTTP - nothing about the request is malformed, the timing
+    is. It has its own type so the scheduler can tell "the guard did its job"
+    from "this schedule is broken": counting a skip as a failure would pause a
+    schedule for behaving correctly.
+    """
+
+
 class BenchmarkService:
     def __init__(self, config, snapshots, audit_guard: AuditGuard, repository,
                  runner, query_sets: Dict[str, Any], gateway_client=None,
-                 stale_threshold: float = 120.0) -> None:
+                 stale_threshold: float = 120.0, schedules=None) -> None:
         self.config = config
         self.snapshots = snapshots
         self.audit = audit_guard
@@ -65,6 +80,9 @@ class BenchmarkService:
                            if isinstance(query_sets, dict) else query_sets)
         self.gateway = gateway_client
         self._stale_threshold = stale_threshold
+        # None when the schedule table is not there. The screen then says the
+        # feature is off rather than offering a form that cannot save.
+        self.schedules = schedules
 
     # ------------------------------------------------------------- guards
 
@@ -288,8 +306,8 @@ class BenchmarkService:
     # ------------------------------------------------------------ writing
 
     def start(self, principal: Principal, cluster: str, query_set: str,
-              reason: str, repetitions: int = 1,
-              label: Optional[str] = None) -> Dict[str, Any]:
+              reason: str, repetitions: int = 1, label: Optional[str] = None,
+              schedule_id: Any = None) -> Dict[str, Any]:
         self._require_admin(principal)
         self._cluster_or_404(cluster)
         declared = self._set_or_404(query_set)
@@ -310,14 +328,14 @@ class BenchmarkService:
 
         try:
             return self._start_audited(principal, cluster, declared, reason,
-                                       repetitions, label, guard)
+                                       repetitions, label, guard, schedule_id)
         except ReasonRequired as exc:
             raise ReasonRequiredError(str(exc))
         except AuditUnavailable as exc:
             raise AuditUnavailableError(str(exc))
 
     def _start_audited(self, principal, cluster, declared, reason, repetitions,
-                       label, guard):
+                       label, guard, schedule_id=None):
         with self.audit.action(
             actor=principal.username, roles=principal.roles,
             action_type=ACTION_BENCHMARK_RUN, target_kind=TARGET_CLUSTER,
@@ -330,9 +348,10 @@ class BenchmarkService:
                     actor=principal.username, roles=principal.roles,
                     reason=reason, repetitions=repetitions,
                     guard=guard.as_dict(), label=(label or None),
-                    queries=[q.as_dict() for q in declared.queries])
+                    queries=[q.as_dict() for q in declared.queries],
+                    schedule_id=schedule_id)
             except ActiveRunExists:
-                raise InvalidRequest(
+                raise BenchmarkAlreadyRunning(
                     "A benchmark is already running on {}. Two runs on one "
                     "cluster measure each other.".format(cluster))
             except BenchmarkStoreUnavailable as exc:
@@ -347,6 +366,199 @@ class BenchmarkService:
                      run["id"], cluster, principal.username, repetitions,
                      len(declared.queries))
             return run
+
+    # ------------------------------------------------------- schedules (D-017)
+
+    @contextmanager
+    def _schedule_audit(self, principal: Principal, reason, name: str):
+        """Reason, audit record, administrator, around one schedule edit.
+
+        ⛔ Its own action type. A schedule authorises *future* unattended runs,
+        so "who set this cluster up to be benchmarked every night" has to be
+        answerable without reading every run it produced.
+        """
+        try:
+            with self.audit.action(
+                actor=principal.username, roles=principal.roles,
+                action_type=ACTION_BENCHMARK_SCHEDULE_CHANGE,
+                target_kind=TARGET_BENCHMARK_SET, target_id=name,
+                reason=reason, actor_ip=principal.ip,
+            ):
+                yield
+        except ReasonRequired as exc:
+            raise ReasonRequiredError(str(exc))
+        except AuditUnavailable as exc:
+            raise AuditUnavailableError(str(exc))
+
+    def _schedules_or_503(self):
+        if self.schedules is None:
+            raise UpstreamUnavailable(
+                "Benchmark schedules are not available - migration 020 has not "
+                "been applied, or the schedule store could not be opened.")
+        return self.schedules
+
+    def list_schedules(self, principal: Principal) -> Dict[str, Any]:
+        self._require_view(principal)
+        if self.schedules is None:
+            return {"available": False, "schedules": [],
+                    "can_edit": principal.can(MANAGE_HEALTH),
+                    "min_interval_minutes": scheduling.MIN_INTERVAL_MINUTES,
+                    "failure_limit": scheduling.FAILURE_LIMIT}
+        try:
+            rows = self.schedules.list()
+        except scheduling.ScheduleStoreUnavailable as exc:
+            raise UpstreamUnavailable(str(exc))
+        return {
+            "available": True,
+            "schedules": [_schedule(row) for row in rows],
+            "can_edit": principal.can(MANAGE_HEALTH),
+            "min_interval_minutes": scheduling.MIN_INTERVAL_MINUTES,
+            "failure_limit": scheduling.FAILURE_LIMIT,
+        }
+
+    def create_schedule(self, principal: Principal, name: str, query_set: str,
+                        clusters: List[str], interval_minutes: Any,
+                        reason: Optional[str], repetitions: Any = 1,
+                        label: Optional[str] = None,
+                        starts_at: Any = None) -> Dict[str, Any]:
+        """⛔ `reason` is not paperwork here. Nobody is present when a scheduled
+        run executes, so this is the only explanation the audit record will
+        ever carry."""
+        self._require_admin(principal)
+        store = self._schedules_or_503()
+        try:
+            fields = scheduling.validate(name, interval_minutes, repetitions,
+                                         clusters, reason)
+        except ValueError as exc:
+            raise InvalidRequest(str(exc))
+
+        self._set_or_404(query_set)
+        for cluster in fields["clusters"]:
+            self._cluster_or_404(cluster)
+
+        first = _moment(starts_at) or scheduling.utcnow()
+        with self._schedule_audit(principal, fields["reason"], fields["name"]):
+            try:
+                row = store.create(query_set=query_set, label=label,
+                                   next_run_at=first,
+                                   created_by=principal.username, **fields)
+            except ValueError as exc:
+                raise InvalidRequest(str(exc))
+            except scheduling.ScheduleStoreUnavailable as exc:
+                raise UpstreamUnavailable(str(exc))
+        return _schedule(row)
+
+    def set_schedule_enabled(self, principal: Principal, schedule_id: Any,
+                             enabled: bool, reason: Optional[str]) -> Dict[str, Any]:
+        """Switch one on or off by hand.
+
+        Enabling clears the failure count and the reason TMS paused it - the
+        operator is saying they have dealt with whatever it was, and a counter
+        that survived would trip again three failures later without three more
+        failures.
+        """
+        self._require_admin(principal)
+        store = self._schedules_or_503()
+        row = store.get(schedule_id)
+        if row is None:
+            raise NotFound("No such schedule: {}".format(schedule_id))
+
+        changes = {"enabled": bool(enabled)}
+        if enabled:
+            changes.update(consecutive_failures=0, paused_reason=None,
+                           next_run_at=scheduling.advance(
+                               _moment(row["next_run_at"]) or scheduling.utcnow(),
+                               row["interval_minutes"]))
+        with self._schedule_audit(principal, reason, str(row["name"])):
+            updated = store.update(schedule_id, **changes)
+        return _schedule(updated)
+
+    def delete_schedule(self, principal: Principal, schedule_id: Any,
+                        reason: Optional[str]) -> None:
+        """The runs it started are untouched - `schedule_id` is ON DELETE SET
+        NULL, because the measurements outlive the reason they were taken."""
+        self._require_admin(principal)
+        store = self._schedules_or_503()
+        row = store.get(schedule_id)
+        if row is None:
+            raise NotFound("No such schedule: {}".format(schedule_id))
+        with self._schedule_audit(principal, reason, str(row["name"])):
+            store.delete(schedule_id)
+
+    def tick_schedules(self, now=None) -> List[Dict[str, Any]]:
+        """Start whatever is due. Called on a timer, by nobody in particular.
+
+        ⛔ Not a request. There is no `principal` because there is no person -
+        the schedule's `created_by` is the actor and its `reason` is the why,
+        which is exactly what makes an unattended write legal under absolute
+        rule 3.
+
+        Returns what it did, for the log. Never raises: this runs in a
+        background thread, and a schedule that cannot start must not take the
+        thread down with it.
+        """
+        if self.schedules is None:
+            return []
+        try:
+            due = self.schedules.claim_due(now)
+        except Exception:  # noqa: BLE001 - a background tick reports, never dies
+            log.exception("could not claim due benchmark schedules")
+            return []
+
+        outcomes = []
+        for row in due:
+            outcomes.append(self._fire(row))
+        return outcomes
+
+    def _fire(self, row: Dict[str, Any]) -> Dict[str, Any]:
+        """One schedule's turn. Records what happened on the row."""
+        actor = Principal(row["created_by"], [ROLE_ADMIN])
+        started, refused = [], []
+        for cluster in row["clusters"] or []:
+            try:
+                run = self.start(actor, cluster, query_set=row["query_set"],
+                                 reason=row["reason"],
+                                 repetitions=row["repetitions"],
+                                 label=row.get("label"),
+                                 schedule_id=row["id"])
+                started.append(run["cluster"])
+            except BenchmarkAlreadyRunning as exc:
+                # ⛔ Skipped, not failed. The previous run has not finished, so
+                # this is the guard working - counting it as a failure would
+                # pause the schedule for doing the right thing.
+                refused.append({"cluster": cluster, "message": str(exc),
+                                "skipped": True})
+            except Exception as exc:  # noqa: BLE001
+                log.warning("schedule %s could not start on %s: %s",
+                            row["name"], cluster, exc)
+                refused.append({"cluster": cluster, "message": str(exc),
+                                "skipped": False})
+
+        broke = [r for r in refused if not r["skipped"]]
+        changes: Dict[str, Any] = {"last_run_at": scheduling.utcnow()}
+        if started:
+            changes.update(last_outcome="started", consecutive_failures=0)
+        elif broke:
+            failures = int(row.get("consecutive_failures") or 0) + 1
+            changes.update(last_outcome=broke[0]["message"][:500],
+                           consecutive_failures=failures)
+            if failures >= scheduling.FAILURE_LIMIT:
+                # A broken set running every night forever is load with no
+                # reader. Switched off *for* the operator, with the reason on
+                # the row so the screen can say which it was.
+                changes.update(enabled=False, paused_reason=(
+                    "Paused after {} failures in a row. Last: {}".format(
+                        failures, broke[0]["message"][:300])))
+                log.error("benchmark schedule %s paused after %d failures",
+                          row["name"], failures)
+        else:
+            changes.update(last_outcome="skipped - a run was already going")
+
+        try:
+            self.schedules.update(row["id"], **changes)
+        except Exception:  # noqa: BLE001
+            log.exception("could not record the outcome of schedule %s", row["name"])
+        return {"schedule": row["name"], "started": started, "refused": refused}
 
     def start_many(self, principal: Principal, clusters: List[str], query_set: str,
                    reason: str, repetitions: int = 1,
@@ -542,3 +754,34 @@ def _max_repetitions(config) -> int:
 
     declared = getattr(getattr(config, "benchmark", None), "max_repetitions", None)
     return int(declared or MAX_REPETITIONS)
+
+
+def _moment(value: Any) -> Optional[datetime]:
+    """A timestamp from a request body, or None."""
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    return None
+
+
+def _schedule(row: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """One schedule, as the console reads it.
+
+    `paused_reason` is separate from `enabled` on purpose: "somebody switched
+    this off" and "this broke and was switched off for them" are different
+    answers, and only the second one needs acting on.
+    """
+    if row is None:
+        return {}
+    out = dict(row)
+    for column in ("next_run_at", "last_run_at", "created_at"):
+        value = out.get(column)
+        out[column] = value.isoformat() if hasattr(value, "isoformat") else value
+    out["clusters"] = list(out.get("clusters") or [])
+    out["paused_by_tms"] = bool(out.get("paused_reason")) and not out.get("enabled")
+    return out

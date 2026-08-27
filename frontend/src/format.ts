@@ -11,6 +11,25 @@ export function relativeTime(value: string | null): string {
   return `${Math.round(hours / 24)}d ago`;
 }
 
+/**
+ * "in 17h", "in 3d" — the mirror of relativeTime.
+ *
+ * Its own function rather than a sign flip on `relativeTime`: that one clamps
+ * at zero, so every future moment came out as "just now". A schedule due
+ * tomorrow said it was about to fire.
+ */
+export function untilTime(value: string | null): string {
+  if (!value) return "—";
+  const seconds = (new Date(value).getTime() - Date.now()) / 1000;
+  if (seconds <= 0) return "due now";
+  if (seconds < 90) return `in ${Math.round(seconds)}s`;
+  const minutes = seconds / 60;
+  if (minutes < 90) return `in ${Math.round(minutes)}m`;
+  const hours = minutes / 60;
+  if (hours < 36) return `in ${Math.round(hours)}h`;
+  return `in ${Math.round(hours / 24)}d`;
+}
+
 /** Human elapsed time: 940ms, 21m 34s, 4h 12m. */
 export function duration(ms: number | null | undefined): string {
   if (ms === null || ms === undefined || ms < 0) return "—";

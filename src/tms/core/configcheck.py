@@ -500,9 +500,11 @@ _REQUIRED_OBJECTS = (
     ("018_benchmark_query_sets.sql", "table", "benchmark_query_set"),
     ("018_benchmark_query_sets.sql", "table", "benchmark_query"),
     ("018_benchmark_query_sets.sql", "action", "BENCHMARK_QUERY_CHANGE"),
-    # 011, 013, 015 and 017 only grant; a privilege is not an object, so there is
-    # nothing here to look for. Missing one shows up as a permission error on
-    # the first write, which names itself clearly enough.
+    ("020_benchmark_schedules.sql", "table", "benchmark_schedule"),
+    ("020_benchmark_schedules.sql", "action", "BENCHMARK_SCHEDULE_CHANGE"),
+    # 011, 013, 015, 017, 019 and 021 only grant; a privilege is not an object,
+    # so there is nothing here to look for. Missing one shows up as a
+    # permission error on the first write, which names itself clearly enough.
 )
 
 _CONSTRAINT_FOR = {

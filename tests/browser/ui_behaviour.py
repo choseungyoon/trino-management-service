@@ -50,6 +50,7 @@ SCREENS = (
     "/resource-groups?cluster=prod-a", "/resource-groups/history?cluster=prod-a",
     "/fleet", "/fleet/jobs/1", "/restart?cluster=prod-a",
     "/benchmark", "/benchmark/runs/1", "/benchmark/sets",
+    "/benchmark/schedules",
     "/benchmark/sets/adhoc", "/benchmark/sets/adhoc/queries/scan_narrow/history",
     "/work", "/work/REQ-1", "/audit", "/account",
 )

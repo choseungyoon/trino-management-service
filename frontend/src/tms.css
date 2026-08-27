@@ -988,6 +988,13 @@ dialog::backdrop { background: rgba(4, 6, 10, .55); backdrop-filter: blur(1px); 
 .chart__swatch { border: 1px solid currentColor; }
 .chart__key[aria-pressed="false"] .chart__swatch { border-color: var(--tx-3); }
 
+/* Table paging. Centred under the table it pages, not floated right - the
+   count in the middle is the part people read. */
+.pager {
+  display: flex; align-items: center; justify-content: center; gap: 12px;
+  padding: 10px 16px 14px; font-size: 12px;
+}
+
 /* The axis grouping control, above the chart. */
 .chart__controls {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;

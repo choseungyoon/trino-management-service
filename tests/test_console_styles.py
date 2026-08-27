@@ -127,3 +127,23 @@ class ClusterSelectionTest(unittest.TestCase):
                     offenders[str(path.relative_to(FRONTEND))] = line.strip()
         self.assertEqual({}, offenders,
                          "cluster names come from /clusters: {}".format(offenders))
+
+
+class FutureTimeTest(unittest.TestCase):
+    """`relativeTime` clamps at zero, so every future moment reads "just now".
+
+    A schedule due tomorrow said it was about to fire. There is a separate
+    helper for the future direction; this is the guard that no screen reaches
+    for the past one to describe it.
+    """
+
+    def test_no_screen_flips_the_past_helper_into_the_future(self):
+        offenders = {}
+        for path in sorted(FRONTEND.rglob("*.tsx")):
+            text = path.read_text(encoding="utf-8")
+            if re.search(r"relativeTime\([^)]*\)\s*\n?\s*\.replace", text):
+                offenders[str(path.relative_to(FRONTEND))] = "relativeTime(...).replace"
+        self.assertEqual(
+            {}, offenders,
+            "these rewrite the past-tense helper's words instead of using "
+            "untilTime(): {}".format(offenders))

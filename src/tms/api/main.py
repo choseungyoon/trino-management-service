@@ -211,6 +211,7 @@ def build_benchmark_service(config: Config, service: TmsService, gateway_client=
     if not getattr(config, "benchmark", None) or not config.benchmark.enabled:
         return None
     from tms.bench.runner import BenchmarkRunner
+    from tms.bench.schedules import PostgresScheduleRepository
     from tms.bench.service import BenchmarkService
     from tms.bench.setstore import PostgresQuerySetRepository
     from tms.bench.store import PostgresBenchmarkRepository
@@ -219,6 +220,10 @@ def build_benchmark_service(config: Config, service: TmsService, gateway_client=
         dsn = config.database_url.reveal()
         repository = PostgresBenchmarkRepository(dsn)
         query_sets = PostgresQuerySetRepository(dsn)
+        # ⛔ Its own try below, not this one. Schedules arrived in migration
+        # 020; an installation that has not applied it must still get working
+        # benchmarks, with the schedule section switched off.
+        schedules = None
     except Exception as exc:  # noqa: BLE001
         log.error("cannot open the benchmark store, so benchmarks are off: %s", exc)
         return None
@@ -240,6 +245,12 @@ def build_benchmark_service(config: Config, service: TmsService, gateway_client=
         return SqlClient(service.trino_clients[cluster],
                          timeout_seconds=config.benchmark.timeout_seconds)
 
+    try:
+        schedules = PostgresScheduleRepository(dsn)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("benchmark schedules are unavailable: %s", exc)
+        schedules = None
+
     return BenchmarkService(
         config=config,
         snapshots=service.repository,
@@ -250,6 +261,7 @@ def build_benchmark_service(config: Config, service: TmsService, gateway_client=
         query_sets=query_sets,
         gateway_client=gateway_client,
         stale_threshold=config.collector.stale_threshold_seconds,
+        schedules=schedules,
     )
 
 
@@ -626,6 +638,19 @@ def create_app(config: Optional[Config] = None, service: Optional[TmsService] = 
     fleet_routes.register(app, api_deps)
     restart_routes.register(app, api_deps)
     observability_routes.register(app, api_deps)
+
+    # Schedules fire from here, on a daemon thread. See bench/ticker.py for
+    # why this process and not the collector.
+    #
+    # ⛔ Started here rather than on a startup event: `create_app` is called by
+    # every test that builds an app, and a lifespan hook would have to be
+    # installed on the FastAPI() above - before `benchmark` exists. The ticker
+    # starts no thread at all when schedules are off, which is every test.
+    if benchmark is not None:
+        from tms.bench.ticker import ScheduleTicker
+
+        app.state.schedule_ticker = ScheduleTicker(benchmark)
+        app.state.schedule_ticker.start()
 
     # ⛔ The console, mounted last. Its catch-all answers every address that is
     # not an API route, so anything registered after it would be unreachable.

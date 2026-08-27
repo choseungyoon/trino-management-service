@@ -51,6 +51,9 @@ interface History {
   buckets: { value: string; label: string }[];
 }
 
+/** Thirty repetitions of ten runs is three hundred rows. Nobody reads that. */
+const PAGE_SIZE = 25;
+
 export function QueryHistory() {
   const { key = "", name = "" } = useParams();
   // In the query string, so a link to "this query, monthly" is a link somebody
@@ -66,6 +69,7 @@ export function QueryHistory() {
   // list, which never changes as boxes are ticked.
   const [hidden, setHidden] = useState<string[]>([]);
   const [showMean, setShowMean] = useState(true);
+  const [page, setPage] = useState(0);
 
   const setBucket = (next: string) => {
     const copy = new URLSearchParams(params);
@@ -97,6 +101,11 @@ export function QueryHistory() {
   const order = data.trend.series.map((s) => s.cluster);
   const slotOf = (cluster: string) => Math.max(0, order.indexOf(cluster));
   const visible = data.trend.series.filter((s) => !hidden.includes(s.cluster));
+
+  // Paged in the browser, over the window the server already sent. The chart
+  // above aggregates that same window, so the table and the line describe the
+  // same executions - which they would stop doing if the server paged this.
+  const shown = data.history.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
   return (
     <>
@@ -214,10 +223,12 @@ export function QueryHistory() {
             <div className="panel__title">Executions</div>
             <div className="panel__sub">
               One row per execution, not a median — the outlier is usually the
-              answer here
+              answer here. The most recent {data.history.length}, which is also
+              what the chart above is drawn from.
             </div>
           </div>
           {data.history.length ? (
+            <>
             <div className="table-scroll">
               <table className="table">
                 <thead>
@@ -234,7 +245,7 @@ export function QueryHistory() {
                   </tr>
                 </thead>
                 <tbody>
-                  {data.history.map((row, index) => (
+                  {shown.map((row, index) => (
                     <tr key={`${row.run_id}-${row.iteration}-${index}`}>
                       <td>
                         <Link className="mono" to={`/benchmark/runs/${row.run_id}`}>
@@ -277,6 +288,9 @@ export function QueryHistory() {
                 </tbody>
               </table>
             </div>
+            <Pager page={page} pageSize={PAGE_SIZE} total={data.history.length}
+                   onPage={setPage} />
+            </>
           ) : (
             <div className="empty">
               <Icon name="clock" size={20} stroke={1.6} />
@@ -343,5 +357,34 @@ function SummaryTable({ rows, hidden, slotOf }: {
         apart, the query has a slow tail.
       </p>
     </>
+  );
+}
+
+
+function Pager({ page, pageSize, total, onPage }: {
+  page: number;
+  pageSize: number;
+  total: number;
+  onPage: (page: number) => void;
+}) {
+  const pages = Math.ceil(total / pageSize);
+  if (pages <= 1) return null;
+  const first = page * pageSize + 1;
+  const last = Math.min(total, (page + 1) * pageSize);
+
+  return (
+    <div className="pager">
+      <button className="btn btn--sm" type="button" disabled={page === 0}
+              onClick={() => onPage(page - 1)}>
+        ← Newer
+      </button>
+      <span className="dim num">
+        {first}–{last} of {total}
+      </span>
+      <button className="btn btn--sm" type="button" disabled={page >= pages - 1}
+              onClick={() => onPage(page + 1)}>
+        Older →
+      </button>
+    </div>
   );
 }

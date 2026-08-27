@@ -45,6 +45,7 @@ SHOTS = (
      "/benchmark/sets/adhoc/queries/scan_narrow/history", None),
     ("35-query-history-daily",
      "/benchmark/sets/adhoc/queries/scan_narrow/history?bucket=day", None),
+    ("37-schedules", "/benchmark/schedules", None),
     ("36-query-history-one-cluster",
      "/benchmark/sets/adhoc/queries/scan_narrow/history", "hide_series"),
     ("40-work-board", "/work", None),
