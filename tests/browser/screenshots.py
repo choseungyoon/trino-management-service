@@ -37,17 +37,23 @@ SHOTS = (
     ("20-fleet", "/fleet?cluster=prod-a", None),
     ("21-fleet-job", "/fleet/jobs/1", None),
     ("22-restart", "/restart?cluster=prod-a", None),
-    ("23-restart-draining", "/restart?cluster=prod-a", "restart_begin"),
     ("30-benchmark", "/benchmark", None),
     ("31-benchmark-run", "/benchmark/runs/1", None),
     ("32-query-sets", "/benchmark/sets", None),
     ("33-query-set", "/benchmark/sets/adhoc", None),
     ("34-query-history",
      "/benchmark/sets/adhoc/queries/scan_narrow/history", None),
+    ("35-query-history-daily",
+     "/benchmark/sets/adhoc/queries/scan_narrow/history?bucket=day", None),
+    ("36-query-history-one-cluster",
+     "/benchmark/sets/adhoc/queries/scan_narrow/history", "hide_series"),
     ("40-work-board", "/work", None),
     ("41-work-item", "/work/REQ-1", None),
     ("42-work-decision", "/work/D-2", None),
     ("43-work-board-dark", "/work", "toggle_theme"),
+    # ⛔ Last. Starting a sequence leaves the cluster out of rotation, and the
+    # shell then draws the restart banner on every screen shot afterwards.
+    ("90-restart-draining", "/restart?cluster=prod-a", "restart_begin"),
 )
 
 
@@ -93,6 +99,11 @@ def _act(page, action):
     if action == "rg_delete":
         page.click("#rg-1 button:has-text('Delete')")
         page.wait_for_selector("#rg-1 .confirm__impact")
+        return
+    if action == "hide_series":
+        page.wait_for_selector(".chart__key")
+        page.locator(".chart__key").first.click()
+        page.wait_for_timeout(250)
         return
     if action == "toggle_theme":
         page.click("button[aria-label^='Switch to']")

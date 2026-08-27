@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 
+import { ClusterTabs, useCluster } from "../components/ClusterTabs";
 import { Icon } from "../components/Icon";
 import { KillDialog } from "../components/KillDialog";
 import { Status } from "../components/Status";
@@ -34,14 +35,20 @@ const QUEUED = ["QUEUED", "WAITING_FOR_RESOURCES", "PLANNING", "STARTING", "DISP
 
 export function Queries() {
   const [params, setParams] = useSearchParams();
-  const cluster = params.get("cluster") ?? "prod-a";
+  // ⛔ From `/clusters`, which is the configured list. This screen used to
+  // default to a literal "prod-a" - a name that only exists in the test
+  // harness, so every deployment whose clusters are named anything else got
+  // a 404 the moment somebody opened the screen without ?cluster= in the URL.
+  // The browser tests missed it because the harness cluster really is called
+  // prod-a.
+  const [cluster, selectCluster, names] = useCluster();
   const filter = params.get("filter") ?? "";
   const [killing, setKilling] = useState<Query | null>(null);
 
   // Five seconds: this screen answers "what is happening right now", and the
   // collector polls queries on that cadence.
   const { data, error, loading, reload } = useApi<Envelope<QueryList>>(
-    `/clusters/${encodeURIComponent(cluster)}/queries`, 5_000);
+    cluster ? `/clusters/${encodeURIComponent(cluster)}/queries` : null, 5_000);
 
   const rows = useMemo(() => {
     const all = data?.data.queries ?? [];
@@ -63,6 +70,7 @@ export function Queries() {
     <>
       <header className="topbar">
         <span className="topbar__title">Live Queries</span>
+        <ClusterTabs selected={cluster} names={names} onSelect={selectCluster} />
         {data ? (
           <div className="freshness" data-stale={data.stale ? "true" : "false"}>
             <span className="freshness__dot" aria-hidden="true" />

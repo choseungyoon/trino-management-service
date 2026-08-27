@@ -972,6 +972,27 @@ dialog::backdrop { background: rgba(4, 6, 10, .55); backdrop-filter: blur(1px); 
 .chart__line { fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 /* The ring is the panel colour, so two lines crossing stay countable. */
 .chart__dot { stroke: var(--panel); stroke-width: 2; }
+/* The average of the points drawn. Dashed and thin so it never reads as
+   another measurement. */
+.chart__mean { stroke-width: 1.5; stroke-dasharray: 5 4; opacity: .55; }
+
+/* Legend entries are buttons: clicking one hides its series. Pressed = hidden,
+   and the swatch empties so the state is not carried by opacity alone. */
+.chart__key {
+  border: 0; background: none; padding: 2px 4px; border-radius: 5px;
+  cursor: pointer; color: inherit;
+}
+.chart__key:hover { background: var(--panel-2); }
+.chart__key[aria-pressed="false"] { color: var(--tx-3); }
+.chart__key[aria-pressed="false"] .chart__swatch { background: transparent; }
+.chart__swatch { border: 1px solid currentColor; }
+.chart__key[aria-pressed="false"] .chart__swatch { border-color: var(--tx-3); }
+
+/* The axis grouping control, above the chart. */
+.chart__controls {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 0 16px 8px;
+}
 
 .chart__series--0 { stroke: var(--s1); }
 .chart__series--1 { stroke: var(--s2); }

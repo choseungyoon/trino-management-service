@@ -334,17 +334,25 @@ def build_app(workload_enabled=False, seed=None, gateway=None,
                    "window_rank": 1580, "wide_scan": 4200}
         skew = {"scan_narrow": 1.02, "join_three": 1.04,
                 "window_rank": 2.7, "wide_scan": 0.98}
-        # Four runs a day apart on each cluster, so the trend chart has a line
-        # to draw. One run per cluster is two dots and no line, which is a
+        # Five runs on each cluster over four days, so the trend chart has a
+        # line to draw. One run per cluster is two dots and no line, which is a
         # chart pretending to be a trend - and the chart refuses to render it.
         drift = (1.00, 1.06, 1.03, 1.14)
+        # (days ago, hour) - two runs land on the same day so the daily
+        # grouping visibly collapses something. A demo where every day holds
+        # exactly one run makes "Every run" and "Daily" look identical, and
+        # then the control appears to do nothing.
+        when = ((0, 3), (1, 3), (2, 3), (3, 3), (3, 21))
+        drift = drift + (1.11,)
 
         for day, factor in enumerate(drift):
             for cluster, quick, label, statements in (
                 ("prod-a", True, "heap 250G", older),
                 ("prod-b", False, "heap 400G", current),
             ):
-                started = now - timedelta(days=len(drift) - day)
+                days_ago, hour = when[day]
+                started = (now - timedelta(days=len(drift) - 1 - days_ago)).replace(
+                    hour=hour, minute=1, second=0, microsecond=0)
                 past = bench_repository.create(
                     cluster=cluster, query_set="adhoc", actor="sre.kim",
                     roles=["admin"],

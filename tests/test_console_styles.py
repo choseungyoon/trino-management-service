@@ -83,3 +83,47 @@ class StylesheetTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ClusterSelectionTest(unittest.TestCase):
+    """Which cluster a screen shows has exactly one source.
+
+    ⛔ Live Queries shipped with `params.get("cluster") ?? "prod-a"` - a literal
+    from the test harness. Every deployment whose clusters are named anything
+    else got a 404 the moment somebody opened the screen without ?cluster= in
+    the URL, and the browser tests could not see it because the harness cluster
+    really is called prod-a.
+
+    The fix is not "do not hardcode that one name": it is that reading the
+    cluster out of the query string belongs to `useCluster`, which falls back
+    to the first cluster the *server* lists.
+    """
+
+    def test_only_the_cluster_hook_reads_the_cluster_parameter(self):
+        offenders = {}
+        for path in sorted(FRONTEND.rglob("*.tsx")) + sorted(FRONTEND.rglob("*.ts")):
+            if path.name == "ClusterTabs.tsx":
+                continue
+            text = path.read_text(encoding="utf-8")
+            if re.search(r'\bparams\.get\(\s*["\']cluster["\']\s*\)', text):
+                offenders[str(path.relative_to(FRONTEND))] = 'params.get("cluster")'
+        self.assertEqual(
+            {}, offenders,
+            "these read the cluster themselves instead of calling useCluster(), "
+            "so they need their own fallback - and every fallback that is not "
+            "the server's cluster list is a name somebody made up: {}".format(
+                offenders))
+
+    def test_no_screen_hardcodes_a_cluster_name(self):
+        """The harness names, specifically. They are what gets typed by
+        accident, and they are the ones that make a demo look correct."""
+        offenders = {}
+        for path in sorted(FRONTEND.rglob("*.tsx")):
+            text = path.read_text(encoding="utf-8")
+            for line in text.splitlines():
+                if line.lstrip().startswith(("//", "*", "/*")):
+                    continue  # the comment explaining the bug names it
+                if re.search(r'["\']prod-[ab]["\']', line):
+                    offenders[str(path.relative_to(FRONTEND))] = line.strip()
+        self.assertEqual({}, offenders,
+                         "cluster names come from /clusters: {}".format(offenders))

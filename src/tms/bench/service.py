@@ -234,7 +234,7 @@ class BenchmarkService:
         }
 
     def query_history(self, principal: Principal, key: str, name: str,
-                      limit: int = 100) -> Dict[str, Any]:
+                      limit: int = 100, bucket: str = trend.BY_RUN) -> Dict[str, Any]:
         """Every execution of one query, and the statement each run used.
 
         The two are separate on purpose. `current` is what the query says
@@ -271,7 +271,11 @@ class BenchmarkService:
             # Aggregated here rather than by the caller: which runs group
             # together and what the middle of a run is are decisions about the
             # numbers, not about how to draw them.
-            "trend": trend.build(rows),
+            "trend": trend.build(rows, bucket=bucket),
+            # The axis choices, named by the server so a screen cannot offer
+            # a grouping the aggregation does not implement.
+            "buckets": [{"value": b, "label": trend.BUCKET_LABELS[b]}
+                        for b in trend.BUCKETS],
         }
 
     def _run_snapshot(self, run_id) -> List[Dict[str, Any]]:

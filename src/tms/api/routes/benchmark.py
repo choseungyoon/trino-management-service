@@ -44,14 +44,21 @@ def register(app, deps: Deps) -> None:
 
     @app.get("/api/v1/benchmark/sets/{key}/queries/{name}/history")
     def query_history(key: str, name: str, limit: int = Query(100, ge=1, le=1000),
+                      bucket: str = Query("run"),
                       principal: Principal = Depends(principal_of)):
         """Every execution of one query, with the statement each run used.
 
         `current` is what the query says today; each row's `statement` is what
         that run executed. Where they differ the numbers are not comparable,
         and `changed` says so without the caller having to diff them.
+
+        `bucket` groups the chart's x axis: `run`, `day` or `month`. A query
+        that runs several times a day is noise at one dot per run. An
+        unrecognised value falls back to `run` rather than refusing - this is
+        a query string, and a chart that will not draw teaches nothing.
         """
-        return bench().query_history(principal, key, name, limit=limit)
+        return bench().query_history(principal, key, name, limit=limit,
+                                     bucket=bucket)
 
     @app.get("/api/v1/benchmarks/{run_id}")
     def get_run(run_id: str, principal: Principal = Depends(principal_of)):

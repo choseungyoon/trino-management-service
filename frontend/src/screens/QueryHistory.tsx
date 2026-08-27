@@ -1,7 +1,8 @@
-import { Link, useParams } from "react-router";
+import { useState } from "react";
+import { Link, useParams, useSearchParams } from "react-router";
 
 import { Icon } from "../components/Icon";
-import { LineChart, type Series } from "../components/LineChart";
+import { LineChart, type Bucket, type Series } from "../components/LineChart";
 import { duration } from "../format";
 import { useApi } from "../useApi";
 
@@ -24,6 +25,7 @@ interface Execution {
 interface Summary {
   cluster: string;
   runs: number;
+  buckets: number;
   count: number;
   avg: number | null;
   median: number | null;
@@ -36,13 +38,40 @@ interface History {
   query: { name: string; title: string; sql: string };
   history: Execution[];
   changed: boolean;
-  trend: { series: Series[]; summaries: Summary[]; drawable: boolean };
+  trend: {
+    series: Series[];
+    summaries: Summary[];
+    buckets: Bucket[];
+    drawable: boolean;
+    bucket: string;
+    bucket_label: string;
+  };
+  /** The groupings the server implements. Not written here — a screen that
+      offered a fourth would be offering something that does not exist. */
+  buckets: { value: string; label: string }[];
 }
 
 export function QueryHistory() {
   const { key = "", name = "" } = useParams();
+  // In the query string, so a link to "this query, monthly" is a link somebody
+  // can paste.
+  const [params, setParams] = useSearchParams();
+  const bucket = params.get("bucket") ?? "run";
   const { data, error } = useApi<History>(
-    `/benchmark/sets/${encodeURIComponent(key)}/queries/${encodeURIComponent(name)}/history`);
+    `/benchmark/sets/${encodeURIComponent(key)}/queries/${encodeURIComponent(name)}`
+    + `/history?bucket=${encodeURIComponent(bucket)}`);
+
+  // ⛔ Hidden, not filtered out of the data. Colour follows the entity, so
+  // hiding one series must not repaint the others - `slotOf` indexes the full
+  // list, which never changes as boxes are ticked.
+  const [hidden, setHidden] = useState<string[]>([]);
+  const [showMean, setShowMean] = useState(true);
+
+  const setBucket = (next: string) => {
+    const copy = new URLSearchParams(params);
+    copy.set("bucket", next);
+    setParams(copy, { replace: true });
+  };
 
   if (error) {
     return (
@@ -62,6 +91,12 @@ export function QueryHistory() {
   if (!data) return null;
 
   const clock = (iso: string) => new Date(iso).toLocaleString();
+
+  // Slot by position in the *full* series list, so ticking a box never moves
+  // another cluster's colour.
+  const order = data.trend.series.map((s) => s.cluster);
+  const slotOf = (cluster: string) => Math.max(0, order.indexOf(cluster));
+  const visible = data.trend.series.filter((s) => !hidden.includes(s.cluster));
 
   return (
     <>
@@ -104,21 +139,73 @@ export function QueryHistory() {
             <div className="panel__head">
               <div className="panel__title">How long it takes, over time</div>
               <div className="panel__sub">
-                One point per run — that run's median across its repetitions
+                Each point is a <strong>median</strong> — of that group's
+                executions, not of its runs' medians
               </div>
             </div>
+
+            <div className="chart__controls">
+              <div className="segmented" role="group" aria-label="Group by">
+                {data.buckets.map((choice) => (
+                  <a key={choice.value} href={`?bucket=${choice.value}`}
+                     aria-current={data.trend.bucket === choice.value
+                       ? "page" : undefined}
+                     onClick={(e) => { e.preventDefault(); setBucket(choice.value); }}>
+                    {choice.label}
+                  </a>
+                ))}
+              </div>
+              <label className="check">
+                <input type="checkbox" checked={showMean}
+                       onChange={(e) => setShowMean(e.target.checked)} />
+                Average line
+              </label>
+              <span className="spacer" />
+              <span className="dim">
+                {data.trend.buckets.length} point
+                {data.trend.buckets.length === 1 ? "" : "s"} on the axis
+              </span>
+            </div>
+
             {data.trend.drawable ? (
-              <LineChart series={data.trend.series}
-                         label="Median elapsed time per run, one line per cluster" />
+              <LineChart series={visible} buckets={data.trend.buckets}
+                         showMean={showMean} slotOf={slotOf}
+                         label={`Median elapsed time, ${data.trend.bucket_label.toLowerCase()}, one line per cluster`} />
             ) : (
-              /* One run per cluster is a dot and no line. The table below says
-                 the same thing without the chart pretending to show a trend. */
+              /* One point per cluster is a dot and no line. The table below
+                 says the same thing without the chart pretending to show a
+                 trend. */
               <p className="panel__note">
-                Not enough runs to draw a line yet — a cluster needs at least
-                two. The numbers are below.
+                Not enough points to draw a line yet — a cluster needs at least
+                two. {data.trend.bucket !== "run"
+                  ? "Grouping by run may give you more."
+                  : "The numbers are below."}
               </p>
             )}
-            <SummaryTable rows={data.trend.summaries} />
+
+            {/* ⛔ Identity is never colour alone, and the legend is where a
+                series is switched off. */}
+            <div className="chart__legend">
+              {data.trend.series.map((entry) => {
+                const on = !hidden.includes(entry.cluster);
+                return (
+                  <button className="chart__key" type="button" key={entry.cluster}
+                          aria-pressed={on}
+                          title={on ? `Hide ${entry.cluster}` : `Show ${entry.cluster}`}
+                          onClick={() => setHidden((current) =>
+                            current.includes(entry.cluster)
+                              ? current.filter((c) => c !== entry.cluster)
+                              : [...current, entry.cluster])}>
+                    <span className={`chart__swatch chart__series--${
+                      slotOf(entry.cluster) % 4}`} aria-hidden="true" />
+                    <span className="mono">{entry.cluster}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            <SummaryTable rows={data.trend.summaries} hidden={hidden}
+                          slotOf={slotOf} />
           </section>
         ) : null}
 
@@ -205,7 +292,11 @@ export function QueryHistory() {
   );
 }
 
-function SummaryTable({ rows }: { rows: Summary[] }) {
+function SummaryTable({ rows, hidden, slotOf }: {
+  rows: Summary[];
+  hidden: string[];
+  slotOf: (cluster: string) => number;
+}) {
   return (
     <>
       <div className="table-scroll">
@@ -222,11 +313,15 @@ function SummaryTable({ rows }: { rows: Summary[] }) {
             </tr>
           </thead>
           <tbody>
-            {rows.map((row, slot) => (
-              <tr key={row.cluster}>
+            {rows.map((row) => (
+              /* Hidden in the chart, still in the table. Switching a line off
+                 is about reading the chart, not about excluding the cluster
+                 from the answer. */
+              <tr key={row.cluster} className={hidden.includes(row.cluster)
+                ? "dim" : undefined}>
                 <td>
-                  <span className={`chart__swatch chart__series--${slot % 4}`}
-                        aria-hidden="true" />{" "}
+                  <span className={`chart__swatch chart__series--${
+                    slotOf(row.cluster) % 4}`} aria-hidden="true" />{" "}
                   <span className="mono">{row.cluster}</span>
                 </td>
                 <td className="num dim">{row.runs}</td>
