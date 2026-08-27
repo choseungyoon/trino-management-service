@@ -32,6 +32,7 @@ const NAV = [
   { to: "/queries", label: "Live Queries", icon: "queries" },
   { to: "/cluster-health", label: "Health", icon: "health" },
   { to: "/workload", label: "Workload", icon: "queries" },
+  { to: "/cluster-config", label: "Configuration", icon: "audit" },
   { to: "/resource-groups", label: "Resource Groups", icon: "board" },
   { to: "/fleet", label: "Fleet", icon: "overview" },
   { to: "/restart", label: "Safe Restart", icon: "history" },

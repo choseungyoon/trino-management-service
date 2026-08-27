@@ -112,7 +112,8 @@ def _query(qid, user, source, elapsed_ms, long_running=False, state="RUNNING"):
 
 def build_app(workload_enabled=False, seed=None, gateway=None,
               resource_groups=False, password=None, session_secret=None,
-              fleet_jobs=False, benchmark=False, restarts=False):
+              fleet_jobs=False, benchmark=False, restarts=False,
+              config_scan=False):
     repository = InMemorySnapshotRepository()
     now = utcnow()
 
@@ -419,6 +420,62 @@ def build_app(workload_enabled=False, seed=None, gateway=None,
                 build_query_sets(DEMO_QUERY_SETS)),
             gateway_client=DemoGateway(), schedules=schedule_store)
 
+    scan_service = None
+    if config_scan:
+        # In memory and pre-seeded: the real one shells out to
+        # ansible-playbook, which a demo has no business doing. The drift is
+        # deliberate - a demo where everything agrees never shows the state
+        # worth acting on.
+        import base64
+        import json as _json
+
+        from tms.collector.snapshot import KIND_CONFIG
+        from tms.ops.configscan import MARKER
+        from tms.ops.configservice import ConfigScanService
+
+        def node(host, role, port="8443", extra=None, catalog="c0ffee"):
+            body = ("coordinator={}\n"
+                    "http-server.http.port={}\n"
+                    "query.max-memory=900GB\n"
+                    "query.max-memory-per-node=176GB\n"
+                    "{}").format("true" if role == "coordinator" else "false",
+                                 port, extra or "")
+            return MARKER + _json.dumps({
+                "host": host, "role": role, "reachable": True,
+                "files": {
+                    "etc/config.properties": {
+                        "present": True,
+                        "content_b64": base64.b64encode(body.encode()).decode()},
+                    "etc/node.properties": {"present": True,
+                                            "sha256": "id-" + host},
+                    "etc/catalog/hive.properties": {"present": True,
+                                                    "sha256": catalog},
+                },
+                "valid_names": ["coordinator", "http-server.http.port",
+                                "query.max-memory", "query.max-memory-per-node",
+                                "node-scheduler.include-coordinator"],
+            })
+
+        lines = [
+            node("trino-a-c1", "coordinator"),
+            node("trino-a-w1", "worker"),
+            # ⛔ One worker on a different port and an older catalog. This is
+            # the shape the screen exists for: same role, different values.
+            node("trino-a-w2", "worker", port="8080", catalog="0ldcafe"),
+        ]
+
+        scan_service = ConfigScanService(
+            config=config, snapshots=repository,
+            inventories={name: "/etc/tms/{}.ini".format(name) for name in CLUSTERS},
+            playbook="/etc/tms/collect-config.yml",
+            development_clusters=["prod-b"],
+            runner=lambda command, timeout, on_line: (
+                [on_line(line) for line in lines], {"rc": 0})[1])
+        from tms.ops import configscan as _scan
+
+        repository.save(Snapshot("prod-a", KIND_CONFIG, now, payload={
+            "nodes": _scan.parse_scan(lines), "error": None, "exit_code": 0}))
+
     restart_service = None
     if restarts:
         # In memory, because the real one needs PostgreSQL. Without this the
@@ -473,6 +530,7 @@ def build_app(workload_enabled=False, seed=None, gateway=None,
     return create_app(config=config, service=service, fleet=fleet,
                       board=BoardService(board_repository),
                       restarts=restart_service,
+                      config_scan=scan_service,
                       benchmark=bench_service), trino
 
 
@@ -498,14 +556,15 @@ def _free_port():
 @contextlib.contextmanager
 def serve(workload_enabled=False, seed=None, gateway=None,
           resource_groups=False, fleet_jobs=False, benchmark=False,
-          restarts=False):
+          restarts=False, config_scan=False):
     """Run the console on a free port. Yields (base_url, stub_trino)."""
     import uvicorn
 
     app, trino = build_app(workload_enabled=workload_enabled, seed=seed,
                            resource_groups=resource_groups,
                            fleet_jobs=fleet_jobs, gateway=gateway,
-                           benchmark=benchmark, restarts=restarts)
+                           benchmark=benchmark, restarts=restarts,
+                           config_scan=config_scan)
     port = _free_port()
     with tempfile.TemporaryDirectory() as tmp:
         key, crt = _make_cert(tmp)

@@ -285,7 +285,8 @@ def build_board_service(config: Config):
 
 def create_app(config: Optional[Config] = None, service: Optional[TmsService] = None,
                restarts: Optional[Any] = None, fleet: Optional[Any] = None,
-               board: Optional[Any] = None, benchmark: Optional[Any] = None):
+               board: Optional[Any] = None, benchmark: Optional[Any] = None,
+               config_scan: Optional[Any] = None):
     from fastapi import Body, Depends, FastAPI, Query, Request, Response
     from fastapi.responses import JSONResponse
 
@@ -621,6 +622,7 @@ def create_app(config: Optional[Config] = None, service: Optional[TmsService] = 
     # shadowed by a page route, and each one 503s with a name when its feature
     # is switched off rather than 404ing as though it never existed.
     from tms.api.routes import benchmark as benchmark_routes
+    from tms.api.routes import config as config_routes
     from tms.api.routes import fleet as fleet_routes
     from tms.api.routes import observability as observability_routes
     from tms.api.routes import resource_groups as resource_group_routes
@@ -628,11 +630,20 @@ def create_app(config: Optional[Config] = None, service: Optional[TmsService] = 
     from tms.api.routes import work as work_routes
     from tms.api.routes.deps import Deps
 
+    # Reading each node's configuration back. Off unless a playbook is
+    # configured; it shares the restart executor's inventories. Passed in by
+    # the demo harness, which has no business shelling out to Ansible.
+    if config_scan is None:
+        from tms.ops.configservice import build_config_scan_service
+
+        config_scan = build_config_scan_service(config, service.repository)
+
     api_deps = Deps(config=config, service=service,
                     current_principal=current_principal,
                     restarts=restarts, fleet=fleet, board=board,
-                    benchmark=benchmark)
+                    benchmark=benchmark, config_scan=config_scan)
     benchmark_routes.register(app, api_deps)
+    config_routes.register(app, api_deps)
     resource_group_routes.register(app, api_deps)
     work_routes.register(app, api_deps)
     fleet_routes.register(app, api_deps)

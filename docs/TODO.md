@@ -52,15 +52,16 @@
 
 ---
 
-### 🔴 1-0. 마이그레이션 `020` `021` `[먼저]`
+### 🔴 1-0. 마이그레이션 `020` `021` `022` `[먼저]`
 
-벤치마크 주기 실행(FR-BM-07 · D-017)이 쓰는 테이블이다. **적용 전에는 스케줄
-화면이 "사용할 수 없음" 으로 나오고 나머지는 전부 정상 동작한다.**
+`020`/`021` 은 벤치마크 주기 실행(FR-BM-07 · D-017)이, `022` 는 설정 조회
+(FR-CO-01 · D-018)가 쓴다. **적용 전에는 해당 화면만 "사용할 수 없음" 으로
+나오고 나머지는 전부 정상 동작한다.**
 
 - [ ] `git pull` → `pip install -e .`
-- [ ] `020` `021` 을 **번호순으로** `tms_owner` 로 적용
-- [ ] `tms-config-check` → `benchmark_schedule` 테이블과
-      `BENCHMARK_SCHEDULE_CHANGE` 액션을 확인한다
+- [ ] `020` `021` `022` 를 **번호순으로** `tms_owner` 로 적용
+- [ ] `tms-config-check` → `benchmark_schedule` 테이블 ·
+      `BENCHMARK_SCHEDULE_CHANGE` 액션 · `config` snapshot kind 를 확인한다
 
 > ⛔ **앞 번호를 다시 돌리지 않는다.** `020` 도 감사 액션 제약을 `DROP` 후
 > 다시 만든다 — 위의 경고가 그대로 적용된다.
@@ -191,6 +192,38 @@ React 콘솔은 `/app` 에 있다. 되돌렸다면 그 이유가 D-016 의 "뒤�
 
 > ⚠️ **무거운 세트를 운영 클러스터에 돌리는 것 자체가 부하다.** 가벼운 세트 · 반복 1회로
 > 시작한다. 재려던 느려짐을 스스로 만들 수 있다 (D-015).
+
+### 1-5-2. V-12 — 설정 조회 · 드리프트 `[022 적용 후 · 새 기능]`
+
+⛔ **읽기만 한다.** `docs/templates/collect-config.yml` 에는 노드를 바꾸는
+태스크가 하나도 없다. 배포는 아직 만들지 않았다 (D-018 2·3단계).
+
+**선행 — ansible 전환과 같이 한다 (§2 D-2)**
+
+- [ ] `docs/templates/collect-config.yml` 를 `/etc/tms/ansible/` 에 설치
+- [ ] `trino_etc` · `trino_log` 를 실제 경로에 맞춘다 (파일 상단 주석)
+- [ ] `config.yaml` 에 경로를 넣는다:
+      ```yaml
+      cluster_ops:
+        config_scan:
+          playbook: /etc/tms/ansible/collect-config.yml
+          development_clusters: [<개발 클러스터 이름>]
+      ```
+- [ ] 손으로 먼저 한 번: `ansible-playbook -i <인벤토리> collect-config.yml`
+      → `TMS-CONFIG-SCAN {...}` 줄이 호스트마다 하나씩 나오는가
+
+**확인**
+
+- [ ] `/cluster-config` → **Read the nodes** → 노드 표가 채워진다
+- [ ] ⛔ **코디와 워커의 차이가 드리프트로 안 나온다** (역할별로 비교한다)
+- [ ] 워커끼리 값이 다르면 **나온다** — 없으면 일부러 한 대만 고쳐 본다
+- [ ] `etc/node.properties` 는 **Expected differences** 로 따로 나온다
+- [ ] ⛔ **카탈로그는 체크섬만** 나온다. 내용도 비밀번호도 화면에 없다
+- [ ] Known properties 열에 숫자가 채워진다 (수백 개)
+      <br>*비어 있으면 `trino_log` 경로가 틀렸거나 로그가 로테이션된 것이다 —
+      이게 3단계 배포의 오타 검사 재료다*
+- [ ] 조회자 계정 → 표는 보이고 **Read the nodes 버튼이 없다**
+- [ ] 개발 클러스터에서 워커 한 대를 내리고 스캔 → **드리프트로 안 나온다**
 
 ### 1-6. V-6 — 감사 append-only 재확인
 
@@ -371,6 +404,7 @@ Gateway 2대가 PostgreSQL 하나를 공유하는데 그 DB 가 VM1 에 얹혀 �
 사내 들어가면  🔴 020/021 마이그레이션 → V-10 콘솔이 뜨는가  ← 게이트
                V-2 / V-3  (Fleet · Workload 가 실제로 보는가)
                V-9 리소스 그룹 편집 · V-8 벤치마크 나머지 · V-11 스케줄
+               V-12 설정 조회·드리프트 (D-2 전환과 같이)
                W-1 실측 [피크 시간대]  ← R1 DoD 가 닫힌다
                §1-9 끝나고 · §4 보드 정리
 
@@ -393,6 +427,7 @@ Gateway 2대가 PostgreSQL 하나를 공유하는데 그 DB 가 VM1 에 얹혀 �
 |---|---|
 | 벤치마크만 문제 | `benchmark.enabled: false` → `tms-api` 재시작 |
 | 스케줄만 문제 | 화면에서 해당 스케줄을 **끈다**. 전부 끄려면 `benchmark.enabled: false` — 스케줄은 벤치마크의 일부다 |
+| 설정 조회만 문제 | `cluster_ops.config_scan.playbook` 을 비운다 → 재시작. 화면이 사라지고 **다른 것은 아무 영향 없다** (읽기 전용이라 노드에 남긴 것도 없다) |
 | 리소스 그룹 편집만 문제 | `resource_groups.enabled: false` → 재시작. **Trino 의 db 매니저와는 무관하다** — 화면만 사라지고 쿼리 수용은 그대로 돈다 |
 | Fleet 작업만 문제 | `fleet.jobs` 를 비운다 → 재시작 |
 | 보드만 문제 | 보드는 항상 켜져 있다. DB 를 못 읽으면 화면이 "보드를 읽을 수 없다" 를 표시하고 **다른 화면은 영향받지 않는다** |

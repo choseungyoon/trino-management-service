@@ -34,6 +34,8 @@ SHOTS = (
     ("12-rg-refused", "/resource-groups?cluster=prod-a", "rg_bad_edit"),
     ("13-rg-delete", "/resource-groups?cluster=prod-a", "rg_delete"),
     ("14-rg-history", "/resource-groups/history?cluster=prod-a", None),
+    ("15-config", "/cluster-config?cluster=prod-a", None),
+    ("16-config-node", "/cluster-config?cluster=prod-a", "config_node"),
     ("20-fleet", "/fleet?cluster=prod-a", None),
     ("21-fleet-job", "/fleet/jobs/1", None),
     ("22-restart", "/restart?cluster=prod-a", None),
@@ -83,6 +85,11 @@ def _act(page, action):
         page.wait_for_selector(".seq__act-why")
         page.wait_for_timeout(400)
         return
+    if action == "config_node":
+        page.wait_for_selector("table.table tbody tr")
+        page.locator("button:has-text('Show')").first.click()
+        page.wait_for_timeout(250)
+        return
     if action == "rg_edit":
         page.click("#rg-2 button:has-text('Edit')")
         page.wait_for_selector("#rg-2 input[aria-label='Group name']")
@@ -120,6 +127,7 @@ def main(out_dir):
 
     with serve(workload_enabled=True, resource_groups=True,
                fleet_jobs=True, benchmark=True, restarts=True,
+               config_scan=True,
                # On, so the Gateway screen shows its tables rather than only
                # the "integration is off" banner.
                gateway={"enabled": True, "base_url": "https://gw.invalid:8080"},

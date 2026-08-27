@@ -203,6 +203,31 @@ class AnsibleConfig:
 
 
 @dataclass(frozen=True)
+class ConfigScanConfig:
+    """Reading each node's configuration back (FR-CO-01, D-018 step 1).
+
+    Its own playbook, not the restart one. That one restarts things; this one
+    only reads - `docs/templates/collect-config.yml` has no task that changes
+    a node, and keeping them apart is what lets an operator confirm that by
+    reading one short file.
+
+    Off unless a playbook is configured. The inventories are shared with the
+    restart executor, so a cluster TMS can restart is a cluster it can scan.
+    """
+
+    playbook: str = ""
+    timeout_seconds: float = 600.0
+    #: Clusters whose node count changes with whatever is being tested, so a
+    #: node that did not answer is not drift (D-018: the development cluster
+    #: keeps a coordinator and at least one worker, and nothing else).
+    development_clusters: List[str] = field(default_factory=list)
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.playbook)
+
+
+@dataclass(frozen=True)
 class ClusterOpsConfig:
     """The safe restart sequence (FR-CO-02).
 
@@ -215,6 +240,7 @@ class ClusterOpsConfig:
     restart_mode: str = "manual"
     drain_timeout_seconds: float = 900.0
     ansible: AnsibleConfig = field(default_factory=AnsibleConfig)
+    config_scan: ConfigScanConfig = field(default_factory=ConfigScanConfig)
 
 
 @dataclass(frozen=True)
@@ -593,8 +619,35 @@ def _build_cluster_ops(raw: Dict[str, Any], whole: Dict[str, Any]) -> ClusterOps
     if drain_timeout <= 0:
         raise ConfigError("cluster_ops.drain_timeout_seconds must be positive")
 
+    scan_raw = raw.get("config_scan") or {}
+    development = [str(name) for name in (scan_raw.get("development_clusters") or [])]
+    scan = ConfigScanConfig(
+        playbook=str(scan_raw.get("playbook") or ""),
+        timeout_seconds=float(scan_raw.get("timeout_seconds", 600)),
+        development_clusters=development,
+    )
+    if scan.enabled:
+        if scan.timeout_seconds <= 0:
+            raise ConfigError("cluster_ops.config_scan.timeout_seconds must be positive")
+        # ⛔ Same inventories as the restart executor. A cluster with no
+        # inventory cannot be scanned, and finding that out when somebody
+        # presses the button is finding it out too late.
+        configured = [str(c.get("name")) for c in (whole.get("clusters") or [])
+                      if c.get("name")]
+        missing = [name for name in configured if name not in inventories]
+        if missing:
+            raise ConfigError(
+                "cluster_ops.config_scan is on but cluster_ops.ansible.inventories "
+                "has no entry for {}. The scan uses the same inventories as the "
+                "restart.".format(", ".join(sorted(missing))))
+        stray = [name for name in development if configured and name not in configured]
+        if stray:
+            raise ConfigError(
+                "cluster_ops.config_scan.development_clusters names unknown "
+                "cluster(s): {}".format(", ".join(sorted(stray))))
+
     return ClusterOpsConfig(restart_mode=mode, drain_timeout_seconds=drain_timeout,
-                            ansible=ansible)
+                            ansible=ansible, config_scan=scan)
 
 
 def build_config(raw: Dict[str, Any], where: str = "config.secret.yaml") -> Config:

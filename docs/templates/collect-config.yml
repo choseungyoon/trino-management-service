@@ -1,0 +1,155 @@
+---
+# TMS 설정 수집 플레이북 (FR-CO-01 · FR-FD-01 · D-018 1단계)
+#
+# ⛔ 읽기만 한다. 노드를 바꾸는 태스크가 하나도 없다 — slurp · stat · find ·
+#    grep 뿐이다. 배포는 별도 플레이북이고 아직 만들지 않았다.
+#
+# TMS 는 이 파일을 **고르지 않는다.** config.yaml 에 절대경로로 지정하고 TMS 는
+# 그 경로를 실행할 뿐이다 (D-009: "플레이북은 입력이 아니라 설정").
+#
+#   cluster_ops:
+#     config_scan:
+#       playbook: /etc/tms/ansible/collect-config.yml
+#
+# ── TMS 가 출력을 어떻게 읽나 ────────────────────────────────────────
+#
+# 마지막 태스크가 호스트마다 한 줄을 찍는다:
+#
+#     TMS-CONFIG-SCAN {"host": "...", "role": "...", ...}
+#
+# TMS 는 그 접두어가 붙은 줄만 읽고 나머지 출력은 전부 무시한다. 공유
+# 파일시스템이 필요 없다. 파일 내용은 slurp 이 준 **base64 그대로** 보낸다 —
+# 한 줄짜리 JSON 에 여러 줄 텍스트를 넣는 것보다 깨질 구석이 없다.
+#
+# ── 고쳐야 할 수 있는 것 ─────────────────────────────────────────────
+#
+#   trino_etc  : Trino 설치의 etc 디렉터리
+#   trino_log  : 기동 로그. 여기서 유효 프로퍼티 목록을 뽑는다
+#
+# `-e` 로 넘기거나 인벤토리 변수로 둔다.
+
+- name: Collect Trino configuration
+  hosts: all
+  gather_facts: false
+
+  vars:
+    trino_etc: /opt/trino/etc
+    trino_log: /var/log/trino/server.log
+
+    # 내용을 읽는 파일.
+    # ⛔ etc/catalog/* 는 여기 없다 — connection-password 가 들어 있고, TMS 로
+    #    옮기면 자격증명이 같이 옮겨진다 (D-018). 카탈로그는 체크섬만 본다.
+    content_files:
+      - config.properties
+      - jvm.config
+      - log.properties
+
+    # 존재와 체크섬만 보는 파일.
+    # node.properties 는 노드마다 **달라야** 한다 (node.id). 그래도 수집은
+    # 하는데, "어느 노드에 있나" 는 여전히 볼 가치가 있기 때문이다.
+    checksum_files:
+      - node.properties
+      - access-control.properties
+      - resource-groups.properties
+
+  tasks:
+    - name: Read the files TMS collects by content
+      ansible.builtin.slurp:
+        src: "{{ trino_etc }}/{{ item }}"
+      loop: "{{ content_files }}"
+      register: slurped
+      failed_when: false
+
+    - name: Fingerprint the files TMS does not read
+      ansible.builtin.stat:
+        path: "{{ trino_etc }}/{{ item }}"
+        checksum_algorithm: sha256
+      loop: "{{ checksum_files }}"
+      register: stated
+      failed_when: false
+
+    - name: Fingerprint the catalogs
+      ansible.builtin.find:
+        paths: "{{ trino_etc }}/catalog"
+        patterns: "*.properties"
+        get_checksum: true
+        checksum_algorithm: sha256
+      register: catalogs
+      failed_when: false
+
+    # ⛔ 마지막 기동의 블록만. 서버가 여러 번 떴으면 로그에 블록이 여러 개
+    #    있고, 예전 블록은 지금 유효한 목록이 아니다. `Loading configuration`
+    #    이 블록의 시작이다 (TRINO_VERIFIED T1-8-3).
+    - name: Take the property names from the most recent startup
+      ansible.builtin.shell:
+        cmd: >-
+          awk -F'\t' '
+            $NF == "Loading configuration" { names = "" ; next }
+            $0 ~ /\tBootstrap\t/ { split($NF, f, /[ \t]+/); if (f[1] != "") names = names f[1] "\n" }
+            END { printf "%s", names }
+          ' {{ trino_log | quote }}
+      register: bootstrap
+      changed_when: false
+      failed_when: false
+
+    # ── 여기부터가 페이로드. 한 단계씩 쌓아서 읽을 수 있게 둔다 ────────
+
+    - name: Assemble the file map
+      ansible.builtin.set_fact:
+        scan_files: >-
+          {{ scan_files | default({}) | combine({
+               'etc/' ~ item.item: {
+                 'present': not (item.failed | default(false)),
+                 'content_b64': item.content | default(none),
+               }
+             }) }}
+      loop: "{{ slurped.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Add the fingerprinted files
+      ansible.builtin.set_fact:
+        scan_files: >-
+          {{ scan_files | combine({
+               'etc/' ~ item.item: {
+                 'present': item.stat.exists | default(false),
+                 'sha256': item.stat.checksum | default(none),
+               }
+             }) }}
+      loop: "{{ stated.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Add the catalogs
+      ansible.builtin.set_fact:
+        scan_files: >-
+          {{ scan_files | combine({
+               'etc/catalog/' ~ (item.path | basename): {
+                 'present': true,
+                 'sha256': item.checksum,
+               }
+             }) }}
+      loop: "{{ catalogs.files | default([]) }}"
+      loop_control:
+        label: "{{ item.path | basename }}"
+
+    - name: Decide this node's role
+      ansible.builtin.set_fact:
+        # 인벤토리가 역할의 주인이다 (docs/templates/cluster-inventory.ini.example).
+        # 여기서 다시 판단하면 두 번째 정의가 생긴다.
+        scan_role: >-
+          {{ 'coordinator'
+             if inventory_hostname in (groups['coordinator']
+                  | default(groups['coordinators'] | default([])))
+             else 'worker' }}
+
+    - name: Report this node to TMS
+      ansible.builtin.debug:
+        msg: "TMS-CONFIG-SCAN {{ scan_payload | to_json }}"
+      vars:
+        scan_payload:
+          host: "{{ inventory_hostname }}"
+          role: "{{ scan_role }}"
+          reachable: true
+          files: "{{ scan_files }}"
+          valid_names: "{{ bootstrap.stdout_lines | default([]) }}"

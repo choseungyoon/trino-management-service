@@ -33,6 +33,10 @@ GATEWAY_SCOPE = "*"
 # one row holds the whole fleet for that cluster.
 KIND_FLEET = "fleet"
 
+#: What each node has in its `etc/` directory, collected on request
+#: rather than on a timer - a scan opens SSH to every node (D-018).
+KIND_CONFIG = "config"
+
 # ⛔ Mirrored by the CHECK constraint on collector_snapshot.kind. A kind added
 # here without a migration is rejected by the database, and the collector logs
 # it and carries on - so the screen simply stays empty forever with nothing
@@ -40,7 +44,7 @@ KIND_FLEET = "fleet"
 # `tests/test_collector_units.py` compares the two.
 ALLOWED_KINDS = (
     KIND_QUERIES, KIND_JMX, KIND_INFO, KIND_HEALTH,
-    KIND_RESOURCE_GROUPS, KIND_GATEWAY, KIND_FLEET,
+    KIND_RESOURCE_GROUPS, KIND_GATEWAY, KIND_FLEET, KIND_CONFIG,
 )
 
 
