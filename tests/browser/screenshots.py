@@ -36,6 +36,8 @@ SHOTS = (
     ("14-rg-history", "/resource-groups/history?cluster=prod-a", None),
     ("15-config", "/cluster-config?cluster=prod-a", None),
     ("16-config-node", "/cluster-config?cluster=prod-a", "config_node"),
+    ("17-catalogs", "/catalogs", None),
+    ("18-catalog-file", "/catalogs", "catalog_show"),
     ("20-fleet", "/fleet?cluster=prod-a", None),
     ("21-fleet-job", "/fleet/jobs/1", None),
     ("22-restart", "/restart?cluster=prod-a", None),
@@ -85,6 +87,11 @@ def _act(page, action):
         page.wait_for_selector(".seq__act-why")
         page.wait_for_timeout(400)
         return
+    if action == "catalog_show":
+        page.wait_for_selector("table.table tbody tr")
+        page.locator("button:has-text('Show')").first.click()
+        page.wait_for_timeout(250)
+        return
     if action == "config_node":
         page.wait_for_selector("table.table tbody tr")
         page.locator("button:has-text('Show')").first.click()
@@ -127,7 +134,7 @@ def main(out_dir):
 
     with serve(workload_enabled=True, resource_groups=True,
                fleet_jobs=True, benchmark=True, restarts=True,
-               config_scan=True,
+               config_scan=True, catalogs=True,
                # On, so the Gateway screen shows its tables rather than only
                # the "integration is off" banner.
                gateway={"enabled": True, "base_url": "https://gw.invalid:8080"},

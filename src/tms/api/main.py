@@ -286,7 +286,7 @@ def build_board_service(config: Config):
 def create_app(config: Optional[Config] = None, service: Optional[TmsService] = None,
                restarts: Optional[Any] = None, fleet: Optional[Any] = None,
                board: Optional[Any] = None, benchmark: Optional[Any] = None,
-               config_scan: Optional[Any] = None):
+               config_scan: Optional[Any] = None, catalogs: Optional[Any] = None):
     from fastapi import Body, Depends, FastAPI, Query, Request, Response
     from fastapi.responses import JSONResponse
 
@@ -622,6 +622,7 @@ def create_app(config: Optional[Config] = None, service: Optional[TmsService] = 
     # shadowed by a page route, and each one 503s with a name when its feature
     # is switched off rather than 404ing as though it never existed.
     from tms.api.routes import benchmark as benchmark_routes
+    from tms.api.routes import catalogs as catalog_routes
     from tms.api.routes import config as config_routes
     from tms.api.routes import fleet as fleet_routes
     from tms.api.routes import observability as observability_routes
@@ -638,12 +639,19 @@ def create_app(config: Optional[Config] = None, service: Optional[TmsService] = 
 
         config_scan = build_config_scan_service(config, service.repository)
 
+    if catalogs is None:
+        from tms.ops.catalogservice import build_catalog_service
+
+        catalogs = build_catalog_service(config, service.audit)
+
     api_deps = Deps(config=config, service=service,
                     current_principal=current_principal,
                     restarts=restarts, fleet=fleet, board=board,
-                    benchmark=benchmark, config_scan=config_scan)
+                    benchmark=benchmark, config_scan=config_scan,
+                    catalogs=catalogs)
     benchmark_routes.register(app, api_deps)
     config_routes.register(app, api_deps)
+    catalog_routes.register(app, api_deps)
     resource_group_routes.register(app, api_deps)
     work_routes.register(app, api_deps)
     fleet_routes.register(app, api_deps)

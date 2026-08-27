@@ -502,6 +502,9 @@ _REQUIRED_OBJECTS = (
     ("018_benchmark_query_sets.sql", "action", "BENCHMARK_QUERY_CHANGE"),
     ("020_benchmark_schedules.sql", "table", "benchmark_schedule"),
     ("022_snapshot_kind_config.sql", "kind", "config"),
+    ("023_catalogs.sql", "table", "catalog_definition"),
+    ("023_catalogs.sql", "table", "catalog_deployment"),
+    ("023_catalogs.sql", "action", "CATALOG_DEPLOY"),
     ("020_benchmark_schedules.sql", "action", "BENCHMARK_SCHEDULE_CHANGE"),
     # 011, 013, 015, 017, 019 and 021 only grant; a privilege is not an object,
     # so there is nothing here to look for. Missing one shows up as a

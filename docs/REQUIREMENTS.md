@@ -563,6 +563,12 @@ _런타임 정보 (실시간 조회 소스)_: Trino 버전, systemd 유닛 상�
 | FR-CT-04 | 자격증명은 `'${ENV:VAR}'` 환경변수 참조로 전달. 평문 금지 | 평문 입력 차단    |
 | ~~FR-CT-05~~ | ~~카탈로그 변경 (ALTER CATALOG)~~ | **요구사항으로 등재하지 않는다.** Trino 477에 `ALTER CATALOG` 부재 (`TRINO_VERIFIED.md` §T1-6). 변경 = DROP+CREATE이며 Hive/Iceberg에서는 재시작을 수반하므로 "변경 버튼"은 무중단으로 오인된다 |
 
+**⛔ 2026-08-28: 파일 배포 방식으로 구현했다 (D-018 2단계).** 아래 SQL 방식(`CREATE CATALOG`)의 제약 때문이다 — experimental 이고, 쿼리 전문이 로그와 Web UI 에 남아 **비밀번호가 노출**된다. 파일 배포는 `catalog.management=static`(기본값) 그대로 동작하고 비밀번호는 `${ENV:VAR}` 로 남는다.
+
+구현된 것: FR-CT-01(조회 — Configuration 화면의 체크섬) · **FR-CT-02/03(파일 추가·제거)** · FR-CT-04(`${ENV:VAR}` 강제). 재시작 필요 경고(CT-03)는 항상 참이다 — static 카탈로그는 기동 시에만 읽힌다 (T1-8-4).
+
+⛔ **실측으로 드러난 것**: 잘못된 카탈로그는 **서버 전체를 못 뜨게 한다** (T1-9-1). 그래서 개발 클러스터를 먼저 통과해야 한다.
+
 **중대 제약 (UI에 반드시 표시)**
 
 - `catalog.management=dynamic` 필요. **이 기능은 experimental이며 보안 영향이 있다.**

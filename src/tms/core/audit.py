@@ -69,6 +69,15 @@ ACTION_BENCHMARK_QUERY_CHANGE = "BENCHMARK_QUERY_CHANGE"
 #: able to answer without reading every run.
 ACTION_BENCHMARK_SCHEDULE_CHANGE = "BENCHMARK_SCHEDULE_CHANGE"
 
+#: Editing a catalog draft in TMS. Nothing has reached a cluster yet.
+ACTION_CATALOG_CHANGE = "CATALOG_CHANGE"
+
+#: Writing a catalog onto a cluster's nodes, or removing it. Its own
+#: type because a bad catalog file stops every node it reaches from
+#: starting (TRINO_VERIFIED T1-9-1) - "what did we put on prod-a" has to
+#: be answerable without reading every other kind of action.
+ACTION_CATALOG_DEPLOY = "CATALOG_DEPLOY"
+
 ALLOWED_ACTION_TYPES = frozenset(
     [
         ACTION_QUERY_KILL,
@@ -84,6 +93,8 @@ ALLOWED_ACTION_TYPES = frozenset(
         ACTION_BENCHMARK_RUN,
         ACTION_BENCHMARK_QUERY_CHANGE,
         ACTION_BENCHMARK_SCHEDULE_CHANGE,
+        ACTION_CATALOG_CHANGE,
+        ACTION_CATALOG_DEPLOY,
     ]
 )
 
@@ -93,6 +104,7 @@ TARGET_HEALTH_TEST = "health_test"
 TARGET_NODE = "node"
 TARGET_RESOURCE_GROUP = "resource_group"
 TARGET_BENCHMARK_SET = "benchmark_query_set"
+TARGET_CATALOG = "catalog"
 
 # The reason is forwarded to Trino and shown to the user whose query was killed,
 # so it is capped and flattened to a single line.

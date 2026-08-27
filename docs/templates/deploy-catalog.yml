@@ -1,0 +1,96 @@
+---
+# TMS 카탈로그 배포 플레이북 (FR-CATALOG · D-018 2단계)
+#
+# ⛔ 이 플레이북은 **파일을 쓴다.** collect-config.yml 과 달리 노드를 바꾼다.
+#    두 파일을 따로 둔 이유가 이것이다 — 어느 쪽이 무엇을 하는지 짧은 파일
+#    하나를 읽어서 확인할 수 있어야 한다.
+#
+# ⛔ **재시작하지 않는다.** static 카탈로그는 기동 시에만 읽히므로
+#    (TRINO_VERIFIED T1-8-4) 배포만으로는 아무 일도 일어나지 않는다. 재시작은
+#    TMS 의 안전 재시작 시퀀스가 따로 한다 — 유입 차단 → 드레인 → 재시작 →
+#    헬스 확인. 여기서 재시작해 버리면 그 게이트를 통째로 건너뛴다
+#    (절대규칙 5).
+#
+# TMS 는 이 파일을 **고르지 않는다.** config.yaml 에 절대경로로 지정한다.
+#
+#   cluster_ops:
+#     catalog_deploy:
+#       playbook: /etc/tms/ansible/deploy-catalog.yml
+#
+# ── TMS 가 넘기는 변수 ───────────────────────────────────────────────
+#
+#   catalog_name     : 파일 이름 (etc/catalog/<이름>.properties)
+#   catalog_action   : "deploy" 또는 "remove"
+#   catalog_content  : 파일 내용을 base64 로. deploy 일 때만
+#
+# ⛔ 내용을 base64 로 받는 이유: 명령행에 여러 줄 텍스트를 넣지 않기 위해서다.
+#    자격증명은 애초에 여기 없다 — TMS 는 평문 비밀번호를 저장하지 않고,
+#    카탈로그에는 ${ENV:VAR} 참조만 들어 있다 (D-018, T1-9-2).
+
+- name: Deploy or remove a Trino catalog
+  hosts: all
+  gather_facts: false
+  vars:
+    trino_etc: /opt/trino/etc
+    trino_user: trino
+    trino_group: trino
+
+  tasks:
+    - name: Refuse a request TMS did not fill in
+      ansible.builtin.assert:
+        that:
+          - catalog_name is defined and catalog_name | length > 0
+          - catalog_action in ['deploy', 'remove']
+          - catalog_action != 'deploy' or (catalog_content | default('')) | length > 0
+        fail_msg: >-
+          This playbook is driven by TMS and needs catalog_name,
+          catalog_action and (for a deploy) catalog_content.
+
+    # ⛔ 이름을 다시 검사한다. TMS 도 검사하지만, 이 플레이북은 파일 경로를
+    #    만드는 쪽이고 `../` 하나면 etc/ 밖으로 나간다. 두 번 검사하는 비용이
+    #    한 번 놓치는 비용보다 싸다.
+    - name: Refuse a name that is not a plain catalog name
+      ansible.builtin.assert:
+        that:
+          - catalog_name is match('^[a-z][a-z0-9_]*$')
+        fail_msg: "catalog_name must match ^[a-z][a-z0-9_]*$"
+
+    - name: Keep a copy of what is there now
+      ansible.builtin.copy:
+        src: "{{ trino_etc }}/catalog/{{ catalog_name }}.properties"
+        dest: "{{ trino_etc }}/catalog/{{ catalog_name }}.properties.tms-previous"
+        remote_src: true
+        mode: "0640"
+      failed_when: false
+      # 없으면 넘어간다 — 새 카탈로그의 첫 배포다. 되돌릴 때 이 파일을 쓴다.
+
+    - name: Write the catalog
+      ansible.builtin.copy:
+        content: "{{ catalog_content | b64decode }}"
+        dest: "{{ trino_etc }}/catalog/{{ catalog_name }}.properties"
+        owner: "{{ trino_user }}"
+        group: "{{ trino_group }}"
+        mode: "0640"
+      when: catalog_action == 'deploy'
+
+    - name: Remove the catalog
+      ansible.builtin.file:
+        path: "{{ trino_etc }}/catalog/{{ catalog_name }}.properties"
+        state: absent
+      when: catalog_action == 'remove'
+
+    - name: Report what this node now has
+      ansible.builtin.stat:
+        path: "{{ trino_etc }}/catalog/{{ catalog_name }}.properties"
+        checksum_algorithm: sha256
+      register: written
+
+    - name: Tell TMS
+      ansible.builtin.debug:
+        msg: >-
+          TMS-CATALOG-DEPLOY {{ {
+            "host": inventory_hostname,
+            "action": catalog_action,
+            "present": written.stat.exists,
+            "sha256": written.stat.checksum | default(none),
+          } | to_json }}

@@ -8,6 +8,7 @@ import { Login } from "./screens/Login";
 import { Overview } from "./screens/Overview";
 import { Audit } from "./screens/Audit";
 import { Benchmark } from "./screens/Benchmark";
+import { Catalogs } from "./screens/Catalogs";
 import { ClusterConfig } from "./screens/ClusterConfig";
 import { BenchmarkRun } from "./screens/BenchmarkRun";
 import { Fleet } from "./screens/Fleet";
@@ -53,6 +54,7 @@ createRoot(document.getElementById("root")!).render(
           <Route path="fleet" element={<Fleet />} />
           <Route path="fleet/jobs/:id" element={<FleetJob />} />
           <Route path="cluster-config" element={<ClusterConfig />} />
+          <Route path="catalogs" element={<Catalogs />} />
           <Route path="resource-groups" element={<ResourceGroups />} />
           <Route path="resource-groups/history" element={<ResourceGroupHistory />} />
           <Route path="benchmark" element={<Benchmark />} />

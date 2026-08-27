@@ -113,7 +113,7 @@ def _query(qid, user, source, elapsed_ms, long_running=False, state="RUNNING"):
 def build_app(workload_enabled=False, seed=None, gateway=None,
               resource_groups=False, password=None, session_secret=None,
               fleet_jobs=False, benchmark=False, restarts=False,
-              config_scan=False):
+              config_scan=False, catalogs=False):
     repository = InMemorySnapshotRepository()
     now = utcnow()
 
@@ -476,6 +476,42 @@ def build_app(workload_enabled=False, seed=None, gateway=None,
         repository.save(Snapshot("prod-a", KIND_CONFIG, now, payload={
             "nodes": _scan.parse_scan(lines), "error": None, "exit_code": 0}))
 
+    catalog_service = None
+    if catalogs:
+        # In memory: the real one shells out to ansible-playbook. Seeded with
+        # one catalog proved on the development cluster and one that is not,
+        # so both sides of the gate are on the screen.
+        from tms.core.audit import AuditGuard as _CatGuard
+        from tms.ops.catalogservice import CatalogService
+        from tms.ops.catalogstore import InMemoryCatalogRepository
+
+        catalog_repo = InMemoryCatalogRepository()
+        proved = catalog_repo.create(
+            "pg_reporting", "postgresql",
+            {"connection-url": "jdbc:postgresql://reporting-db:5432/bi",
+             "connection-user": "trino",
+             "connection-password": "${ENV:PG_REPORTING_PASSWORD}"},
+            "Owned by the BI team", "sre.kim")
+        catalog_repo.update(proved["id"], verified_on="prod-b",
+                            verified_at=now - timedelta(hours=3))
+        catalog_repo.create(
+            "lake_iceberg", "iceberg",
+            {"iceberg.catalog.type": "hive_metastore",
+             "hive.metastore.uri": "thrift://hms:9083"},
+            None, "syhcho")
+        catalog_repo.start_deployment(
+            proved["id"], "pg_reporting", "prod-b", "deploy", "postgresql",
+            {}, "BI needs the reporting database", "sre.kim")
+        catalog_repo.finish_deployment(1, "SUCCEEDED")
+
+        catalog_service = CatalogService(
+            config=config, repository=catalog_repo,
+            audit_guard=_CatGuard(audit),
+            playbook="/etc/tms/deploy-catalog.yml",
+            inventories={name: "/etc/tms/{}.ini".format(name) for name in CLUSTERS},
+            development_clusters=["prod-b"],
+            runner=lambda command, timeout, on_line: {"rc": 0})
+
     restart_service = None
     if restarts:
         # In memory, because the real one needs PostgreSQL. Without this the
@@ -531,6 +567,7 @@ def build_app(workload_enabled=False, seed=None, gateway=None,
                       board=BoardService(board_repository),
                       restarts=restart_service,
                       config_scan=scan_service,
+                      catalogs=catalog_service,
                       benchmark=bench_service), trino
 
 
@@ -556,7 +593,7 @@ def _free_port():
 @contextlib.contextmanager
 def serve(workload_enabled=False, seed=None, gateway=None,
           resource_groups=False, fleet_jobs=False, benchmark=False,
-          restarts=False, config_scan=False):
+          restarts=False, config_scan=False, catalogs=False):
     """Run the console on a free port. Yields (base_url, stub_trino)."""
     import uvicorn
 
@@ -564,7 +601,7 @@ def serve(workload_enabled=False, seed=None, gateway=None,
                            resource_groups=resource_groups,
                            fleet_jobs=fleet_jobs, gateway=gateway,
                            benchmark=benchmark, restarts=restarts,
-                           config_scan=config_scan)
+                           config_scan=config_scan, catalogs=catalogs)
     port = _free_port()
     with tempfile.TemporaryDirectory() as tmp:
         key, crt = _make_cert(tmp)

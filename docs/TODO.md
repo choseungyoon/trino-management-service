@@ -52,16 +52,17 @@
 
 ---
 
-### 🔴 1-0. 마이그레이션 `020` `021` `022` `[먼저]`
+### 🔴 1-0. 마이그레이션 `020` ~ `024` `[먼저]`
 
 `020`/`021` 은 벤치마크 주기 실행(FR-BM-07 · D-017)이, `022` 는 설정 조회
-(FR-CO-01 · D-018)가 쓴다. **적용 전에는 해당 화면만 "사용할 수 없음" 으로
+(FR-CO-01 · D-018)가, `023`/`024` 는 카탈로그 배포(FR-CATALOG · D-018 2단계)가 쓴다. **적용 전에는 해당 화면만 "사용할 수 없음" 으로
 나오고 나머지는 전부 정상 동작한다.**
 
 - [ ] `git pull` → `pip install -e .`
-- [ ] `020` `021` `022` 를 **번호순으로** `tms_owner` 로 적용
-- [ ] `tms-config-check` → `benchmark_schedule` 테이블 ·
-      `BENCHMARK_SCHEDULE_CHANGE` 액션 · `config` snapshot kind 를 확인한다
+- [ ] `020` ~ `024` 를 **번호순으로** `tms_owner` 로 적용
+- [ ] `tms-config-check` → `benchmark_schedule` · `catalog_definition` ·
+      `catalog_deployment` 테이블, `BENCHMARK_SCHEDULE_CHANGE` ·
+      `CATALOG_DEPLOY` 액션, `config` snapshot kind 를 확인한다
 
 > ⛔ **앞 번호를 다시 돌리지 않는다.** `020` 도 감사 액션 제약을 `DROP` 후
 > 다시 만든다 — 위의 경고가 그대로 적용된다.
@@ -224,6 +225,46 @@ React 콘솔은 `/app` 에 있다. 되돌렸다면 그 이유가 D-016 의 "뒤�
       이게 3단계 배포의 오타 검사 재료다*
 - [ ] 조회자 계정 → 표는 보이고 **Read the nodes 버튼이 없다**
 - [ ] 개발 클러스터에서 워커 한 대를 내리고 스캔 → **드리프트로 안 나온다**
+
+### 1-5-3. V-13 — 카탈로그 배포 `[023/024 적용 후 · ⚠️ 가장 위험한 신규 기능]`
+
+⛔ **잘못된 카탈로그 하나가 배포된 모든 노드를 못 뜨게 한다** (T1-9-1). 그래서
+개발 클러스터가 먼저다. **개발 클러스터에서 처음 시도한다.**
+
+**선행 설정**
+
+- [ ] `docs/templates/deploy-catalog.yml` 을 `/etc/tms/ansible/` 에 설치
+      <br>*⛔ collect-config.yml 과 **다른 파일**이다. 하나는 읽고 하나는 쓴다*
+- [ ] `trino_etc` · `trino_user` · `trino_group` 을 맞춘다
+- [ ] `config.yaml`:
+      ```yaml
+      cluster_ops:
+        catalog_deploy:
+          playbook: /etc/tms/ansible/deploy-catalog.yml
+      ```
+- [ ] ⛔ `development_clusters` 가 비어 있으면 **기동이 거부된다.** 증명할 곳이
+      없으면 모든 배포가 곧장 운영으로 가기 때문이다
+
+**확인 — 개발 클러스터에서, 무해한 카탈로그로**
+
+- [ ] `/catalogs` → New catalog → 예: `probe_memory` / `memory` / 프로퍼티 없음
+- [ ] ⛔ `connection-password=hunter2` 를 넣어 본다 → **거부되고 `${ENV:VAR}` 를
+      쓰라고 말한다**
+- [ ] 개발 클러스터 버튼만 활성, 운영 버튼은 **비활성 + 이유가 툴팁에**
+- [ ] 개발 클러스터에 배포 → 파일이 전 노드에 생긴다
+      (`ls /opt/trino/etc/catalog/`)
+- [ ] ⛔ **아직 아무 일도 안 일어난다.** `SHOW CATALOGS` 에 안 나온다 —
+      기동 시에만 읽히기 때문이다
+- [ ] 안전 재시작 실행 → 재시작 후 `SHOW CATALOGS` 에 나온다
+- [ ] 운영 버튼이 **활성화**됐다
+- [ ] 초안을 고친다 → **다시 비활성**이 된다 (증명이 지워진다)
+- [ ] 감사 로그에 `CATALOG_CHANGE` · `CATALOG_DEPLOY` 가 사유와 함께
+
+**⚠️ 일부러 깨뜨려 보는 것은 개발 클러스터에서만**
+
+- [ ] 없는 커넥터 이름으로 배포 → 재시작 → **코디네이터가 안 뜬다.**
+      이게 이 게이트가 있는 이유다. 되돌리려면 파일을 지우고 다시 재시작한다
+      (`/catalogs` → Show → Remove from a cluster)
 
 ### 1-6. V-6 — 감사 append-only 재확인
 
@@ -405,6 +446,7 @@ Gateway 2대가 PostgreSQL 하나를 공유하는데 그 DB 가 VM1 에 얹혀 �
                V-2 / V-3  (Fleet · Workload 가 실제로 보는가)
                V-9 리소스 그룹 편집 · V-8 벤치마크 나머지 · V-11 스케줄
                V-12 설정 조회·드리프트 (D-2 전환과 같이)
+               V-13 카탈로그 배포 ⚠️ 개발 클러스터에서 먼저
                W-1 실측 [피크 시간대]  ← R1 DoD 가 닫힌다
                §1-9 끝나고 · §4 보드 정리
 
@@ -428,6 +470,7 @@ Gateway 2대가 PostgreSQL 하나를 공유하는데 그 DB 가 VM1 에 얹혀 �
 | 벤치마크만 문제 | `benchmark.enabled: false` → `tms-api` 재시작 |
 | 스케줄만 문제 | 화면에서 해당 스케줄을 **끈다**. 전부 끄려면 `benchmark.enabled: false` — 스케줄은 벤치마크의 일부다 |
 | 설정 조회만 문제 | `cluster_ops.config_scan.playbook` 을 비운다 → 재시작. 화면이 사라지고 **다른 것은 아무 영향 없다** (읽기 전용이라 노드에 남긴 것도 없다) |
+| 카탈로그 배포만 문제 | `cluster_ops.catalog_deploy.playbook` 을 비운다 → 재시작. ⛔ **이미 올라간 파일은 그대로 남는다** — 지우려면 손으로 지우고 재시작하거나, 끄기 전에 화면에서 제거한다 |
 | 리소스 그룹 편집만 문제 | `resource_groups.enabled: false` → 재시작. **Trino 의 db 매니저와는 무관하다** — 화면만 사라지고 쿼리 수용은 그대로 돈다 |
 | Fleet 작업만 문제 | `fleet.jobs` 를 비운다 → 재시작 |
 | 보드만 문제 | 보드는 항상 켜져 있다. DB 를 못 읽으면 화면이 "보드를 읽을 수 없다" 를 표시하고 **다른 화면은 영향받지 않는다** |

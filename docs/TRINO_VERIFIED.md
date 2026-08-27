@@ -532,6 +532,38 @@ io.trino.connector.StaticCatalogManager  -- Added catalog memory using connector
 
 ---
 
+### T1-9. 카탈로그 파일의 실패 방식 — **실측 2026-08-28 (로컬 Trino 477)**
+
+**왜 쟀나**: 카탈로그를 UI 에서 만들어 전 노드에 배포하는 기능(D-018 2단계)의 안전장치를 무엇으로 삼을지가 여기 달려 있다.
+
+#### T1-9-1. ⛔ 잘못된 카탈로그는 **서버 전체를 못 뜨게 한다**
+
+"그 카탈로그만 없는 채로 뜬다" 가 **아니다.** 세 가지 실수를 각각 넣어 봤고 셋 다 같은 결과였다 — `SERVER STARTED` 없음, 프로세스 종료.
+
+| 넣은 것 | 로그 |
+|---|---|
+| 없는 커넥터 이름 | `No factory for connector 'this_connector_does_not_exist'. Available factories: [hive, ignite, delta_lake, ...]` |
+| 커넥터에 없는 프로퍼티 | `Configuration property 'memory.this-is-not-a-real-property' was not used` |
+| 없는 환경변수 참조 | `RuntimeException: Environment variable is not set: TMS_PROBE_SIZE` |
+
+> **설계에 미치는 영향**: 카탈로그 파일 하나가 `config.properties` 와 **정확히 같은 무게**다. 24대에 배포하면 24대가 동시에 안 뜬다.
+
+#### T1-9-2. `${ENV:VAR}` 는 프로세스 환경에서 해석된다
+
+`memory.max-data-per-node=${ENV:TMS_PROBE_SIZE}` 를 넣고 그 변수를 export 한 채 기동 → 카탈로그가 정상 로드된다. 안 하면 위 표의 세 번째 줄이 된다. 처리 주체는 `io.airlift.configuration.secrets.SecretsResolver`.
+
+> **설계에 미치는 영향**: FR-CT-04 가 정한 "자격증명은 `${ENV:VAR}` 로, 평문 금지" 가 **파일 배포 방식에서도 그대로 동작한다.** TMS 가 비밀번호를 갖지 않고도 카탈로그를 만들 수 있다. 대신 **변수가 노드에 없으면 기동이 실패**하므로, 참조만 넣고 변수를 안 만든 것도 배포 사고다.
+
+#### T1-9-3. TMS 는 유효한 커넥터 이름을 알아낼 방법이 없다
+
+- `plugin/` 디렉터리 이름은 커넥터 이름과 **다르다** — `delta-lake`→`delta_lake`, `google-sheets`→`gsheets`, `ai-functions`→`ai`. 게다가 55개 중 커넥터가 아닌 것(`exchange-filesystem`, `http-event-listener`, `geospatial` …)이 섞여 있다
+- 전체 목록은 **실패했을 때의 예외 메시지에만** 나온다. 성공한 기동 로그에는 없다 (`grep -c "Available factories"` = 0)
+- 커넥터별 유효 프로퍼티 목록은 어디에도 없다. 39개 커넥터의 프로퍼티를 손으로 들면 절대규칙 1 위반이고 Trino 업그레이드마다 틀려진다
+
+> **설계에 미치는 영향**: **검증자를 만들 수 없으므로, 검증자는 클러스터여야 한다.** 개발 클러스터에 먼저 배포해 재시작하고 헬스가 돌아오는지 보는 것(D-018)이 우회로가 아니라 **유일한 방법**이다. 안전 재시작 시퀀스가 이미 헬스 게이트를 갖고 있으므로 새로 만들 것도 없다.
+
+---
+
 ### T1-7. JMX 노출 방식 및 주요 MBean — **확인**
 
 **JMX/RMI 활성화** (`config.properties`) — **확인**

@@ -228,6 +228,27 @@ class ConfigScanConfig:
 
 
 @dataclass(frozen=True)
+class CatalogDeployConfig:
+    """Writing catalog files onto nodes (FR-CATALOG, D-018 step 2).
+
+    ⛔ Its own playbook, separate from both the restart one and the read-only
+    scan. This one writes; keeping the three apart is what lets an operator
+    tell which is which by reading one short file.
+
+    ⛔ It does not restart, and the playbook must not either. Trino reads
+    static catalogs only at startup, so a deploy changes nothing until a
+    restart - and restarting belongs to the safe sequence, which drains first.
+    """
+
+    playbook: str = ""
+    timeout_seconds: float = 900.0
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.playbook)
+
+
+@dataclass(frozen=True)
 class ClusterOpsConfig:
     """The safe restart sequence (FR-CO-02).
 
@@ -241,6 +262,7 @@ class ClusterOpsConfig:
     drain_timeout_seconds: float = 900.0
     ansible: AnsibleConfig = field(default_factory=AnsibleConfig)
     config_scan: ConfigScanConfig = field(default_factory=ConfigScanConfig)
+    catalog_deploy: CatalogDeployConfig = field(default_factory=CatalogDeployConfig)
 
 
 @dataclass(frozen=True)
@@ -646,8 +668,40 @@ def _build_cluster_ops(raw: Dict[str, Any], whole: Dict[str, Any]) -> ClusterOps
                 "cluster_ops.config_scan.development_clusters names unknown "
                 "cluster(s): {}".format(", ".join(sorted(stray))))
 
+    deploy_raw = raw.get("catalog_deploy") or {}
+    catalog_deploy = CatalogDeployConfig(
+        playbook=str(deploy_raw.get("playbook") or ""),
+        timeout_seconds=float(deploy_raw.get("timeout_seconds", 900)),
+    )
+    if catalog_deploy.enabled:
+        if catalog_deploy.timeout_seconds <= 0:
+            raise ConfigError(
+                "cluster_ops.catalog_deploy.timeout_seconds must be positive")
+        if catalog_deploy.playbook == ansible.playbook:
+            # ⛔ The restart playbook restarts things. Pointing the catalog
+            # deploy at it would put a restart inside a deploy, which is the
+            # path around the drain (absolute rule 5).
+            raise ConfigError(
+                "cluster_ops.catalog_deploy.playbook must not be the restart "
+                "playbook. Deploying a catalog writes a file; restarting is "
+                "the safe sequence's job and it drains first.")
+        if catalog_deploy.playbook == scan.playbook:
+            raise ConfigError(
+                "cluster_ops.catalog_deploy.playbook must not be the config "
+                "scan playbook. One reads, the other writes.")
+        # ⛔ Fails closed: with nowhere to prove a catalog first, every deploy
+        # would go straight to a cluster that serves queries (D-018).
+        if not scan.development_clusters:
+            raise ConfigError(
+                "cluster_ops.catalog_deploy is on but no development cluster is "
+                "listed in cluster_ops.config_scan.development_clusters. A bad "
+                "catalog stops every node it reaches from starting, and TMS "
+                "cannot check one in advance - the development cluster is the "
+                "only check there is.")
+
     return ClusterOpsConfig(restart_mode=mode, drain_timeout_seconds=drain_timeout,
-                            ansible=ansible, config_scan=scan)
+                            ansible=ansible, config_scan=scan,
+                            catalog_deploy=catalog_deploy)
 
 
 def build_config(raw: Dict[str, Any], where: str = "config.secret.yaml") -> Config:

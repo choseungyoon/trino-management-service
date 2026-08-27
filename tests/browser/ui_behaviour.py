@@ -47,7 +47,7 @@ from tests.browser.harness import serve, sign_in  # noqa: E402
 #: render test at all.
 SCREENS = (
     "/", "/queries", "/cluster-health", "/workload", "/gateway",
-    "/cluster-config?cluster=prod-a",
+    "/cluster-config?cluster=prod-a", "/catalogs",
     "/resource-groups?cluster=prod-a", "/resource-groups/history?cluster=prod-a",
     "/fleet", "/fleet/jobs/1", "/restart?cluster=prod-a",
     "/benchmark", "/benchmark/runs/1", "/benchmark/sets",
@@ -65,7 +65,7 @@ class UiBehaviourTest(unittest.TestCase):
     def setUpClass(cls):
         cls._server = serve(workload_enabled=True, resource_groups=True,
                             fleet_jobs=True, benchmark=True, restarts=True,
-                            config_scan=True,
+                            config_scan=True, catalogs=True,
                             gateway={"enabled": True,
                                      "base_url": "https://gw.invalid:8080"})
         cls.base, cls.trino = cls._server.__enter__()
