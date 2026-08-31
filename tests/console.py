@@ -62,7 +62,7 @@ class StubTrino:
 
 
 def build_service(roles=("admin",), with_data=True, workload=None,
-                  clusters=("prod-a",)):
+                  clusters=("prod-a",), with_ui_url=True):
     repository = InMemorySnapshotRepository()
     now = utcnow()
     if with_data:
@@ -98,7 +98,9 @@ def build_service(roles=("admin",), with_data=True, workload=None,
         "clusters": [{"name": name,
                       "coordinator_url": "https://{}.invalid:8443".format(name),
                       "expected_workers": 12,
-                      "trino_ui_url": "https://{}.invalid:8443/ui/".format(name)}
+                      **({"trino_ui_url":
+                          "https://{}.invalid:8443/ui/".format(name)}
+                         if with_ui_url else {})}
                      for name in clusters],
         "trino": {"user": "tms-svc", "password": "pw"},
         "database": {"url": "postgresql://u:p@h:5432/d"},

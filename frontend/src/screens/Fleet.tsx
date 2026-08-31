@@ -244,9 +244,31 @@ export function Fleet() {
               <Icon name="info" size={20} stroke={1.6} />
               <div className="empty__title">No nodes collected yet</div>
               <div className="empty__desc">
-                The collector reads the Ansible inventory for this cluster and
-                then asks each node what it is. Give it one poll interval, then
-                check <code className="mono">fleet.inventories</code>.
+                This screen is where node addresses live — every coordinator and
+                worker, with the address TMS reaches it on. TMS does not
+                discover them: it reads the Ansible inventory you point it at,
+                then asks each node about itself.
+                {/* Three settings, and missing any one of them produces an
+                    empty screen rather than an error. Naming all three beats
+                    finding out one at a time. */}
+                <div className="stack" style={{ marginTop: 10, textAlign: "left" }}>
+                  <div>
+                    <code className="mono">fleet.enabled: true</code>
+                  </div>
+                  <div>
+                    <code className="mono">fleet.inventories</code> — a file per
+                    cluster, with <code className="mono">[coordinator]</code> and{" "}
+                    <code className="mono">[workers]</code> groups
+                  </div>
+                  <div>
+                    <code className="mono">fleet.node_url_template</code> — an
+                    inventory carries addresses, not schemes or ports
+                  </div>
+                </div>
+                <div style={{ marginTop: 10 }}>
+                  All three set? Give it one poll interval
+                  {" "}(<code className="mono">fleet.poll_interval_seconds</code>).
+                </div>
               </div>
             </div>
           </div>

@@ -13,6 +13,18 @@ Each card shows active workers against expected, running and queued counts, the
 5-minute failure rate, and the roll-up health state. The health test chips
 underneath are the individual checks — click one to land on it.
 
+The **coordinator's address** sits beside the cluster name, and links to that
+cluster's own Trino UI when `trino_ui_url` is configured for it.
+
+> The link is not derived from `coordinator_url`, even though Trino serves its
+> UI from the same host. That URL is the one **TMS** reaches; the link is
+> clicked from a browser that may be on a different network or behind a
+> different proxy. A link that works from the server and 404s for the operator
+> is worse than no link — so without `trino_ui_url` the address stays plain
+> text, and the tooltip says which setting would make it a link.
+
+For every node's address, not just the coordinator's, see [Fleet](fleet.md).
+
 > **Active workers counts workers, not nodes.** Trino's `ActiveNodeCount`
 > includes the coordinator, so a cluster of N workers reports N+1. TMS corrects
 > for this. If you compare against the coordinator UI, that is why the numbers

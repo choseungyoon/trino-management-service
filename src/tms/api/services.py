@@ -1056,6 +1056,15 @@ def cluster_card(cluster, health_envelope: Dict[str, Any],
     summary = ((queries_envelope.get("data") or {}).get("summary") or {})
     return {
         "name": cluster.name,
+        # Where this cluster is. Shown as text on the card, because "which
+        # host am I looking at" is the question a second cluster creates.
+        "coordinator_url": cluster.coordinator_url,
+        # ⛔ Only when configured. The UI could be derived from the
+        # coordinator URL - Trino serves it on the same host - but that URL is
+        # reachable from *TMS*, and the link is clicked from a browser that may
+        # sit on a different network or behind a different proxy. A link that
+        # works from the server and 404s for the operator is worse than none.
+        "trino_ui_url": cluster.trino_ui_url or None,
         "expected_workers": cluster.expected_workers,
         "active_workers": active_workers,
         "planned_out": planned_out,

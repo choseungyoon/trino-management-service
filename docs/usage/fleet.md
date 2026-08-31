@@ -1,6 +1,11 @@
 # Fleet
 
-Every node in a cluster, what it is running, and whether it answered.
+**Every node in a cluster, with the address TMS reaches it on** — coordinators
+and workers, what each is running, and whether it answered.
+
+If you are looking for *"where is this node"*, this is the screen. The
+coordinator's address is also on each [Overview](observing.md#overview) card,
+because that one needs no setup.
 
 ---
 
@@ -45,7 +50,13 @@ for n in load_inventory('/etc/tms/ansible/cluster1.ini','prod-a'):
 
 ## The node list
 
-Per node: role, state, Trino version, `node.environment`, and uptime.
+Per node: the inventory name, the **address** TMS connects to, role, state,
+Trino version, `node.environment`, and uptime.
+
+The name and the address are shown separately when they differ. TMS connects to
+`ansible_host` when the inventory sets one — an inventory alias is often a name
+only Ansible resolves, and connecting to it would make a healthy node look
+dead.
 
 Above the table, TMS reports **disagreements across the fleet** — each of these
 is invisible in a single row and obvious across the whole cluster, and each is a

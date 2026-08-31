@@ -7,6 +7,9 @@ import { useApi } from "../useApi";
 
 interface ClusterCard {
   name: string;
+  coordinator_url: string;
+  /** Null unless configured — see `Coordinator` for why it is not derived. */
+  trino_ui_url: string | null;
   expected_workers: number;
   active_workers: number | null;
   planned_out: number;
@@ -17,6 +20,50 @@ interface ClusterCard {
   stale: boolean;
   collected_at: string | null;
   tests: { id: string; name: string; state: string }[];
+}
+
+/**
+ * Where the cluster is, and a way into its own web UI.
+ *
+ * ⛔ Linked only when `trino_ui_url` is configured. The address could be
+ * turned into a link on its own — Trino serves its UI from the coordinator —
+ * but that URL is the one *TMS* reaches, and this link is clicked from a
+ * browser that may be on another network or behind another proxy. A link that
+ * works from the server and 404s for the operator is worse than no link, so
+ * the address stays text and the tooltip names the setting that would make it
+ * one.
+ */
+function Coordinator({ cluster }: { cluster: ClusterCard }) {
+  const address = hostOf(cluster.coordinator_url);
+  if (!address) return null;
+  if (!cluster.trino_ui_url) {
+    return (
+      <span className="cluster__host mono"
+            title={`${cluster.coordinator_url}\n\nSet trino_ui_url for this `
+                   + `cluster in config.yaml to link straight to its Trino UI.`}>
+        {address}
+      </span>
+    );
+  }
+  return (
+    <a className="cluster__host mono" href={cluster.trino_ui_url}
+       target="_blank" rel="noopener noreferrer"
+       title={`Open the Trino UI for ${cluster.name}`}>
+      {address}
+      <Icon name="external" size={11} />
+    </a>
+  );
+}
+
+/** `https://host:8443/` -> `host:8443`. The scheme is noise on a card. */
+function hostOf(url: string | null | undefined): string {
+  if (!url) return "";
+  try {
+    const parsed = new URL(url);
+    return parsed.host;
+  } catch {
+    return url;
+  }
 }
 
 export function Overview() {
@@ -73,7 +120,10 @@ export function Overview() {
           {data?.clusters.map((cluster) => (
             <section className="panel cluster" key={cluster.name}>
               <div className="cluster__top">
-                <h2 className="cluster__name">{cluster.name}</h2>
+                <div className="cluster__id">
+                  <h2 className="cluster__name">{cluster.name}</h2>
+                  <Coordinator cluster={cluster} />
+                </div>
                 <Status state={cluster.rollup_state} large />
               </div>
 

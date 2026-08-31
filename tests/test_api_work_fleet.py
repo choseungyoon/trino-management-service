@@ -211,3 +211,44 @@ class OverviewApiTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("UNKNOWN", card["rollup_state"])
         self.assertTrue(card["stale"])
         self.assertIsNone(card["active_workers"])
+
+
+@unittest.skipUnless(WEB_DEPS, "fastapi/httpx not installed")
+class OverviewAddressTest(unittest.IsolatedAsyncioTestCase):
+    """Where each cluster is, on the card.
+
+    ⛔ The link to a cluster's own web UI is only rendered when `trino_ui_url`
+    is configured. It could be derived from `coordinator_url` - Trino serves
+    the UI on the same host - but that URL is the one *TMS* reaches, and the
+    link is clicked from a browser that may be on another network or behind a
+    different proxy. A link that works from the server and 404s for the
+    operator is worse than no link.
+    """
+
+    async def signed_in(self, **kwargs):
+        from console import build_service
+
+        config, service, _trino = build_service(**kwargs)
+        client = client_for(create_app(config=config, service=service))
+        await client.__aenter__()
+        await sign_in(client)
+        self.addAsyncCleanup(client.__aexit__, None, None, None)
+        return client
+
+    async def test_the_coordinator_address_is_on_the_card(self):
+        c = await self.signed_in()
+        card = (await c.get("/api/v1/overview")).json()["clusters"][0]
+        self.assertEqual("https://prod-a.invalid:8443", card["coordinator_url"])
+
+    async def test_the_ui_link_is_present_when_configured(self):
+        c = await self.signed_in()
+        card = (await c.get("/api/v1/overview")).json()["clusters"][0]
+        self.assertEqual("https://prod-a.invalid:8443/ui/", card["trino_ui_url"])
+
+    async def test_an_unconfigured_ui_link_is_null_not_guessed(self):
+        c = await self.signed_in(with_ui_url=False)
+        card = (await c.get("/api/v1/overview")).json()["clusters"][0]
+        self.assertIsNone(card["trino_ui_url"])
+        # The address is still there - it answers "which host", which is the
+        # other half of what the card is for.
+        self.assertEqual("https://prod-a.invalid:8443", card["coordinator_url"])
