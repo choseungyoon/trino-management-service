@@ -423,3 +423,18 @@ class FleetReadTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LimitsTest(unittest.TestCase):
+    """⛔ The screen must not be wrong about its own limits."""
+
+    def test_the_permission_sentence_follows_whether_tms_can_actually_query(self):
+        from tms.fleet.service import FleetService
+
+        payload = {"node_counts": {}, "inventory_size": 0}
+        without = FleetService._limits(payload, can_query=False)[0]
+        withal = FleetService._limits(payload, can_query=True)[0]
+        self.assertIn("does not hold", without)
+        # Granted (D-012): saying otherwise contradicts the identify button and
+        # the node scan, both of which run exactly this query.
+        self.assertNotIn("does not hold", withal)

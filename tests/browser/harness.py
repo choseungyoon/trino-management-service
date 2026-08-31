@@ -113,7 +113,7 @@ def _query(qid, user, source, elapsed_ms, long_running=False, state="RUNNING"):
 def build_app(workload_enabled=False, seed=None, gateway=None,
               resource_groups=False, password=None, session_secret=None,
               fleet_jobs=False, benchmark=False, restarts=False,
-              config_scan=False, catalogs=False):
+              config_scan=False, catalogs=False, node_list=False):
     repository = InMemorySnapshotRepository()
     now = utcnow()
 
@@ -197,21 +197,44 @@ def build_app(workload_enabled=False, seed=None, gateway=None,
     if fleet_jobs:
         # The fleet screen needs an inventory snapshot before its job panel has
         # anywhere to live.
+        # ⛔ The same five nodes the node list below holds. Under
+        # `fleet.source: tms` the poller reads the inventory TMS renders from
+        # that list, so the two panels cannot disagree - seeding them
+        # differently would show a state the real thing cannot produce.
+        def _node(host, address, role, reachable=True):
+            return {"host": host, "address": address, "role": role,
+                    "cluster": "prod-a", "reachable": reachable,
+                    "state": "ACTIVE" if reachable else None,
+                    "version": "477" if reachable else None,
+                    "environment": "cluster1" if reachable else None,
+                    "uptime": "6d" if reachable else None,
+                    "coordinator": role == "coordinator",
+                    "error": None if reachable else "connection refused"}
+
         repository.save(Snapshot("prod-a", KIND_FLEET, now, payload={
             "nodes": [
-                {"host": "trino-a-w1", "address": "10.0.0.11", "role": "worker",
-                 "cluster": "prod-a", "reachable": True, "state": "ACTIVE",
-                 "version": "477", "environment": "cluster1", "uptime": "6d",
-                 "coordinator": False, "error": None},
-                {"host": "trino-a-c1", "address": "10.0.0.10", "role": "coordinator",
-                 "cluster": "prod-a", "reachable": True, "state": "ACTIVE",
-                 "version": "477", "environment": "cluster1", "uptime": "6d",
-                 "coordinator": True, "error": None},
+                _node("trino-a-c1", "10.0.0.10", "coordinator"),
+                _node("trino-a-w1", "10.0.0.11", "worker"),
+                _node("trino-a-w2", "10.0.0.12", "worker"),
+                _node("trino-a-w3", "10.0.0.13", "worker"),
+                _node("trino-a-w9", "10.0.0.19", "worker", reachable=False),
             ],
-            "summary": {"total": 2, "reachable": 2, "unreachable": 0,
-                        "workers": 1, "shutting_down": 0},
-            "notes": [], "node_counts": {"ActiveNodeCount": 2}, "inventory_size": 2,
+            "summary": {"total": 5, "reachable": 4, "unreachable": 1,
+                        "workers": 4, "shutting_down": 0},
+            "notes": [], "node_counts": {"ActiveNodeCount": 4}, "inventory_size": 5,
         }))
+
+    class _Coordinator:
+        """Answers a node scan with everything except w9, which is down."""
+
+        def query(self, sql):
+            return [{"node_id": "c1", "http_uri": "https://10.0.0.10:8443",
+                     "node_version": "477", "coordinator": True,
+                     "state": "active"}] + [
+                {"node_id": "w{}".format(i),
+                 "http_uri": "https://10.0.0.1{}:8443".format(i),
+                 "node_version": "477", "coordinator": False,
+                 "state": "active"} for i in (1, 2, 3)]
 
     trino = StubTrino()
     audit = InMemoryAuditRepository()
@@ -262,7 +285,11 @@ def build_app(workload_enabled=False, seed=None, gateway=None,
             job_runner=JobRunner(jobs=definitions,
                                  cluster_inventories={"prod-a": __file__},
                                  runner=demo_runner),
-            job_repository=job_repository)
+            job_repository=job_repository,
+            # ⛔ The same coordinator the node scan talks to. Without it this
+            # screen claims TMS cannot run the query whose button sits right
+            # below it - a demo that shows a state the real thing cannot be in.
+            sql_client_factory=lambda cluster: _Coordinator())
 
     bench_service = None
     if benchmark:
@@ -563,7 +590,47 @@ def build_app(workload_enabled=False, seed=None, gateway=None,
                                  "SSH access would reach.")
     board_repository.update("FR-BM-04", "syhcho", status=IN_PROGRESS)
 
+    # The node list TMS owns (D-019). Seeded with one worker the coordinator
+    # is not reporting, because that is the state the panel exists for: it
+    # still receives every deployment until somebody decides otherwise.
+    node_service = None
+    if node_list:
+        import tempfile
+
+        from tms.fleet.nodeservice import NodeListService
+        from tms.fleet.nodestore import (
+            SOURCE_DISCOVERED,
+            SOURCE_MANUAL,
+            InMemoryNodeRepository,
+            utcnow as node_now,
+        )
+
+        node_repository = InMemoryNodeRepository()
+        directory = tempfile.mkdtemp()
+        seen = node_now()
+        node_repository.add(cluster="prod-a", host="trino-a-c1",
+                            address="10.0.0.10", role="coordinator",
+                            source=SOURCE_DISCOVERED, actor="tms-scan",
+                            node_id="c1", version="477", last_seen_at=seen)
+        for index in (1, 2, 3):
+            node_repository.add(
+                cluster="prod-a", host="trino-a-w{}".format(index),
+                address="10.0.0.1{}".format(index), role="worker",
+                source=SOURCE_DISCOVERED, actor="tms-scan",
+                node_id="w{}".format(index), version="477", last_seen_at=seen)
+        node_repository.add(cluster="prod-a", host="trino-a-w9",
+                            address="10.0.0.19", role="worker",
+                            source=SOURCE_MANUAL, actor="sre.kim",
+                            reason="Down for a disk swap; still needs config")
+        node_service = NodeListService(
+            config=config, repository=node_repository,
+            audit_guard=service.audit,
+            inventories={c.name: os.path.join(directory, c.name + ".ini")
+                         for c in config.clusters},
+            sql_client_factory=lambda cluster: _Coordinator())
+
     return create_app(config=config, service=service, fleet=fleet,
+                      node_list=node_service,
                       board=BoardService(board_repository),
                       restarts=restart_service,
                       config_scan=scan_service,
@@ -593,7 +660,8 @@ def _free_port():
 @contextlib.contextmanager
 def serve(workload_enabled=False, seed=None, gateway=None,
           resource_groups=False, fleet_jobs=False, benchmark=False,
-          restarts=False, config_scan=False, catalogs=False):
+          restarts=False, config_scan=False, catalogs=False,
+          node_list=False):
     """Run the console on a free port. Yields (base_url, stub_trino)."""
     import uvicorn
 
@@ -601,7 +669,8 @@ def serve(workload_enabled=False, seed=None, gateway=None,
                            resource_groups=resource_groups,
                            fleet_jobs=fleet_jobs, gateway=gateway,
                            benchmark=benchmark, restarts=restarts,
-                           config_scan=config_scan, catalogs=catalogs)
+                           config_scan=config_scan, catalogs=catalogs,
+                           node_list=node_list)
     port = _free_port()
     with tempfile.TemporaryDirectory() as tmp:
         key, crt = _make_cert(tmp)

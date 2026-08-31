@@ -185,8 +185,29 @@ fleet:
   # each poll fans out to every node. Slow on purpose.
   poll_interval_seconds: 60
 
+  # Who owns the node list (DECISIONS.md D-019).
+  #
+  #   inventory  the files below, edited by hand on the server. The default.
+  #   tms        the console. TMS discovers workers by asking the coordinator,
+  #              keeps them in its own table, and *renders* the inventory files
+  #              from it into <cluster_ops.ansible.state_dir>/inventory/.
+  #
+  # ⛔ Under `tms`, both `inventories` maps below must be empty and TMS refuses
+  # to start otherwise. Two places to answer "which hosts are in this cluster"
+  # is the split this setting exists to close, and a second source that is
+  # merely ignored is one that eventually wins an argument nobody knew about.
+  #
+  # Moving across: run `tms-import-inventory --config ... --dry-run` first —
+  # discovery finds only the nodes that are currently answering, and the ones
+  # that are not are exactly the entries worth carrying over.
+  source: inventory
+
   # Usually the same files as cluster_ops.ansible.inventories. Kept separate so
   # that seeing the fleet does not require permission to restart it.
+  #
+  # Leave empty under `source: tms` — TMS fills this in with the paths it
+  # generates, and every executor is handed the same map, so what the console
+  # writes is what gets deployed against.
   inventories: {}
   #   prod-a: /etc/tms/ansible/cluster1.ini
   #   prod-b: /etc/tms/ansible/cluster2.ini

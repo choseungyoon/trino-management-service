@@ -164,6 +164,10 @@ class FleetConfig:
 
     enabled: bool = False
     poll_interval_seconds: float = 60.0
+    #: Who owns the node list (D-019). `inventory` = the files named below,
+    #: edited by hand. `tms` = the `cluster_node` table, from which TMS renders
+    #: those files - and then `inventories` holds generated paths nobody edits.
+    source: str = "inventory"
     inventories: Dict[str, str] = field(default_factory=dict)
     node_url_template: str = ""
     # Playbooks TMS may run on request. Empty means the feature does not
@@ -513,9 +517,58 @@ def _build_clusters(raw: Dict[str, Any]) -> List[ClusterConfig]:
     return clusters
 
 
-def _build_fleet(raw: Dict[str, Any]) -> FleetConfig:
+#: Where TMS writes the inventories it renders from the node table (D-019).
+#: Under the Ansible state directory because that is already the one place the
+#: service is expected to own and systemd already creates.
+INVENTORY_SUBDIR = "inventory"
+
+SOURCE_INVENTORY = "inventory"
+SOURCE_TMS = "tms"
+
+
+def _generated_inventories(whole: Dict[str, Any]) -> Optional[Dict[str, str]]:
+    """{cluster: path} when the node list lives in TMS, otherwise None.
+
+    ⛔ Every consumer - the restart executor, the config scan, the catalog
+    deploy, the fleet poller - already takes a {cluster: path} map and never a
+    host name (D-009). So switching the owner of the list means substituting
+    this map at startup and changing nothing else: what the console writes is
+    what gets deployed against, by construction rather than by agreement.
+    """
+    source = str((whole.get("fleet") or {}).get("source")
+                 or SOURCE_INVENTORY).strip().lower()
+    if source == SOURCE_INVENTORY:
+        return None
+    if source != SOURCE_TMS:
+        raise ConfigError(
+            "fleet.source must be 'inventory' or 'tms', not {!r}".format(source))
+
+    state_dir = str((((whole.get("cluster_ops") or {}).get("ansible")) or {})
+                    .get("state_dir") or "/var/lib/trino-management-service")
+    names = [str(c.get("name")) for c in (whole.get("clusters") or []) if c.get("name")]
+    if not names:
+        raise ConfigError("fleet.source is 'tms' but no clusters are configured")
+    return {name: os.path.join(state_dir, INVENTORY_SUBDIR, name + ".ini")
+            for name in names}
+
+
+def _refuse_hand_written(section: str, configured: Dict[str, str]) -> None:
+    # ⛔ The lesson of D-014: a second source that is merely ignored is a second
+    # source that eventually wins an argument nobody knew was happening.
+    if configured:
+        raise ConfigError(
+            "fleet.source is 'tms', so the node list comes from the console and "
+            "TMS renders the inventory files. Remove {} - leaving it set gives "
+            "two answers to the same question.".format(section))
+
+
+def _build_fleet(raw: Dict[str, Any], whole: Dict[str, Any]) -> FleetConfig:
     enabled = bool(raw.get("enabled", False))
     inventories = {str(k): str(v) for k, v in (raw.get("inventories") or {}).items()}
+    generated = _generated_inventories(whole)
+    if generated is not None:
+        _refuse_hand_written("fleet.inventories", inventories)
+        inventories = generated
     template = str(raw.get("node_url_template") or "")
     interval = float(raw.get("poll_interval_seconds", 60))
     timeout = float(raw.get("shutdown_timeout_seconds", 900))
@@ -550,6 +603,7 @@ def _build_fleet(raw: Dict[str, Any]) -> FleetConfig:
             raise ConfigError("fleet.shutdown_timeout_seconds must be positive")
 
     return FleetConfig(enabled=enabled, poll_interval_seconds=interval,
+                       source=SOURCE_TMS if generated is not None else SOURCE_INVENTORY,
                        inventories=inventories, node_url_template=template,
                        jobs=dict(jobs), shutdown_timeout_seconds=timeout)
 
@@ -606,6 +660,10 @@ def _build_cluster_ops(raw: Dict[str, Any], whole: Dict[str, Any]) -> ClusterOps
 
     ansible_raw = raw.get("ansible") or {}
     inventories = {str(k): str(v) for k, v in (ansible_raw.get("inventories") or {}).items()}
+    generated = _generated_inventories(whole)
+    if generated is not None:
+        _refuse_hand_written("cluster_ops.ansible.inventories", inventories)
+        inventories = generated
     ansible = AnsibleConfig(
         playbook=str(ansible_raw.get("playbook") or ""),
         binary=str(ansible_raw.get("binary") or "ansible-playbook"),
@@ -734,7 +792,7 @@ def build_config(raw: Dict[str, Any], where: str = "config.secret.yaml") -> Conf
         raise ConfigError("workload.poll_interval_seconds must be positive")
 
     cluster_ops = _build_cluster_ops(raw.get("cluster_ops") or {}, raw)
-    fleet = _build_fleet(raw.get("fleet") or {})
+    fleet = _build_fleet(raw.get("fleet") or {}, raw)
 
     resource_groups_raw = raw.get("resource_groups") or {}
     resource_groups = ResourceGroupStoreConfig(

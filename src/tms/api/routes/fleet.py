@@ -70,3 +70,43 @@ def register(app, deps: Deps) -> None:
         return fleet().start_job(principal, cluster, key,
                                  parameters=body.get("parameters") or {},
                                  reason=body.get("reason"))
+
+    # ------------------------------------------------- the node list (D-019)
+
+    def node_list():
+        return deps.require("node_list")
+
+    @app.get("/api/v1/clusters/{cluster}/nodes")
+    def get_nodes(cluster: str, principal: Principal = Depends(principal_of)):
+        """The cluster's node list, and which entries are still answering."""
+        return node_list().overview(principal, cluster)
+
+    @app.post("/api/v1/clusters/{cluster}/nodes/scan")
+    def scan_nodes(cluster: str, principal: Principal = Depends(principal_of)):
+        """Ask the coordinator which nodes it sees, and fold the answer in.
+
+        Adds and refreshes only. A node that stopped answering is reported,
+        never removed - it still has to receive configuration.
+        """
+        return node_list().scan(principal, cluster)
+
+    @app.post("/api/v1/clusters/{cluster}/nodes", status_code=201)
+    def add_node(cluster: str, body: Dict[str, Any] = Body(...),
+                 principal: Principal = Depends(principal_of)):
+        """Add a node the coordinator cannot see, because it is down."""
+        return node_list().add(principal, cluster,
+                               host=body.get("host"),
+                               address=body.get("address"),
+                               role=body.get("role"),
+                               reason=body.get("reason"))
+
+    @app.post("/api/v1/clusters/{cluster}/nodes/{host}/remove")
+    def remove_node(cluster: str, host: str, body: Dict[str, Any] = Body(...),
+                    principal: Principal = Depends(principal_of)):
+        """Stop deploying to this host.
+
+        POST rather than DELETE because it carries a reason, and a body on
+        DELETE is the kind of thing proxies drop silently.
+        """
+        return node_list().remove(principal, cluster, host,
+                                  reason=body.get("reason"))

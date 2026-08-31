@@ -30,7 +30,7 @@ audit row, and is restricted to administrators.
 | | |
 |---|---|
 | [Safe restart](safe-restart.md) | The six-step sequence, and why no step can be skipped |
-| [Fleet](fleet.md) | Node inventory, graceful worker shutdown, playbook jobs |
+| [Fleet](fleet.md) | The node list, graceful worker shutdown, playbook jobs |
 | [Catalogs](catalogs.md) | Adding and removing catalogs across a cluster |
 | [Resource groups](resource-groups.md) | Editing Trino's admission control tree |
 

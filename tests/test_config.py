@@ -297,3 +297,47 @@ class ShippedConfigTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class FleetSourceTest(unittest.TestCase):
+    """`fleet.source: tms` — one owner for the node list (D-019)."""
+
+    def base(self, **fleet):
+        return {
+            "clusters": [{"name": "prod-a", "expected_workers": 2,
+                          "coordinator_url": "https://a.invalid:8443"}],
+            "trino": {"user": "u", "password": "p"},
+            "database": {"url": "postgresql://u:p@h:5432/d"},
+            "cluster_ops": {"ansible": {"state_dir": "/var/lib/tms"}},
+            "fleet": dict({"enabled": True,
+                           "node_url_template": "https://{address}:8443"}, **fleet),
+        }
+
+    def test_the_default_still_reads_hand_written_files(self):
+        config = build_config(self.base(inventories={"prod-a": "/etc/tms/a.ini"}))
+        self.assertEqual(config.fleet.source, "inventory")
+        self.assertEqual(config.fleet.inventories["prod-a"], "/etc/tms/a.ini")
+
+    def test_tms_generates_a_path_per_cluster_under_the_state_directory(self):
+        config = build_config(self.base(source="tms"))
+        self.assertEqual(config.fleet.inventories,
+                         {"prod-a": "/var/lib/tms/inventory/prod-a.ini"})
+        # ⛔ The executors get the same map, so what the console writes is what
+        # gets deployed against.
+        self.assertEqual(config.cluster_ops.ansible.inventories,
+                         config.fleet.inventories)
+
+    def test_a_leftover_hand_written_map_is_refused_rather_than_ignored(self):
+        # D-014's lesson: a second source that is merely ignored eventually
+        # wins an argument nobody knew was happening.
+        with self.assertRaises(ConfigError):
+            build_config(self.base(source="tms",
+                                   inventories={"prod-a": "/etc/tms/a.ini"}))
+        raw = self.base(source="tms")
+        raw["cluster_ops"]["ansible"]["inventories"] = {"prod-a": "/etc/tms/a.ini"}
+        with self.assertRaises(ConfigError):
+            build_config(raw)
+
+    def test_an_unknown_source_is_refused(self):
+        with self.assertRaises(ConfigError):
+            build_config(self.base(source="database"))

@@ -163,6 +163,37 @@ def build_fleet_service(config: Config, service: TmsService):
     )
 
 
+def build_node_list_service(config: Config, service: TmsService):
+    """The node list TMS owns, or None when the inventory files still own it.
+
+    Only assembled under `fleet.source: tms` (D-019). Under the default the
+    console must not offer to edit a list it does not own - a screen that
+    writes somewhere nothing reads is worse than no screen.
+    """
+    fleet_config = getattr(config, "fleet", None)
+    if not fleet_config or getattr(fleet_config, "source", "inventory") != "tms":
+        return None
+    from tms.fleet.nodeservice import NodeListService
+    from tms.fleet.nodestore import PostgresNodeRepository
+
+    def sql_for(cluster: str):
+        from tms.clients.sql import SqlClient
+
+        return SqlClient(service.trino_clients[cluster])
+
+    try:
+        return NodeListService(
+            config=config,
+            repository=PostgresNodeRepository(config.database_url.reveal()),
+            audit_guard=service.audit,
+            inventories=fleet_config.inventories,
+            sql_client_factory=sql_for,
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.error("the node list is off: %s", exc)
+        return None
+
+
 def build_fleet_jobs(config: Config):
     """The FR-FL-04 runner and its store, or (None, None).
 
@@ -286,7 +317,8 @@ def build_board_service(config: Config):
 def create_app(config: Optional[Config] = None, service: Optional[TmsService] = None,
                restarts: Optional[Any] = None, fleet: Optional[Any] = None,
                board: Optional[Any] = None, benchmark: Optional[Any] = None,
-               config_scan: Optional[Any] = None, catalogs: Optional[Any] = None):
+               config_scan: Optional[Any] = None, catalogs: Optional[Any] = None,
+               node_list: Optional[Any] = None):
     from fastapi import Body, Depends, FastAPI, Query, Request, Response
     from fastapi.responses import JSONResponse
 
@@ -644,11 +676,14 @@ def create_app(config: Optional[Config] = None, service: Optional[TmsService] = 
 
         catalogs = build_catalog_service(config, service.audit)
 
+    if node_list is None:
+        node_list = build_node_list_service(config, service)
+
     api_deps = Deps(config=config, service=service,
                     current_principal=current_principal,
                     restarts=restarts, fleet=fleet, board=board,
                     benchmark=benchmark, config_scan=config_scan,
-                    catalogs=catalogs)
+                    catalogs=catalogs, node_list=node_list)
     benchmark_routes.register(app, api_deps)
     config_routes.register(app, api_deps)
     catalog_routes.register(app, api_deps)

@@ -5,6 +5,7 @@ import { ApiError, api, type Envelope } from "../api";
 import { ClusterTabs, useCluster } from "../components/ClusterTabs";
 import { Freshness } from "../components/Freshness";
 import { Icon } from "../components/Icon";
+import { NodeListPanel } from "../components/NodeListPanel";
 import { relativeTime } from "../format";
 import { MANAGE_HEALTH, useCapability } from "../useCapability";
 import { useApi } from "../useApi";
@@ -232,7 +233,11 @@ export function Fleet() {
               </div>
             </div>
 
-            {jobs.data?.enabled ? (
+            {/* Above the jobs panel and below the live view: the list is what the
+            jobs and the restart both target, so it is read before they are run. */}
+        <NodeListPanel cluster={cluster} canManage={canManage} />
+
+        {jobs.data?.enabled ? (
               <JobsPanel jobs={jobs.data} base={base} cluster={cluster}
                          canManage={canManage} onChange={jobs.reload}
                          onFail={(text) => setNotice({ good: false, text })} />

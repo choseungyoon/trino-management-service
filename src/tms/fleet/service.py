@@ -252,20 +252,30 @@ class FleetService:
         if snapshot.collection_error:
             payload["unavailable_reason"] = snapshot.collection_error
             payload["advice"] = snapshot.advice
-        payload["limits"] = self._limits(payload)
+        payload["limits"] = self._limits(payload, self.discovery_lookup_available)
         payload["can_identify"] = bool(
             self.discovery_lookup_available and counts_disagree(payload))
         return envelope(snapshot, payload, self._stale_threshold)
 
     @staticmethod
-    def _limits(payload: Dict[str, Any]) -> List[str]:
+    def _limits(payload: Dict[str, Any], can_query: bool = False) -> List[str]:
         """What this screen cannot tell you, and why.
 
         Stated on the screen rather than left for someone to infer from an
         absent column. A monitoring screen that quietly omits a fact is read as
         that fact being fine.
+
+        ⛔ The first sentence used to claim the permission was absent no matter
+        what. On a deployment where it had been granted, the screen said TMS
+        could not do the thing whose button was directly below it - and a
+        screen that is wrong about its own limits is not worth reading.
         """
         limits = [
+            "Discovery join status per node needs `system.runtime.nodes`. TMS "
+            "can ask, but each answer costs the coordinator a query, so it is "
+            "asked for rather than polled - the node counts below are the "
+            "continuous cross-check."
+            if can_query else
             "Discovery join status per node needs `system.runtime.nodes`, which "
             "requires the ExecuteQuery permission TMS does not hold. The "
             "coordinator's node counts below are the cross-check TMS can make.",

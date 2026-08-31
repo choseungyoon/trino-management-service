@@ -25,6 +25,7 @@
 | Gateway 설정 | 백엔드는 **Gateway UI로 등록**. **라우팅 그룹 미사용**(= 기본 랜덤 라우팅). `databaseCache` 활성, **`expireAfterWrite: 10m`** (⚠️ DB 장애 10분 초과 시 라우팅 실패 — §T2-4) |
 | LB | IP HASH (**세션 어피니티로 교체 예정 — 임시 우회책**) |
 | 인프라 | VM + systemd (**K8s 미사용, 확정**) |
+| 노드 목록 | `fleet.source` 로 정한다 (D-019). `inventory`(기본) = 손으로 고치는 파일. `tms` = **코디네이터에게 물어서 채우고 TMS 가 인벤토리 파일을 생성한다** — 이때 두 `inventories` 맵이 비어 있어야 하고 아니면 기동 거부. 옮길 때는 `tms-import-inventory` 를 **먼저** |
 | 증설 | 수동/스크립트 (**확정**) |
 | 접근제어 | OPA policy-as-code, 플랫폼팀 Git 관리 (**확정**) |
 | 스토리지 | Ceph S3 (Spooling), Iceberg + HMS |

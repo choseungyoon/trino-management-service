@@ -48,6 +48,82 @@ for n in load_inventory('/etc/tms/ansible/cluster1.ini','prod-a'):
 
 ---
 
+## Who owns the node list
+
+Two answers, and the choice is `fleet.source`:
+
+| | Where the list lives | Adding a worker means |
+|---|---|---|
+| `inventory` (default) | the files above, edited by hand | editing the file on the server |
+| `tms` | TMS's own table | pressing **Scan the coordinator** |
+
+Under `tms`, TMS asks the coordinator which nodes have joined
+(`system.runtime.nodes`) and keeps the answer. It then **renders** the inventory
+files itself, into `<cluster_ops.ansible.state_dir>/inventory/`. Everything that
+targets hosts — [safe restart](safe-restart.md),
+[configuration](cluster-config.md), [catalogs](catalogs.md), jobs — reads those
+generated files, so there is one list and it is the one you can see.
+
+```yaml
+fleet:
+  enabled: true
+  source: tms
+  node_url_template: "https://{address}:8443"
+  inventories: {}          # must be empty under `tms`
+cluster_ops:
+  ansible:
+    state_dir: /var/lib/trino-management-service
+    inventories: {}        # must be empty too
+```
+
+Both maps must be empty; TMS refuses to start otherwise. A second place to
+answer "which hosts are in this cluster" is what this setting exists to remove,
+and a source that is merely ignored is one that eventually wins an argument
+nobody knew was happening.
+
+### Moving across
+
+Discovery finds only the nodes that are **currently answering**, and the ones
+that are not are exactly the entries worth keeping. So import first, while the
+old files are still configured:
+
+```bash
+tms-import-inventory --config /etc/tms/config.yaml --dry-run
+tms-import-inventory --config /etc/tms/config.yaml
+```
+
+Everything imported is marked hand-entered until the first scan confirms it —
+it came from a file, not from the coordinator. Then set `source: tms`, empty
+both `inventories` maps, and run `tms-config-check`.
+
+> Requires `ExecuteQuery` for the TMS account — the same grant the *identify*
+> button needs. See [the catalogs guide](catalogs.md) for how that is scoped.
+
+### ⛔ A scan never removes anything
+
+A node that stops appearing in `system.runtime.nodes` is either decommissioned
+or **down**, and TMS cannot tell which. So a scan adds and refreshes, and
+reports what it did not hear from:
+
+```
+trino-a-c1   10.0.0.10   coordinator   discovered   answering
+trino-a-w1   10.0.0.11   worker        discovered   answering
+trino-a-w9   10.0.0.19   worker        added by sre.kim   no answer · last seen 6d ago
+```
+
+**Every row here is a deployment target, including the ones not answering.** A
+worker that is down still has to come back running the same configuration as
+its siblings — dropping it from the list automatically is how a node returns
+from a disk swap a month behind everyone else.
+
+Removing one is therefore a decision, with a reason, recorded in the
+[audit log](audit.md). It means "stop deploying to this host".
+
+Adding one by hand is for the same situation in reverse: the node is down, so
+discovery cannot see it, and it still needs the configuration.
+
+---
+
 ## The node list
 
 Per node: the inventory name, the **address** TMS connects to, role, state,

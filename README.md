@@ -51,7 +51,7 @@ the team's working record, kept in Korean.
 | **Live queries** | Every running query across clusters, with a kill that requires a reason — and delivers that reason to whoever owns the query |
 | **Cluster health** | Eight synthetic checks that answer "can this cluster take a query right now", each carrying a written remedy |
 | **Safe restart** | A six-step sequence: stop intake → drain → confirm empty → restart → verify health → restore traffic. No step is reachable out of order |
-| **Fleet** | Node inventory, versions, and graceful worker shutdown that waits for tasks to finish |
+| **Fleet** | The node list — discovered from the coordinator rather than typed in — plus versions and graceful worker shutdown that waits for tasks to finish |
 | **Configuration** | What each node actually has in `etc/`, and where nodes of the same role disagree |
 | **Catalogs** | Write and remove catalog files across a cluster, gated on a development cluster first |
 | **Resource groups** | Edit Trino's `db` resource group tree, with validation, history and revert |
@@ -119,7 +119,7 @@ to configure.
 | [Install and configure](docs/usage/install.md) | Prerequisites, database, service accounts, first run |
 | [Watching a cluster](docs/usage/observing.md) | Overview, live queries, health, workload |
 | [Safe restart](docs/usage/safe-restart.md) | The six-step sequence and why each step exists |
-| [Fleet](docs/usage/fleet.md) | Node inventory, graceful shutdown, playbook jobs |
+| [Fleet](docs/usage/fleet.md) | The node list, graceful shutdown, playbook jobs |
 | [Cluster configuration](docs/usage/cluster-config.md) | Reading `etc/` back, finding drift |
 | [Catalogs](docs/usage/catalogs.md) | Adding and removing catalogs across a cluster |
 | [Resource groups](docs/usage/resource-groups.md) | Editing the admission control tree |

@@ -43,6 +43,9 @@ tms-config-check = "tms.core.configcheck:run"
 # Write the work board out as docs/WORK_BOARD.md so it can be committed and
 # read from outside the network the board lives in. See tms/work/export.py.
 tms-work-export = "tms.work.export:run"
+# Carry a hand-edited Ansible inventory into the node list, once, before
+# switching fleet.source to "tms". See DECISIONS.md D-019.
+tms-import-inventory = "tms.fleet.importer:run"
 
 [tool.setuptools.packages.find]
 where = ["src"]

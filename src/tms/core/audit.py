@@ -78,6 +78,11 @@ ACTION_CATALOG_CHANGE = "CATALOG_CHANGE"
 #: be answerable without reading every other kind of action.
 ACTION_CATALOG_DEPLOY = "CATALOG_DEPLOY"
 
+#: Adding or removing a node from a cluster's list. Its own type
+#: because removing one means every later deployment skips that host
+#: - "who took this worker off the list" has to stay answerable.
+ACTION_CLUSTER_NODE_CHANGE = "CLUSTER_NODE_CHANGE"
+
 ALLOWED_ACTION_TYPES = frozenset(
     [
         ACTION_QUERY_KILL,
@@ -95,6 +100,7 @@ ALLOWED_ACTION_TYPES = frozenset(
         ACTION_BENCHMARK_SCHEDULE_CHANGE,
         ACTION_CATALOG_CHANGE,
         ACTION_CATALOG_DEPLOY,
+        ACTION_CLUSTER_NODE_CHANGE,
     ]
 )
 
@@ -105,6 +111,7 @@ TARGET_NODE = "node"
 TARGET_RESOURCE_GROUP = "resource_group"
 TARGET_BENCHMARK_SET = "benchmark_query_set"
 TARGET_CATALOG = "catalog"
+TARGET_NODE_LIST = "cluster_node"
 
 # The reason is forwarded to Trino and shown to the user whose query was killed,
 # so it is capped and flattened to a single line.

@@ -443,6 +443,26 @@ def check_fleet(report: Report, config) -> None:
         return
     from tms.fleet.inventory import load_inventory
 
+    generated = getattr(fleet, "source", "inventory") == "tms"
+    if generated:
+        # ⛔ Under `fleet.source: tms` the inventory files are output, not
+        # input. Missing means "nothing scanned yet", which is a first-run
+        # state - but an unwritable directory means every change to the node
+        # list will fail, and that is worth failing here instead.
+        directory = os.path.dirname(next(iter(fleet.inventories.values()), "")) or "."
+        try:
+            os.makedirs(directory, exist_ok=True)
+            probe = os.path.join(directory, ".tms-write-probe")
+            with open(probe, "w") as handle:
+                handle.write("")
+            os.remove(probe)
+            report.add(OK, "노드 목록", "TMS 소유 — 인벤토리는 {} 에 생성된다"
+                       .format(directory))
+        except OSError as exc:
+            report.add(FAIL, "노드 목록",
+                       "{} 에 쓸 수 없다 — 노드 추가·스캔이 전부 실패한다: {}"
+                       .format(directory, exc))
+
     if "{address}" not in fleet.node_url_template:
         report.add(FAIL, "fleet.node_url_template",
                    "{address} 가 없다 — 전 노드가 'No answer' 로 보인다")
@@ -454,7 +474,10 @@ def check_fleet(report: Report, config) -> None:
                        "{} 항목이 없다 — 이 클러스터는 Fleet 에 나오지 않는다".format(cluster))
             continue
         if not os.path.isfile(path):
-            report.add(FAIL, "fleet 인벤토리", "{}: {} 가 없다".format(cluster, path))
+            report.add(WARN if generated else FAIL, "fleet 인벤토리",
+                       "{}: {} 가 없다{}".format(
+                           cluster, path,
+                           " — 아직 스캔한 적이 없다" if generated else ""))
             continue
         nodes = load_inventory(path, cluster)
         workers = sum(1 for n in nodes if n.role == "worker")
@@ -505,6 +528,8 @@ _REQUIRED_OBJECTS = (
     ("023_catalogs.sql", "table", "catalog_definition"),
     ("023_catalogs.sql", "table", "catalog_deployment"),
     ("023_catalogs.sql", "action", "CATALOG_DEPLOY"),
+    ("025_cluster_nodes.sql", "table", "cluster_node"),
+    ("025_cluster_nodes.sql", "action", "CLUSTER_NODE_CHANGE"),
     ("020_benchmark_schedules.sql", "action", "BENCHMARK_SCHEDULE_CHANGE"),
     # 011, 013, 015, 017, 019 and 021 only grant; a privilege is not an object,
     # so there is nothing here to look for. Missing one shows up as a

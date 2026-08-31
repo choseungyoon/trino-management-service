@@ -52,17 +52,19 @@
 
 ---
 
-### 🔴 1-0. 마이그레이션 `020` ~ `024` `[먼저]`
+### 🔴 1-0. 마이그레이션 `020` ~ `026` `[먼저]`
 
 `020`/`021` 은 벤치마크 주기 실행(FR-BM-07 · D-017)이, `022` 는 설정 조회
-(FR-CO-01 · D-018)가, `023`/`024` 는 카탈로그 배포(FR-CATALOG · D-018 2단계)가 쓴다. **적용 전에는 해당 화면만 "사용할 수 없음" 으로
+(FR-CO-01 · D-018)가, `023`/`024` 는 카탈로그 배포(FR-CATALOG · D-018 2단계)가,
+`025`/`026` 은 노드 목록(D-019)이 쓴다. **적용 전에는 해당 화면만 "사용할 수 없음" 으로
 나오고 나머지는 전부 정상 동작한다.**
 
 - [ ] `git pull` → `pip install -e .`
-- [ ] `020` ~ `024` 를 **번호순으로** `tms_owner` 로 적용
+- [ ] `020` ~ `026` 을 **번호순으로** `tms_owner` 로 적용
 - [ ] `tms-config-check` → `benchmark_schedule` · `catalog_definition` ·
-      `catalog_deployment` 테이블, `BENCHMARK_SCHEDULE_CHANGE` ·
-      `CATALOG_DEPLOY` 액션, `config` snapshot kind 를 확인한다
+      `catalog_deployment` · `cluster_node` 테이블,
+      `BENCHMARK_SCHEDULE_CHANGE` · `CATALOG_DEPLOY` ·
+      `CLUSTER_NODE_CHANGE` 액션, `config` snapshot kind 를 확인한다
 
 > ⛔ **앞 번호를 다시 돌리지 않는다.** `020` 도 감사 액션 제약을 `DROP` 후
 > 다시 만든다 — 위의 경고가 그대로 적용된다.
@@ -266,6 +268,45 @@ React 콘솔은 `/app` 에 있다. 되돌렸다면 그 이유가 D-016 의 "뒤�
       이게 이 게이트가 있는 이유다. 되돌리려면 파일을 지우고 다시 재시작한다
       (`/catalogs` → Show → Remove from a cluster)
 
+### 1-5-4. V-14 — 노드 목록을 TMS 가 갖는다 `[025/026 적용 후 · 새 기능 · D-019]`
+
+**무엇이 바뀌나**: 워커가 늘거나 줄 때 서버에 들어가 인벤토리를 고치는 일이
+없어진다. 코디네이터에게 물어서 채우고, TMS 가 인벤토리 파일을 **생성**한다.
+
+⛔ **`ExecuteQuery` 가 선행이다** (D-012). 없으면 스캔이 안 되고 전부 수동이 된다.
+
+**옮기기 — 순서를 지킨다**
+
+- [ ] 아직 `fleet.source` 를 바꾸기 **전에** 임포트한다. 스캔은 지금 살아 있는
+      노드만 찾고, **안 살아 있는 노드가 정확히 옮길 가치가 있는 항목**이다
+      ```bash
+      tms-import-inventory --config /etc/tms/config.yaml --dry-run
+      tms-import-inventory --config /etc/tms/config.yaml
+      ```
+- [ ] `config.yaml`: `fleet.source: tms`, **`fleet.inventories` 와
+      `cluster_ops.ansible.inventories` 를 둘 다 비운다**
+      <br>*안 비우면 기동이 거부된다 — 답이 두 개인 상태를 남기지 않는다*
+- [ ] `tms-config-check` → 노드 목록이 `<state_dir>/inventory/` 에 쓰인다고 나온다
+- [ ] `systemctl restart tms-api tms-collector`
+
+**확인 — 개발 클러스터에서 먼저**
+
+- [ ] `/fleet` → Node list 패널에 임포트된 노드가 전부, **added by tms-import**
+- [ ] **Scan the coordinator** → 살아 있는 노드가 `discovered` 로 바뀐다
+      <br>*⛔ 인벤토리 별칭(`trino-w1`)이 IP 로 **바뀌지 않아야** 한다.
+      바뀌면 Ansible 이 그 별칭으로 못 찾는다*
+- [ ] 워커 1대를 내린다 → 다시 스캔 → **목록에서 사라지지 않고** "no answer" 가 된다
+- [ ] `cat <state_dir>/inventory/<cluster>.ini` → 내린 워커가 **여전히 있다**
+      <br>*이게 이 설계의 전부다 — 죽은 노드도 설정을 받아야 한다*
+- [ ] 안전 재시작을 걸어 본다 → 생성된 인벤토리로 돈다
+- [ ] 손으로 노드를 하나 추가 → 사유 필수 → 파일에 반영된다
+- [ ] 제거 → 사유 필수 → 감사 로그에 `CLUSTER_NODE_CHANGE`
+
+**⚠️ 운영 클러스터로 넘어가기 전에**
+
+- [ ] 생성된 인벤토리와 기존 인벤토리를 **눈으로 대조**한다 (`diff`)
+- [ ] 기존 인벤토리 파일은 **지우지 말고** 남겨 둔다 — 되돌릴 때 필요하다
+
 ### 1-6. V-6 — 감사 append-only 재확인
 
 - [ ] `tms_app` 으로 `UPDATE restart_sequence_event` / `DELETE` → **둘 다 실패**
@@ -362,6 +403,19 @@ executor 를 폴링하지 않던 것은 **D-2 를 켜는 순간 터졌을 버그
 
 - [x] 다음 슬라이스 = FR-CO-01 (D-018)
 
+**D-019 는 절반만 했다 (2026-08-31).** 노드 목록(클러스터 *안*)은 TMS 가 갖게 됐다.
+**클러스터 목록**은 D-008 그대로 Gateway 가 주인이고, TMS 에는 아직 화면이 없다 —
+클러스터 추가·삭제는 여전히 Gateway UI 에서 한다.
+
+D-008 부기가 이미 허용한 것: *TMS 가 Gateway API 를 호출하는* CRUD. 만들면 그
+모양이어야 하고, TMS 자체 목록을 만드는 것이 아니다. 선행 조건 두 가지:
+
+- `gateway.enabled: true` (지금 `false`)
+- ⚠️ Gateway 에는 읽기 전용 역할이 없다 — 백엔드를 **읽는** `API` 계정은 **쓸 수도** 있다.
+  TMS 에 쓰기 화면을 만드는 것은 그 자격증명의 노출면을 넓히는 결정이다
+
+- [ ] 다음 슬라이스로 할지 결정 (지금은 안 함)
+
 ---
 
 ## 3. 작업 (W) — 절차 · 설정 · 타 팀
@@ -447,6 +501,7 @@ Gateway 2대가 PostgreSQL 하나를 공유하는데 그 DB 가 VM1 에 얹혀 �
                V-9 리소스 그룹 편집 · V-8 벤치마크 나머지 · V-11 스케줄
                V-12 설정 조회·드리프트 (D-2 전환과 같이)
                V-13 카탈로그 배포 ⚠️ 개발 클러스터에서 먼저
+               V-14 노드 목록 이관 ⚠️ 임포트 → source 전환 순서
                W-1 실측 [피크 시간대]  ← R1 DoD 가 닫힌다
                §1-9 끝나고 · §4 보드 정리
 
