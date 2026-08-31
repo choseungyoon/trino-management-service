@@ -141,6 +141,23 @@ TMS가 완전히 다운되어도 모든 쿼리는 정상 실행되어야 한다.
 | `docs/TEAMS.md` | 역할·승인 게이트 확인 시 |
 | `docs/MARKET_RESEARCH.md` | 설계 판단 근거 필요 시 (SEP/Cloudera/Datadog) |
 
+### 사용자에게 보여 주는 것 (영문 · 오픈소스 독자용)
+
+> **독자가 다르다.** 위의 문서들은 이 팀이 읽고, 아래는 **사내 문맥을 모르는 Trino 운영자**가 읽는다. 그래서 영문이고, 사내 고유명사·사람 이름·`D-018` 같은 문서 번호를 본문에 쓰지 않는다 (링크는 괜찮다).
+>
+> ⛔ **기능을 만들면 여기도 고친다.** 화면을 추가하고 usage 문서를 안 쓰면, 그 기능은 만든 사람만 아는 기능이 된다.
+
+| 파일 | 무엇 |
+|---|---|
+| `README.md` | 서비스 소개 · 무엇을 하고 무엇을 **일부러 안 하는가** · 빠른 시작 |
+| `docs/usage/README.md` | usage 문서 색인 + 모든 화면에 공통인 규약 |
+| `docs/usage/install.md` | 설치 · DB · 서비스 계정 · 첫 기동 |
+| `docs/usage/configuration-reference.md` | `config.yaml` 키 전량 |
+| `docs/usage/observing.md` | Overview · Live Queries · Health · Workload |
+| `docs/usage/safe-restart.md` · `fleet.md` | 재시작 시퀀스 · 노드 인벤토리 |
+| `docs/usage/cluster-config.md` · `catalogs.md` · `resource-groups.md` | 설정 조회 · 카탈로그 배포 · 리소스 그룹 편집 |
+| `docs/usage/benchmark.md` · `gateway.md` · `audit.md` · `work-board.md` | 나머지 |
+
 ### 손에 들고 하는 것 (런북)
 
 | 파일 | 언제 읽나 |

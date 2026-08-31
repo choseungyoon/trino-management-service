@@ -50,3 +50,6 @@ PRODUCT.md.tmp
 # Disposable local verification rig (Trino/PostgreSQL/certs) — never commit
 scratchpad/
 *.tsbuildinfo
+
+# Codex 진입 파일. CLAUDE.md 의 사본이라 공개 저장소에 두 벌을 두지 않는다.
+AGENTS.md

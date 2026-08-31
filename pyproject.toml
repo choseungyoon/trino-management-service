@@ -28,6 +28,12 @@ dev = [
     "pytest-asyncio>=0.23",
     "ruff>=0.4",
 ]
+# Only the browser tests and the screenshot script need this, and it downloads
+# a Chromium. Kept out of `dev` so the ordinary test run stays installable on a
+# locked-down network.
+browser = [
+    "playwright>=1.44",
+]
 
 [project.scripts]
 tms-api = "tms.api.main:run"

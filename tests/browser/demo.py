@@ -67,27 +67,36 @@ def main(port=None):
 
     app, _trino = build_app(workload_enabled=True, resource_groups=True,
                             fleet_jobs=True, benchmark=True, restarts=True,
+                            config_scan=True, catalogs=True,
                             password=password, session_secret=secret)
 
     scheme = "https" if tls else "http"
-    print("")
-    print("  TMS demo   {}://{}:{}".format(scheme, host, port))
+    # Flushed: uvicorn takes over the process right after this, so a buffered
+    # banner never appears when the output is piped to a file - and the banner
+    # is where the URL and the password are.
+    print("", flush=True)
+    print("  TMS demo   {}://{}:{}".format(scheme, host, port), flush=True)
     print("  sign in    {} / {}".format(
         USER, PASSWORD if password == PASSWORD else "(TMS_DEMO_PASSWORD)"))
-    print("")
-    print("  Resource Groups   /resource-groups?cluster=prod-a")
-    print("  Fleet             /fleet?cluster=prod-a")
-    print("  Safe Restart      /restart?cluster=prod-a")
-    print("  Work Board        /work")
-    print("  Benchmark         /benchmark   (every cluster on one page)")
-    print("                    prod-a is serving traffic and prod-b is quiet,")
-    print("                    so the picker shows both conditions at once.")
-    print("  Query sets        /benchmark/sets")
-    print("  prod-b deliberately has no resource group rows loaded, so you can")
-    print("  see that state.")
-    print("")
-    print("  Nothing is persisted; restarting resets the tree.")
-    print("")
+    print("", flush=True)
+    print("  Configuration     /cluster-config?cluster=prod-a", flush=True)
+    print("  Catalogs          /catalogs", flush=True)
+    print("                    lake_iceberg has not been proved on the", flush=True)
+    print("                    development cluster, so its prod button is off.", flush=True)
+    print("  Resource Groups   /resource-groups?cluster=prod-a", flush=True)
+    print("  Fleet             /fleet?cluster=prod-a", flush=True)
+    print("  Safe Restart      /restart?cluster=prod-a", flush=True)
+    print("  Work Board        /work", flush=True)
+    print("  Benchmark         /benchmark   (every cluster on one page)", flush=True)
+    print("                    prod-a is serving traffic and prod-b is quiet,", flush=True)
+    print("                    so the picker shows both conditions at once.", flush=True)
+    print("  Query sets        /benchmark/sets", flush=True)
+    print("  Schedules         /benchmark/schedules", flush=True)
+    print("  prod-b deliberately has no resource group rows loaded, so you can", flush=True)
+    print("  see that state.", flush=True)
+    print("", flush=True)
+    print("  Nothing is persisted; restarting resets the tree.", flush=True)
+    print("", flush=True)
 
     if not tls:
         uvicorn.run(app, host=host, port=port, log_level="warning",

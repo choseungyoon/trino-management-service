@@ -21,8 +21,9 @@ in D-016.
 
 ## Users
 
-Platform team operators at a company running OSS Trino for ~50,000 internal
-users. Primary scene: an operator at a desk (often during an incident or a
+Platform team operators running OSS Trino for internal users at a scale where
+one person can no longer hold every cluster's state in their head. Primary
+scene: an operator at a desk (often during an incident or a
 capacity review), multiple monitoring tools open, needs to answer "can the
 clusters take queries right now, who is running what, and what did we do about
 it" in seconds. Roles: viewer (read-only), operator (can kill queries), admin
@@ -32,12 +33,12 @@ equivalents.
 
 ## Product Purpose
 
-TMS (Trino Management Service) replaces the operational visibility that
-Starburst Enterprise would provide, for a site that cannot use it. R1 answers:
-what is running right now (live queries), is each cluster able to take queries
-(synthetic health with remedies), who did what and why (append-only audit), and
-where to look next (deep links into Grafana/Loki/the existing query-history
-system). Success: an operator resolves "is it broken / who broke it / what do I
+TMS (Trino Management Service) supplies the operational layer OSS Trino does
+not ship: it answers
+what is running right now (live queries), whether each cluster is able to take
+queries (synthetic health with remedies), who did what and why (append-only
+audit), and where to look next (deep links into Grafana, Loki and a
+query-history system). Success: an operator resolves "is it broken / who broke it / what do I
 do" without SSH-ing into coordinators.
 
 ## Positioning
@@ -50,7 +51,8 @@ recorded who/why** (the kill reason is even delivered to the query's owner).
 
 ## Operating Context
 
-- 2 Trino 477 clusters (1 coordinator + 12 workers each), VM + systemd, no K8s.
+- One or more Trino clusters (coordinator + workers), VM + systemd, no K8s.
+  Verified against Trino 477; other versions untested.
 - Data collected by a single `tms-collector` polling REST/JMX every 5–30s;
   the UI reads snapshots and must surface staleness honestly (stale > 30s).
 - Sits alongside: Grafana (metrics), Superset (SQL), Trino Gateway UI, an
@@ -76,8 +78,8 @@ fresh / stale / unknown-with-advice / empty / permission-degraded.
 
 - Name: **TMS** (Trino Management Service). No logo exists yet.
 - Visual direction pinned by the user (2026-08-06): **modern monitoring SaaS**
-  craft level — Datadog, Starburst Enterprise, Snowflake named as the bar;
-  explicitly *not* Cloudera Manager's dated look.
+  craft level — the bar is a current monitoring SaaS, explicitly *not* the
+  dated look of a decade-old cluster manager.
 - **Dark theme default, light toggle** (confirmed 2026-08-06).
 - Subject affinity: Trino's brand accent is its magenta/pink family — available
   as a differentiator no generic monitoring tool would pick.

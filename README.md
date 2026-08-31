@@ -1,155 +1,221 @@
 # TMS — Trino Management Service
 
-OSS Trino로 5만 사용자 규모 서비스를 안정 운영하기 위한 자체 관리 플랫폼.
-Starburst Enterprise 사용 불가 환경에서 동등한 운영 역량(모니터링·알람·사용자 추적·증설·접근제어 가시성)을 확보하는 것이 목표.
+**An operations console for people who run OSS Trino.**
 
----
-
-## 지금 어디까지 왔나 (2026-08-12)
-
-**R1 사내 실환경 배포 완료.** 이후 R2 일부(워크로드 뷰, Gateway 콘솔)와 R3 선행분(안전 재시작, Fleet)까지 구현했다.
-
-| 화면 | 상태 |
-|---|---|
-| 포털 · 실행 중 쿼리(kill 포함) · 헬스 · 감사 · 로그 딥링크 | R1, 운영 중 |
-| 워크로드(리소스 그룹) 뷰 | 기본 비활성 (`workload.enabled`) — NFR-PERF-03 실측 후 켠다 |
-| Gateway 백엔드 콘솔 | 운영 중 |
-| 안전 재시작 (FR-CO-02) | 구현 완료. `manual` 실환경 검증 완료, `ansible` 모드 준비됨 |
-| Fleet 인벤토리 + graceful shutdown | 구현 완료 |
-
-**다음에 무엇을 하느냐**는 `docs/TODO.md` 하나만 보면 된다 — 사내에서 할 것 · 결정 · 타 팀으로 나뉘어 있다.
-**무엇을 했느냐**는 `docs/BOLTS.md`.
-
----
-
-## 문서 지도
-
-> 문서가 여럿인 이유는 **소유자와 수명이 다르기 때문**이다. 아래 분류가 곧 "이 문서를 고쳐도 되는가"의 답이다.
-
-### 매번 읽는 것
-
-| 문서 | 무엇 |
-|---|---|
-| `CLAUDE.md` | ★ 진입점. 절대 규칙 · 환경 사실 |
-| `docs/TRINO_VERIFIED.md` | ★ **기술 사실의 유일한 출처.** 여기 없는 property/API 는 코드에 넣지 않는다 |
-| `docs/TODO.md` | 사람이 해야만 진행되는 것 전량 |
-
-### 무엇을 만들 것인가
-
-| 문서 | 무엇 |
-|---|---|
-| `docs/REQUIREMENTS.md` | 요구사항 + AC. 부록 B = 최신 릴리스 계획 |
-| `docs/BACKLOG.md` | 항목별 판정 (SETUP / BUILD / DELEGATE / REJECT) |
-| `docs/DESIGN_R2.md` | R2 설계 및 착수 가능 여부 |
-
-### 어떻게 만들었나
-
-| 문서 | 무엇 |
-|---|---|
-| `docs/ARCHITECTURE.md` | 컴포넌트 경계, 배포 단위, 성능 예산 |
-| `docs/API_R1.md` | R1 엔드포인트 명세 |
-| `docs/HEALTH_TESTS.md` | 헬스 테스트 카탈로그 (판정식·임계·조치 조언) |
-| `docs/AUDIT_MODEL.md` | append-only 감사 데이터 모델 |
-| `docs/PERF_MEASUREMENT.md` | NFR-PERF-03 부하 실측 결과 |
-
-### 왜 그렇게 정했나
-
-| 문서 | 무엇 |
-|---|---|
-| `docs/DECISIONS.md` | 결정 기록 (D-001~). 되돌리려면 여기부터 |
-| `docs/BOLTS.md` | Bolt 이력 및 계획 |
-| `docs/MARKET_RESEARCH.md` | SEP / Cloudera / Datadog 벤치마킹 |
-| `docs/TEAMS.md` | 에이전트 역할·권한·승인 게이트 |
-
-### 손에 들고 하는 것
-
-| 문서 | 무엇 |
-|---|---|
-| `docs/runbooks/deploy.md` | ⭐ 사내 실환경 배포 전 과정 |
-| `docs/runbooks/upgrade-r2-r3.md` | 운영 중 업데이트 배포 절차 |
-| `docs/runbooks/db-setup.md` | PostgreSQL 초기 구축 |
-| `docs/runbooks/local-account-setup.md` | 로컬 계정 (AD 연동 전까지) |
-| `docs/runbooks/gateway-config-request.md` | Gateway 설정 요청서 (실측 근거 포함) |
-| `docs/templates/` | 채워 넣는 파일 (인벤토리 등) |
-
-### 아직 데이터가 없는 것 / 나중 것
-
-| 문서 | 무엇 |
-|---|---|
-| `docs/WORKLOAD_PROFILE.md` | 워크로드 특성화 — **데이터 미수집.** SLO 목표값을 막고 있다 |
-| `docs/AIOPS.md` | AI Agent 운영 자동화 (R6+) |
-
-### `docs/archive/` — 읽지 않아도 되는 것
-
-수행이 끝났고 **현재 상태를 반영하지 않는다.** 남겨 둔 이유는 판정의 출처이기 때문이며, 각 파일 첫머리에 무엇이 뒤집혔는지 적어 두었다.
-
----
-
-## 리포지토리 구조
+Trino gives you a coordinator UI that shows what is running. It does not tell
+you whether a cluster can take queries, who killed something and why, whether
+your workers are all configured the same way, or whether last week's memory
+change made anything faster. TMS answers those, and it does so without ever
+standing between a client and a query.
 
 ```
-.
-├── CLAUDE.md                  # ★ Claude Code 진입점 (절대 규칙)
-├── README.md                  # 이 파일
-├── PRODUCT.md                 # 제품 정의 (UI 언어·사용자·포지셔닝)
-├── docs/                      # 위 "문서 지도" 참조
-├── src/tms/
-│   ├── api/                   # FastAPI 라우트 + 서비스 계층
-│   ├── clients/               # Trino / Gateway / 노드 클라이언트
-│   ├── core/                  # 설정·인증·인가·감사 미들웨어
-│   ├── collector/             # 폴링 루프 → PostgreSQL 스냅샷 (단일 인스턴스)
-│   ├── health/                # 헬스 테스트 판정 엔진
-│   ├── fleet/                 # 인벤토리 파싱, 노드 상태
-│   ├── ops/                   # 안전 재시작 시퀀스 + 실행기(manual/ansible)
-│   └── web/                   # 서버 렌더 UI (Jinja2)
-├── migrations/                # SQL 마이그레이션 (순차 적용)
-├── ops/systemd/               # tms-api.service, tms-collector.service
-├── scripts/                   # 연결 검증, 부하 실측, 비밀번호 해시
-├── config/
-│   ├── config.yaml            # 일반 설정
-│   └── config.secret.yaml     # ★ gitignore 대상
-└── tests/                     # 단위 + integration + browser
+┌──────────────┐        reads          ┌─────────────────┐
+│     TMS      │ ────────────────────▶ │  Trino cluster  │
+│  (console)   │   REST · JMX · SSH    │  (coordinator   │
+└──────────────┘                       │   + workers)    │
+       │                               └─────────────────┘
+       │  never on the query path              ▲
+       │                                       │
+   ┌───┴────┐                            ┌─────┴─────┐
+   │ people │                            │  clients  │
+   └────────┘                            └───────────┘
 ```
 
-**아직 없는 것** (설계상 의도된 부재): `src/event-listener/` — 별도 히스토리 프로젝트 소관(D-001). `src/routing-service/` — R4.
+If TMS is down, every query still runs. That is the first rule and everything
+else is arranged around it.
 
 ---
 
-## 핵심 설계 결정 (확정)
+## Why this exists
 
-| 결정 | 내용 |
+Running OSS Trino past a handful of users means answering the same operational
+questions over and over, and the engine does not answer them: is this cluster
+healthy enough to route to, who ran the thing that broke it, why do two nodes
+behave differently, did that tuning change help. Most teams end up with a
+Grafana dashboard, a folder of shell scripts and a lot of tribal knowledge.
+
+TMS is that layer, built to be run by a small platform team on plain VMs.
+
+It assumes a shape rather than a size: **Trino on VMs with systemd**, one or
+more clusters, optionally a Trino Gateway in front, and a team that would
+rather approve a change than perform it twenty times. Every design decision is
+written down with its reasoning in [`docs/DECISIONS.md`](docs/DECISIONS.md) —
+the team's working record, kept in Korean.
+
+---
+
+## What it does
+
+| | |
 |---|---|
-| 인프라 | VM + systemd. **K8s 미사용** |
-| 증설 | 수동/스크립트. **확장 단위는 워커가 아니라 클러스터** |
-| 접근제어 | OPA policy-as-code, Git 관리. **권한 UI 만들지 않음** |
-| 업그레이드 | **Blue/Green만.** in-place 금지 (코디네이터 HA 부재) |
-| 클러스터 간 분배 | **least-loaded 라우터.** 정적 가중치 미사용 |
-| 관측성 | Prometheus + Grafana + Alertmanager 위임 |
-| 로그 | Loki 또는 OpenSearch 위임. TMS는 딥링크만 |
+| **Live queries** | Every running query across clusters, with a kill that requires a reason — and delivers that reason to whoever owns the query |
+| **Cluster health** | Eight synthetic checks that answer "can this cluster take a query right now", each carrying a written remedy |
+| **Safe restart** | A six-step sequence: stop intake → drain → confirm empty → restart → verify health → restore traffic. No step is reachable out of order |
+| **Fleet** | Node inventory, versions, and graceful worker shutdown that waits for tasks to finish |
+| **Configuration** | What each node actually has in `etc/`, and where nodes of the same role disagree |
+| **Catalogs** | Write and remove catalog files across a cluster, gated on a development cluster first |
+| **Resource groups** | Edit Trino's `db` resource group tree, with validation, history and revert |
+| **Benchmark** | Run query sets on a schedule, compare clusters and releases, watch a trend |
+| **Gateway** | Which backends the Trino Gateway has, and how they map to clusters |
+| **Audit** | Append-only record of every write, exportable, and impossible to bypass |
+
+Screens are English, dark by default, and dense — this is a console you read
+during an incident, not a dashboard you leave on a wall.
 
 ---
 
-## 절대 원칙
+## What it deliberately does not do
 
-1. **NFR-ISOLATION** — TMS가 죽어도 쿼리는 산다. 쿼리 경로에 개입하지 않는다.
-2. **검증 없이 단정하지 않는다** — Trino 477 공식 문서 확인 필수.
-3. **쓰기 액션은 reason 필수 + 감사 기록.**
-4. **파괴적 액션은 안전 시퀀스를 건너뛸 수 없다.**
-5. **비목표를 침범하지 않는다.**
+A tool that does everything badly is worse than one that does less. TMS
+delegates, and the boundaries are contractual:
 
-상세는 `CLAUDE.md` 참조.
+| Not built | Use instead |
+|---|---|
+| SQL editor | Superset, DBeaver, the Trino CLI |
+| Metric charts and dashboards | Grafana |
+| Alerting engine | Alertmanager |
+| Log collection and search | Loki, OpenSearch |
+| RBAC editing UI | OPA policies in git |
+| Data catalog / lineage | Out of scope |
+
+The one chart TMS draws is of its own benchmark results, because that data
+exists nowhere else.
 
 ---
 
-## 릴리스 로드맵
+## Getting started
 
-| R | 목표 | 주요 기능 |
-|---|---|---|
-| R1 | 지금 무슨 일이 일어나는가 | 포털, **실행 중 쿼리**, 헬스, 감사, 로그 딥링크 (쿼리 히스토리는 별도 프로젝트) |
-| R2 | 측정하고 비교할 수 있다 | 워크로드 뷰, 라우팅 조회, Gateway 콘솔, SLO, 벤치마크 |
-| R3 | 안전하게 조작할 수 있다 | Fleet, 설정변경/재시작, drift 추적 |
-| R4 | 세밀하게 제어할 수 있다 | 카탈로그, OPA 가시성, 로그레벨, 라우팅 서비스 |
-| R5 | 클러스터를 찍어낼 수 있다 | 프로비저닝, Blue/Green 업그레이드 |
-| R6+ | 스스로 운영한다 | AIOps (`docs/AIOPS.md`) |
+```bash
+git clone <this repository>
+cd trino-management-service
+python3 -m venv venv && venv/bin/pip install -e .
+cp config/config.secret.yaml.example config/config.secret.yaml   # then edit
+venv/bin/tms-config-check                                        # before starting
+venv/bin/tms-api
+```
 
-> R2/R3 는 순서대로 끝나지 않았다. 실제로 무엇이 서 있는지는 맨 위 표를, 무엇이 남았는지는 `docs/TODO.md` D-4 를 본다.
+Full instructions, including the PostgreSQL schema and the systemd units, are
+in **[docs/usage/install.md](docs/usage/install.md)**.
+
+**Want to look around first?** The demo runs everything in memory — no
+PostgreSQL, no Trino, no cluster, nothing persisted:
+
+```bash
+venv/bin/python -m tests.browser.demo
+```
+
+It prints a URL and a throwaway login. Every screen is populated, the writes
+really do apply (to memory), and the real validation rules really do refuse.
+
+---
+
+## Usage documentation
+
+Each feature has its own page: what it is for, what it refuses to do, and what
+to configure.
+
+| | |
+|---|---|
+| [Install and configure](docs/usage/install.md) | Prerequisites, database, service accounts, first run |
+| [Watching a cluster](docs/usage/observing.md) | Overview, live queries, health, workload |
+| [Safe restart](docs/usage/safe-restart.md) | The six-step sequence and why each step exists |
+| [Fleet](docs/usage/fleet.md) | Node inventory, graceful shutdown, playbook jobs |
+| [Cluster configuration](docs/usage/cluster-config.md) | Reading `etc/` back, finding drift |
+| [Catalogs](docs/usage/catalogs.md) | Adding and removing catalogs across a cluster |
+| [Resource groups](docs/usage/resource-groups.md) | Editing the admission control tree |
+| [Benchmarking](docs/usage/benchmark.md) | Query sets, comparisons, trends, schedules |
+| [Gateway](docs/usage/gateway.md) | Backend visibility and routing |
+| [Audit](docs/usage/audit.md) | What is recorded, and how to export it |
+| [Configuration reference](docs/usage/configuration-reference.md) | Every `config.yaml` key |
+
+---
+
+## How it is built
+
+Two processes and one database.
+
+```
+tms-collector ──poll──▶ Trino REST + JMX ──▶ PostgreSQL snapshots
+                                                    │
+tms-api ──────read──────────────────────────────────┘
+   │
+   ├─ serves the React console (static bundle, no Node at runtime)
+   ├─ writes go straight to Trino / the Gateway, never through the collector
+   └─ every write: reason required, audit row written, or the write is refused
+```
+
+| | |
+|---|---|
+| Backend | Python 3.9+, FastAPI, PostgreSQL |
+| Frontend | React 19 + TypeScript, built with Vite, **committed to the repository** — the deployment host has no Node |
+| Deployment | `pip install` + systemd. No containers required, no Kubernetes |
+| Cluster operations | Ansible, run from the TMS host, with one playbook per purpose |
+
+Design notes are in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
+---
+
+## Principles
+
+These are enforced in code and in review, not just stated.
+
+1. **Never on the query path.** TMS reads Trino; it never proxies a query. If
+   the event listener buffer fills, events are dropped rather than blocking a
+   coordinator.
+2. **Never render missing data as healthy.** Stale wears a badge, unknown
+   outranks good, and a permission problem names the fix rather than showing an
+   empty list.
+3. **Every write is a ceremony.** A reason is required, the target is shown
+   before you confirm, and the audit row is written or the write does not
+   happen.
+4. **Destructive actions cannot skip their sequence.** There is no endpoint
+   that stops traffic without draining, and none that deploys and restarts in
+   one act.
+5. **Nothing about Trino is asserted without measuring it.** Every version-
+   specific claim in this repository cites a verification in
+   [`docs/TRINO_VERIFIED.md`](docs/TRINO_VERIFIED.md), most of them made against
+   a real Trino 477. Several corrected an assumption that would have shipped a
+   bug.
+
+---
+
+## Status
+
+In production use. Interfaces are still moving; treat this as pre-1.0.
+
+| | |
+|---|---|
+| Trino | Verified against **477**. Other versions are untested — see [why that is not a formality](docs/usage/install.md#a-note-on-trino-versions) |
+| Trino Gateway | 19 (optional) |
+| Python | 3.9 and up |
+| PostgreSQL | 14 and up |
+
+What is being worked on next is in [`docs/TODO.md`](docs/TODO.md) — again a
+working document rather than user documentation, and in Korean.
+
+---
+
+## Contributing
+
+Read [`CLAUDE.md`](CLAUDE.md) first — it holds the rules that a change is
+reviewed against, including the two that reject the most work: *do not assert
+an unverified Trino fact*, and *do not build a non-goal*.
+
+```bash
+venv/bin/pip install -e ".[dev]"
+venv/bin/python -m pytest -q             # unit and API tests, no infrastructure
+npm --prefix frontend run build          # ⛔ commit the output with your change
+
+venv/bin/pip install -e ".[browser]" && venv/bin/python -m playwright install chromium
+venv/bin/python -m unittest tests.browser.ui_behaviour   # what only a browser sees
+```
+
+The frontend build output is committed on purpose: the deployment host has no
+Node, so anything absent from the repository is absent from the server.
+
+---
+
+## Licence
+
+Not yet chosen. Until one is added, treat this as source-available for
+evaluation.
