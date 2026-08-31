@@ -334,6 +334,13 @@ def check_cluster_ops(report: Report, config) -> None:
         else:
             report.add(OK, "ansible known_hosts", known_hosts)
 
+    # ⛔ Under `fleet.source: tms` these files are TMS's output, not input
+    # (D-019). Missing means nothing has been scanned yet, which is a first-run
+    # state - and TMS writes them at startup, so it is also temporary. Zero
+    # hosts is the one that matters: Ansible matches nothing and exits 0.
+    from tms.fleet.inventory import load_inventory
+
+    generated = getattr(getattr(config, "fleet", None), "source", "inventory") == "tms"
     uses_password = False
     for cluster in config.cluster_names:
         path = settings.inventories.get(cluster)
@@ -341,7 +348,16 @@ def check_cluster_ops(report: Report, config) -> None:
             report.add(FAIL, "인벤토리",
                        "{} 에 대한 항목이 없다 — 기동이 실패한다".format(cluster))
         elif not os.path.isfile(path):
-            report.add(FAIL, "인벤토리", "{}: {} 가 없다".format(cluster, path))
+            report.add(WARN if generated else FAIL, "인벤토리",
+                       "{}: {} 가 없다{}".format(
+                           cluster, path,
+                           " — 아직 스캔한 적이 없다. Fleet 화면에서 코디네이터를 "
+                           "스캔하기 전까지 재시작은 거부된다" if generated else ""))
+        elif generated and not load_inventory(path, cluster):
+            report.add(WARN, "인벤토리",
+                       "{}: 노드가 0개다 — Ansible 이 아무것도 못 찾고 성공으로 "
+                       "끝나므로 TMS 가 재시작을 거부한다. Fleet 화면에서 "
+                       "스캔한다".format(cluster))
         else:
             report.add(OK, "인벤토리", "{}: {}".format(cluster, path))
             uses_password = uses_password or _inventory_uses_password(path)

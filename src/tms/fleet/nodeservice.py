@@ -150,6 +150,26 @@ class NodeListService:
                 "The node list could not be written to {}: {}".format(path, exc))
         return path
 
+    def render_all(self) -> None:
+        """Write every cluster's inventory from the table.
+
+        ⛔ Called at startup, before anything that takes an inventory path is
+        built. Those constructors refuse a path that does not exist - which on
+        a fresh deployment is every path, because the files only appear once
+        somebody scans. That left automated restarts silently falling back to
+        manual until the first scan, which is a chicken-and-egg nobody would
+        have connected to the node list.
+
+        A cluster with no rows yet gets a file with empty groups. The executor
+        refuses to run against one; an empty inventory is worse than a missing
+        one, because Ansible matches nothing and exits 0.
+        """
+        for cluster in sorted(self.inventories):
+            try:
+                self._write_inventory(cluster)
+            except Exception as exc:  # noqa: BLE001 - startup must not die here
+                log.error("could not write the inventory for %s: %s", cluster, exc)
+
     def add(self, principal: Principal, cluster: str, host: str, address: str,
             role: str, reason: str) -> Dict[str, Any]:
         """Add a node the coordinator cannot see.

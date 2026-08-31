@@ -57,6 +57,15 @@ class RestartExecutor:
     automated = False
     name = "unknown"
 
+    def preflight(self, cluster: str) -> None:
+        """Raise if this executor could not restart the cluster right now.
+
+        ⛔ Asked before traffic is stopped, not when the restart step is
+        reached. By then the cluster is drained and out of rotation, and
+        "TMS cannot actually do this" is the worst possible moment for a
+        discovery. Nothing to check by default.
+        """
+
     def start(self, cluster: str, sequence_id: str) -> str:
         raise NotImplementedError
 

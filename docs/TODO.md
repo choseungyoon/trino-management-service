@@ -275,27 +275,60 @@ React 콘솔은 `/app` 에 있다. 되돌렸다면 그 이유가 D-016 의 "뒤�
 
 ⛔ **`ExecuteQuery` 가 선행이다** (D-012). 없으면 스캔이 안 되고 전부 수동이 된다.
 
-**옮기기 — 순서를 지킨다**
+**두 가지 출발점이 있다. 자기 것을 고른다.**
 
-- [ ] 아직 `fleet.source` 를 바꾸기 **전에** 임포트한다. 스캔은 지금 살아 있는
-      노드만 찾고, **안 살아 있는 노드가 정확히 옮길 가치가 있는 항목**이다
-      ```bash
-      tms-import-inventory --config /etc/tms/config.yaml --dry-run
-      tms-import-inventory --config /etc/tms/config.yaml
-      ```
-- [ ] `config.yaml`: `fleet.source: tms`, **`fleet.inventories` 와
+| | 어느 쪽인가 |
+|---|---|
+| **A. Fleet 을 이미 쓰고 있다** — 인벤토리 파일이 있다 | 임포트가 **먼저**다 |
+| **B. Fleet 을 켠 적이 없다** — 인벤토리 파일이 없다 | 임포트할 게 없다. **건너뛴다** |
+
+#### A 인 경우 — 임포트가 먼저
+
+⛔ **`fleet.source` 를 바꾸기 전에** 한다. 스캔은 지금 살아 있는 노드만 찾고,
+**안 살아 있는 노드가 정확히 옮길 가치가 있는 항목**이다.
+
+```bash
+tms-import-inventory --config /etc/tms/config.yaml --dry-run
+tms-import-inventory --config /etc/tms/config.yaml
+```
+
+#### B 인 경우 — 목록은 비어서 시작한다
+
+⛔ **비어 있는 동안 재시작은 거부된다.** 노드가 0개인 인벤토리에 대고
+`ansible-playbook` 을 돌리면 아무 호스트도 못 찾고 **종료 코드 0** 으로 끝난다 —
+아무것도 안 하고 "재시작 성공" 이 된다. 이미 유입을 끊고 드레인까지 끝낸
+클러스터에 대해서다. 그래서 TMS 는 유입을 끊기 **전에** 거부한다.
+
+즉 **첫 스캔이 사실상의 초기화**다. 순서를 바꾸지 않는다:
+
+1. 설정 → 기동 → `/fleet` → **Scan the coordinator**
+2. 목록이 채워진 것을 눈으로 확인
+3. 그 다음에야 재시작·설정 배포를 쓴다
+
+**공통 설정**
+
+- [ ] `config.yaml`: `fleet.enabled: true`, `fleet.source: tms`,
+      `node_url_template` 지정, **`fleet.inventories` 와
       `cluster_ops.ansible.inventories` 를 둘 다 비운다**
       <br>*안 비우면 기동이 거부된다 — 답이 두 개인 상태를 남기지 않는다*
-- [ ] `tms-config-check` → 노드 목록이 `<state_dir>/inventory/` 에 쓰인다고 나온다
 - [ ] `systemctl restart tms-api tms-collector`
+      <br>*기동 시 TMS 가 `<state_dir>/inventory/` 에 파일을 만든다. B 라면
+      빈 파일이다 — 파일 자체가 없으면 재시작 실행기가 아예 안 만들어지고
+      조용히 manual 로 되돌아간다*
+- [ ] `tms-config-check`
+      <br>*B 에서 "노드가 0개다" 경고가 나오는 것이 정상이다. 첫 스캔 후 사라진다*
 
 **확인 — 개발 클러스터에서 먼저**
 
-- [ ] `/fleet` → Node list 패널에 임포트된 노드가 전부, **added by tms-import**
-- [ ] **Scan the coordinator** → 살아 있는 노드가 `discovered` 로 바뀐다
+- [ ] `/fleet` → Node list 패널
+      <br>*A: 임포트된 노드가 전부, **added by tms-import***
+      <br>*B: 비어 있고 "Scan the coordinator" 안내가 나온다*
+- [ ] **Scan the coordinator** → 살아 있는 노드가 `discovered` 로 채워진다
       <br>*⛔ 인벤토리 별칭(`trino-w1`)이 IP 로 **바뀌지 않아야** 한다.
       바뀌면 Ansible 이 그 별칭으로 못 찾는다*
 - [ ] 워커 1대를 내린다 → 다시 스캔 → **목록에서 사라지지 않고** "no answer" 가 된다
+      <br>*⛔ B 라면 이 확인은 **첫 스캔 다음**이다. 스캔 전에는 목록이 비어
+      있으므로 "사라지지 않는다" 를 볼 대상 자체가 없다*
 - [ ] `cat <state_dir>/inventory/<cluster>.ini` → 내린 워커가 **여전히 있다**
       <br>*이게 이 설계의 전부다 — 죽은 노드도 설정을 받아야 한다*
 - [ ] 안전 재시작을 걸어 본다 → 생성된 인벤토리로 돈다
@@ -306,6 +339,9 @@ React 콘솔은 `/app` 에 있다. 되돌렸다면 그 이유가 D-016 의 "뒤�
 
 - [ ] 생성된 인벤토리와 기존 인벤토리를 **눈으로 대조**한다 (`diff`)
 - [ ] 기존 인벤토리 파일은 **지우지 말고** 남겨 둔다 — 되돌릴 때 필요하다
+      <br>*B 라면 되돌릴 파일이 없다. 되돌리려면 `fleet.source: inventory` 로
+      바꾸고 인벤토리를 손으로 쓰는 것 — 즉 이 전환은 B 에서 실질적으로 편도다.
+      그래서 개발 클러스터에서 먼저 한다*
 
 ### 1-6. V-6 — 감사 append-only 재확인
 

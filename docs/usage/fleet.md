@@ -83,9 +83,9 @@ nobody knew was happening.
 
 ### Moving across
 
-Discovery finds only the nodes that are **currently answering**, and the ones
-that are not are exactly the entries worth keeping. So import first, while the
-old files are still configured:
+**If you already have inventory files, import them first**, while they are
+still the configured ones. Discovery finds only the nodes that are *currently
+answering*, and the ones that are not are exactly the entries worth keeping:
 
 ```bash
 tms-import-inventory --config /etc/tms/config.yaml --dry-run
@@ -95,6 +95,19 @@ tms-import-inventory --config /etc/tms/config.yaml
 Everything imported is marked hand-entered until the first scan confirms it —
 it came from a file, not from the coordinator. Then set `source: tms`, empty
 both `inventories` maps, and run `tms-config-check`.
+
+**Starting from nothing** — no inventory files, Fleet never enabled — there is
+nothing to import. Skip it. The list starts empty and **the first scan is the
+setup step**: configure, start, open Fleet, press *Scan the coordinator*.
+
+⛔ Until it has run, restarts and deployments are refused. That is deliberate.
+`ansible-playbook` against an inventory with no hosts matches nothing and
+**exits 0** — TMS would report a restart that never touched a machine, on a
+cluster it had already drained and pulled out of rotation. So it refuses
+before stopping any traffic, and `tms-config-check` warns about it beforehand.
+
+TMS writes the (possibly empty) inventory files at startup, so everything that
+needs a path finds one.
 
 > Requires `ExecuteQuery` for the TMS account — the same grant the *identify*
 > button needs. See [the catalogs guide](catalogs.md) for how that is scoped.

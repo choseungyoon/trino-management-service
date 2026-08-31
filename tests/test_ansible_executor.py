@@ -375,3 +375,44 @@ class RedactionTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EmptyInventoryTest(unittest.TestCase):
+    """⛔ An empty inventory is worse than a missing one.
+
+    `ansible-playbook` against one prints "skipping: no hosts matched" and
+    exits 0, so TMS would report a restart that never touched a machine — on a
+    cluster it had just drained and taken out of rotation.
+    """
+
+    def setUp(self):
+        self.directory = tempfile.mkdtemp()
+        self.playbook = os.path.join(self.directory, "restart.yml")
+        open(self.playbook, "w").write("- hosts: all\n")
+
+    def _executor(self, inventory_text):
+        path = os.path.join(self.directory, "prod-a.ini")
+        open(path, "w").write(inventory_text)
+        from tms.ops.ansible import AnsibleRestartExecutor
+
+        # A real runner, so the inventory is treated as a file rather than a
+        # fixture - that is the whole point of this case. `binary` only has to
+        # exist; nothing here executes it.
+        return AnsibleRestartExecutor(
+            playbook=self.playbook, cluster_inventories={"prod-a": path},
+            binary=sys.executable, state_dir=self.directory)
+
+    def test_an_inventory_with_no_hosts_is_refused(self):
+        from tms.ops.ansible import AnsibleError
+
+        executor = self._executor("[coordinator]\n\n[worker]\n")
+        with self.assertRaises(AnsibleError) as caught:
+            executor.preflight("prod-a")
+        self.assertIn("lists no hosts", str(caught.exception))
+        with self.assertRaises(AnsibleError):
+            executor.build_command("prod-a")
+
+    def test_one_host_is_enough(self):
+        executor = self._executor("[coordinator]\nc1\n\n[worker]\n")
+        executor.preflight("prod-a")
+        self.assertIn("prod-a.ini", " ".join(executor.build_command("prod-a")))

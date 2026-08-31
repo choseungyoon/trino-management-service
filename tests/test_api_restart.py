@@ -47,6 +47,7 @@ from tms.ops.executor import (  # noqa: E402
     RUNNING,
     SUCCEEDED,
     ManualExecutor,
+    RestartExecutor,
 )
 from tms.ops.repository import InMemorySequenceRepository  # noqa: E402
 from tms.ops.sequence import RestartSequence as _sequence  # noqa: E402
@@ -68,8 +69,12 @@ class StubGateway:
         self.calls.append((name, active))
 
 
-class StubExecutor:
-    """An automated executor whose output and outcome the test drives."""
+class StubExecutor(RestartExecutor):
+    """An automated executor whose output and outcome the test drives.
+
+    Inherits the base so it keeps up with the interface - `preflight` arrived
+    there as a no-op, and a duck-typed stub would have missed it.
+    """
 
     name = "stub"
 

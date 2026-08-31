@@ -355,6 +355,14 @@ def create_app(config: Optional[Config] = None, service: Optional[TmsService] = 
             config_store=config_store,
         )
 
+    # ⛔ Before the executors. Each of them refuses an inventory path that does
+    # not exist, and under `fleet.source: tms` those files are TMS's own output
+    # (D-019) - unwritten on a fresh deployment.
+    if node_list is None:
+        node_list = build_node_list_service(config, service)
+    if node_list is not None:
+        node_list.render_all()
+
     if restarts is None:
         restarts = build_restart_service(config, service, config_store=config_store)
     if fleet is None:
@@ -675,9 +683,6 @@ def create_app(config: Optional[Config] = None, service: Optional[TmsService] = 
         from tms.ops.catalogservice import build_catalog_service
 
         catalogs = build_catalog_service(config, service.audit)
-
-    if node_list is None:
-        node_list = build_node_list_service(config, service)
 
     api_deps = Deps(config=config, service=service,
                     current_principal=current_principal,

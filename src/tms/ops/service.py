@@ -296,6 +296,13 @@ class RestartService:
         self._cluster_or_404(cluster)
         if not (reason or "").strip():
             raise InvalidRequest("A reason is required to restart a cluster.")
+        # ⛔ Before anything is deactivated. An executor that cannot target this
+        # cluster is a sequence that strands it drained and out of rotation.
+        try:
+            self.executor.preflight(cluster)
+        except Exception as exc:  # noqa: BLE001 - the error type is the executor's
+            log.warning("refusing to restart %s: %s", cluster, exc)
+            raise InvalidRequest(str(exc))
 
         sequence = RestartSequence(cluster=cluster, reason=reason, actor=principal.username)
         try:

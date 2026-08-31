@@ -203,17 +203,25 @@ class AnsibleRestartExecutor(RestartExecutor):
         self.extra_vars = dict(extra_vars or {})
         self.log_dir = log_dir
         self._runner = runner or self._run_subprocess
+        # A stubbed runner means the paths above are fixtures, not files.
+        self._stubbed = runner is not None
         self._runs: Dict[str, Dict[str, Any]] = {}
         self._lock = threading.Lock()
 
     # --------------------------------------------------------------- command
 
-    def build_command(self, cluster: str) -> List[str]:
-        """Argument list for one cluster. Raises before building anything odd.
+    def preflight(self, cluster: str) -> None:
+        """Can this cluster be targeted at all?
 
-        The cluster name selects a configured inventory file and then plays no
-        further part - it never reaches the command line.
+        ⛔ An inventory with no hosts is the dangerous case, not the missing
+        one. `ansible-playbook` against an empty inventory prints "skipping: no
+        hosts matched" and **exits 0** - TMS would report a restart that never
+        touched a machine, on a cluster it had just drained and taken out of
+        rotation. It reaches zero hosts when the node list is generated
+        (nothing has been scanned yet) or when a file was emptied by hand.
         """
+        from tms.fleet.inventory import load_inventory
+
         inventory = self.cluster_inventories.get(cluster)
         if inventory is None:
             # Not a cluster TMS is configured for. Refuse rather than hand an
@@ -221,7 +229,21 @@ class AnsibleRestartExecutor(RestartExecutor):
             raise AnsibleError(
                 "unknown cluster {!r} - it has no configured inventory, so TMS "
                 "will not target it".format(cluster))
+        if not self._stubbed and not load_inventory(inventory, cluster):
+            raise AnsibleError(
+                "{} lists no hosts for {!r}. Ansible would match nothing and "
+                "report success, so TMS will not run it. If TMS owns the node "
+                "list, scan the coordinator on the Fleet screen first."
+                .format(inventory, cluster))
 
+    def build_command(self, cluster: str) -> List[str]:
+        """Argument list for one cluster. Raises before building anything odd.
+
+        The cluster name selects a configured inventory file and then plays no
+        further part - it never reaches the command line.
+        """
+        self.preflight(cluster)
+        inventory = self.cluster_inventories[cluster]
         command = [self.binary, "--inventory", inventory, self.playbook]
         for key, value in sorted(self.extra_vars.items()):
             command += ["--extra-vars", "{}={}".format(key, value)]
