@@ -1,0 +1,128 @@
+---
+# TMS 설정 배포 플레이북 (FR-CO-03 · D-018 3단계)
+#
+# ⛔ 이 플레이북은 **파일을 합친다. 통째로 쓰지 않는다.**
+#    TMS 가 아는 config.properties 는 스캔이 자격증명을 가린 사본이라
+#    keystore 비밀번호 자리에 [REDACTED] 라는 글자가 들어 있다. 그 사본을
+#    되쓰면 전 노드의 비밀번호가 그 글자로 바뀐다. 그래서 TMS 는 "이 키를
+#    이 값으로 / 이 키를 지운다" 만 보내고, 나머지 줄은 손대지 않는다.
+#
+# ⛔ **재시작하지 않는다.** Trino 는 config.properties 를 기동 시에만 읽으므로
+#    (TRINO_VERIFIED T1-8-4) 이 플레이북이 끝나도 클러스터는 여전히 옛 값으로
+#    돈다. 재시작은 TMS 의 안전 재시작 시퀀스가 따로 한다 — 유입 차단 →
+#    드레인 → 재시작 → 헬스 확인. 여기서 재시작하면 그 게이트를 건너뛴다
+#    (절대규칙 5).
+#
+# ⛔ **네 번째 플레이북이고 네 번째 파일이다.** restart / collect-config /
+#    deploy-catalog / deploy-config 는 각각 한 가지만 한다. 둘이 같은 경로를
+#    가리키면 TMS 가 기동을 거부한다.
+#
+# TMS 는 이 파일을 **고르지 않는다.** config.yaml 에 절대경로로 지정한다.
+#
+#   cluster_ops:
+#     config_deploy:
+#       playbook: /etc/tms/ansible/deploy-config.yml
+#
+# ── TMS 가 넘기는 변수 ───────────────────────────────────────────────
+#
+#   target_role   : "all" | "coordinator" | "worker" — 세 낱말뿐이다.
+#                   ⛔ 호스트 이름은 절대 넘어오지 않는다 (D-009). 대상은
+#                   인벤토리의 그룹으로만 고른다
+#   config_edits  : [{"key":…, "action":"set"|"unset", "value":…}] 를
+#                   JSON → base64. 여러 줄 텍스트를 명령행에 올리지 않는다
+
+- name: Merge configuration edits into config.properties
+  hosts: "{{ target_role if target_role in ['coordinator', 'worker'] else 'all' }}"
+  gather_facts: false
+  vars:
+    trino_etc: /opt/trino/etc
+    trino_user: trino
+    trino_group: trino
+
+  tasks:
+    - name: Refuse a request TMS did not fill in
+      ansible.builtin.assert:
+        that:
+          - target_role is defined
+          # ⛔ 어휘를 다시 검사한다. 이 값이 위에서 host pattern 이 된다.
+          - target_role in ['all', 'coordinator', 'worker']
+          - (config_edits | default('')) | length > 0
+        fail_msg: >-
+          This playbook is driven by TMS and needs target_role
+          (all/coordinator/worker) and config_edits.
+
+    - name: Decode what TMS asked for
+      ansible.builtin.set_fact:
+        edits: "{{ config_edits | b64decode | from_json }}"
+
+    - name: Refuse a property name that is not a property name
+      ansible.builtin.assert:
+        that:
+          - item.key is match('^[a-zA-Z][A-Za-z0-9_.-]*$')
+          - item.action in ['set', 'unset']
+        fail_msg: "Not a usable edit: {{ item }}"
+      loop: "{{ edits }}"
+      loop_control:
+        label: "{{ item.key }}"
+
+    # ⛔ 되돌릴 것을 먼저 만든다. 이 파일 하나가 서버를 못 뜨게 할 수 있으므로
+    #    (T1-8-1) 손으로 되돌릴 수단이 노드에 남아 있어야 한다.
+    - name: Keep a copy of what is there now
+      ansible.builtin.copy:
+        src: "{{ trino_etc }}/config.properties"
+        dest: "{{ trino_etc }}/config.properties.tms-previous"
+        remote_src: true
+        owner: "{{ trino_user }}"
+        group: "{{ trino_group }}"
+        mode: "0640"
+      failed_when: false
+
+    - name: Set a property
+      ansible.builtin.lineinfile:
+        path: "{{ trino_etc }}/config.properties"
+        # ⛔ `=` 까지 포함해 고정한다. `query.max-memory` 로만 잡으면
+        #    `query.max-memory-per-node` 줄도 같이 걸린다.
+        regexp: "^\\s*{{ item.key | regex_escape }}\\s*="
+        line: "{{ item.key }}={{ item.value }}"
+        owner: "{{ trino_user }}"
+        group: "{{ trino_group }}"
+        mode: "0640"
+        create: false
+      loop: "{{ edits | selectattr('action', 'equalto', 'set') | list }}"
+      loop_control:
+        label: "{{ item.key }}"
+
+    - name: Remove a property
+      ansible.builtin.lineinfile:
+        path: "{{ trino_etc }}/config.properties"
+        regexp: "^\\s*{{ item.key | regex_escape }}\\s*="
+        state: absent
+      loop: "{{ edits | selectattr('action', 'equalto', 'unset') | list }}"
+      loop_control:
+        label: "{{ item.key }}"
+
+    - name: Report what this node now has
+      ansible.builtin.stat:
+        path: "{{ trino_etc }}/config.properties"
+        checksum_algorithm: sha256
+      register: written
+
+    - name: Tell TMS
+      ansible.builtin.debug:
+        msg: >-
+          TMS-CONFIG-DEPLOY {{ {
+            "host": inventory_hostname,
+            "role": target_role,
+            "edits": edits | length,
+            "sha256": written.stat.checksum | default(none),
+          } | to_json }}
+
+    # ⛔ 화면이 이 상태를 말로 설명하지만, 플레이북 출력에도 남긴다. 로그만
+    #    보는 사람이 "배포됐다 = 반영됐다" 로 읽는 것을 막는다.
+    - name: Say what has NOT happened
+      ansible.builtin.debug:
+        msg: >-
+          The file changed. Trino has not read it - config.properties is read
+          at startup only, so this cluster is still running the old values.
+          Use the safe restart sequence, which stops traffic and drains first.
+      run_once: true

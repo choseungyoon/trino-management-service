@@ -12,11 +12,12 @@ from typing import Any, Optional
 class Deps:
     __slots__ = ("config", "service", "current_principal", "restarts", "fleet",
                  "board", "benchmark", "resource_groups", "config_scan",
-                 "catalogs", "node_list")
+                 "catalogs", "node_list", "config_edit")
 
     def __init__(self, config, service, current_principal, restarts=None,
                  fleet=None, board=None, benchmark=None, config_scan=None,
-                 catalogs=None, resource_groups=None, node_list=None) -> None:
+                 catalogs=None, resource_groups=None, node_list=None,
+                 config_edit=None) -> None:
         self.config = config
         self.service = service
         self.current_principal = current_principal
@@ -28,6 +29,7 @@ class Deps:
         self.catalogs = catalogs
         self.resource_groups = resource_groups
         self.node_list = node_list
+        self.config_edit = config_edit
 
     def require(self, name: str) -> Any:
         """The service, or a 503 naming what is switched off.

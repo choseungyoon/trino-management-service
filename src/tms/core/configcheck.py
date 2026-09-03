@@ -546,6 +546,9 @@ _REQUIRED_OBJECTS = (
     ("023_catalogs.sql", "action", "CATALOG_DEPLOY"),
     ("025_cluster_nodes.sql", "table", "cluster_node"),
     ("025_cluster_nodes.sql", "action", "CLUSTER_NODE_CHANGE"),
+    ("027_config_changes.sql", "table", "config_change"),
+    ("027_config_changes.sql", "table", "config_deployment"),
+    ("027_config_changes.sql", "action", "CONFIG_DEPLOY"),
     ("020_benchmark_schedules.sql", "action", "BENCHMARK_SCHEDULE_CHANGE"),
     # 011, 013, 015, 017, 019 and 021 only grant; a privilege is not an object,
     # so there is nothing here to look for. Missing one shows up as a

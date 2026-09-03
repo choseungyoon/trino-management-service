@@ -113,7 +113,8 @@ def _query(qid, user, source, elapsed_ms, long_running=False, state="RUNNING"):
 def build_app(workload_enabled=False, seed=None, gateway=None,
               resource_groups=False, password=None, session_secret=None,
               fleet_jobs=False, benchmark=False, restarts=False,
-              config_scan=False, catalogs=False, node_list=False):
+              config_scan=False, catalogs=False, node_list=False,
+              config_edit=False):
     repository = InMemorySnapshotRepository()
     now = utcnow()
 
@@ -503,6 +504,45 @@ def build_app(workload_enabled=False, seed=None, gateway=None,
         repository.save(Snapshot("prod-a", KIND_CONFIG, now, payload={
             "nodes": _scan.parse_scan(lines), "error": None, "exit_code": 0}))
 
+    # Editing config.properties (D-018 §3). Seeded so both gates are visible:
+    # one change proved on the development cluster and ready for production,
+    # one with a typo the cluster's own name list refuses.
+    config_edit_service = None
+    if config_edit:
+        from tms.core.audit import AuditGuard as _EditGuard
+        from tms.ops.configeditservice import ConfigEditService
+        from tms.ops.configeditstore import InMemoryConfigChangeRepository
+
+        edit_repo = InMemoryConfigChangeRepository()
+        proved = edit_repo.create(
+            "Raise the memory ceiling", "coordinator",
+            [{"key": "query.max-memory", "action": "set", "value": "1200GB"}],
+            "Month-end reporting runs out of headroom.", "sre.kim")
+        edit_repo.update(proved["id"], verified_on="prod-b",
+                         verified_at=now - timedelta(hours=2))
+        # ⛔ A misspelt property name. This is the one the cheap gate catches:
+        # Trino refuses to start on an unknown name, so it never reaches a
+        # node. A misspelt *value* would pass this check and be caught by the
+        # development cluster instead - the two gates are not redundant.
+        edit_repo.create(
+            "Stop scheduling work on the coordinator", "all",
+            [{"key": "node-scheduler.include-coordinatr", "action": "set",
+              "value": "false"}],
+            None, "syhcho")
+        edit_repo.start_deployment(
+            proved["id"], "Raise the memory ceiling", "prod-b", "coordinator",
+            [{"key": "query.max-memory", "action": "set", "value": "1200GB"}],
+            "Proving it before month end", "sre.kim")
+        edit_repo.finish_deployment(1, "SUCCEEDED")
+
+        config_edit_service = ConfigEditService(
+            config=config, repository=edit_repo, snapshots=repository,
+            audit_guard=_EditGuard(audit),
+            playbook="/etc/tms/deploy-config.yml",
+            inventories={name: "/etc/tms/{}.ini".format(name) for name in CLUSTERS},
+            development_clusters=["prod-b"],
+            runner=lambda command, timeout, on_line: {"rc": 0})
+
     catalog_service = None
     if catalogs:
         # In memory: the real one shells out to ansible-playbook. Seeded with
@@ -635,6 +675,7 @@ def build_app(workload_enabled=False, seed=None, gateway=None,
                       restarts=restart_service,
                       config_scan=scan_service,
                       catalogs=catalog_service,
+                      config_edit=config_edit_service,
                       benchmark=bench_service), trino
 
 
@@ -661,7 +702,7 @@ def _free_port():
 def serve(workload_enabled=False, seed=None, gateway=None,
           resource_groups=False, fleet_jobs=False, benchmark=False,
           restarts=False, config_scan=False, catalogs=False,
-          node_list=False):
+          node_list=False, config_edit=False):
     """Run the console on a free port. Yields (base_url, stub_trino)."""
     import uvicorn
 
@@ -670,7 +711,7 @@ def serve(workload_enabled=False, seed=None, gateway=None,
                            fleet_jobs=fleet_jobs, gateway=gateway,
                            benchmark=benchmark, restarts=restarts,
                            config_scan=config_scan, catalogs=catalogs,
-                           node_list=node_list)
+                           node_list=node_list, config_edit=config_edit)
     port = _free_port()
     with tempfile.TemporaryDirectory() as tmp:
         key, crt = _make_cert(tmp)

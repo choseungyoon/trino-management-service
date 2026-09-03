@@ -119,8 +119,8 @@ deploy goes to several nodes at once, so a property only one node knows is a
 property that would stop the others booting.
 
 > If this column is empty, `trino_log` is pointing at the wrong file or the log
-> has rotated past the last startup. Fix that — this list is what a future
-> deploy checks a typo against.
+> has rotated past the last startup. Fix that — this list is what a deploy
+> checks a typo against, and **nothing deploys until it is populated**.
 
 ---
 
@@ -134,5 +134,83 @@ A cluster listed here does not report an unreachable node as drift. Its worker
 count changes with whatever is being tested, so "a node did not answer" is
 normal there and alarming everywhere else.
 
-It also marks which cluster a catalog must be proved on before it can go
-anywhere else — see [Catalogs](catalogs.md).
+It also marks which cluster a catalog or a configuration change must be proved
+on before it can go anywhere else — see [Catalogs](catalogs.md) and below.
+
+---
+
+## Changing config.properties
+
+```yaml
+cluster_ops:
+  config_deploy:
+    playbook: /etc/tms/ansible/deploy-config.yml
+```
+
+Off unless that is set, and it needs `config_scan` on as well — TMS refuses to
+start otherwise, because the scan is where the typo check gets its material.
+
+### A change is a set of edits, not a file
+
+One property per line, as it will appear in the file. A line starting with `-`
+removes that property instead:
+
+```
+query.max-memory=1200GB
+-node-scheduler.include-coordinator
+```
+
+⛔ **Lines TMS was not given are left exactly as they are.** This is not a
+nicety — the scan redacts credential-shaped values, so TMS's copy of your
+`config.properties` has the literal string `[REDACTED]` where the keystore
+password is. Writing that copy back would replace a working password with that
+string on every node at once. So TMS sends edits and the playbook merges them.
+
+Each node keeps a `config.properties.tms-previous` beside the real file, so
+there is something to restore by hand if a change goes wrong.
+
+### Two gates, and neither replaces the other
+
+| | Catches | Where it runs |
+|---|---|---|
+| **Name check** | A misspelt property name | Everywhere, including development |
+| **Development cluster** | A correct name whose *value* stops the server | Before production |
+
+`node-scheduler.include-coordinatr` never reaches a node — the first gate has
+the list of names the cluster itself reported and that name is not on it.
+`node-scheduler.include-coordinator=fasle` passes the first gate and is caught
+by the second, when the development cluster does not come back.
+
+> Deploy → **restart** → confirm health is GOOD. Only then does the production
+> button turn on. Editing the change afterwards clears that mark: a change
+> edited after it was proved is a different change, and the test it passed
+> never saw this version.
+
+### Where it goes
+
+`every node` / `the coordinator only` / `the workers only`. Three words, and
+they are what Ansible receives as the host pattern — **no host name ever
+reaches the command line**, so mis-targeting is impossible rather than
+unlikely.
+
+A coordinator-only setting going to workers gets a note on screen and is **not
+blocked**: measured on Trino 477, a coordinator property on a worker starts
+fine. The note is derived from what your cluster is doing today, not from a
+table TMS maintains.
+
+### ⛔ Deploying does not restart anything
+
+Trino reads `config.properties` at startup. When the deploy finishes, the file
+has changed and the cluster is **still running the old values**. Use
+[Safe restart](safe-restart.md), which stops traffic and drains first.
+
+A deploy that restarted on its own would be that sequence skipped, with a
+different label on it.
+
+### Credentials
+
+A key that reads like a credential — `password`, `secret`, `keystore`,
+anything ending in `.key` — must carry `${ENV:VARIABLE_NAME}`. A literal is
+refused when the change is saved and **again immediately before it deploys**,
+because a row can be edited between the two and the second check is the one
+standing between a plaintext password and every node.

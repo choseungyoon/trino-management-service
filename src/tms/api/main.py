@@ -318,7 +318,8 @@ def create_app(config: Optional[Config] = None, service: Optional[TmsService] = 
                restarts: Optional[Any] = None, fleet: Optional[Any] = None,
                board: Optional[Any] = None, benchmark: Optional[Any] = None,
                config_scan: Optional[Any] = None, catalogs: Optional[Any] = None,
-               node_list: Optional[Any] = None):
+               node_list: Optional[Any] = None,
+               config_edit: Optional[Any] = None):
     from fastapi import Body, Depends, FastAPI, Query, Request, Response
     from fastapi.responses import JSONResponse
 
@@ -358,6 +359,12 @@ def create_app(config: Optional[Config] = None, service: Optional[TmsService] = 
     # ⛔ Before the executors. Each of them refuses an inventory path that does
     # not exist, and under `fleet.source: tms` those files are TMS's own output
     # (D-019) - unwritten on a fresh deployment.
+    if config_edit is None:
+        from tms.ops.configeditservice import build_config_edit_service
+
+        config_edit = build_config_edit_service(config, service.repository,
+                                                service.audit)
+
     if node_list is None:
         node_list = build_node_list_service(config, service)
     if node_list is not None:
@@ -688,7 +695,8 @@ def create_app(config: Optional[Config] = None, service: Optional[TmsService] = 
                     current_principal=current_principal,
                     restarts=restarts, fleet=fleet, board=board,
                     benchmark=benchmark, config_scan=config_scan,
-                    catalogs=catalogs, node_list=node_list)
+                    catalogs=catalogs, node_list=node_list,
+                    config_edit=config_edit)
     benchmark_routes.register(app, api_deps)
     config_routes.register(app, api_deps)
     catalog_routes.register(app, api_deps)

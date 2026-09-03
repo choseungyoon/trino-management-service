@@ -52,19 +52,20 @@
 
 ---
 
-### 🔴 1-0. 마이그레이션 `020` ~ `026` `[먼저]`
+### 🔴 1-0. 마이그레이션 `020` ~ `028` `[먼저]`
 
 `020`/`021` 은 벤치마크 주기 실행(FR-BM-07 · D-017)이, `022` 는 설정 조회
 (FR-CO-01 · D-018)가, `023`/`024` 는 카탈로그 배포(FR-CATALOG · D-018 2단계)가,
-`025`/`026` 은 노드 목록(D-019)이 쓴다. **적용 전에는 해당 화면만 "사용할 수 없음" 으로
+`025`/`026` 은 노드 목록(D-019)이, `027`/`028` 은 설정 편집(D-018 3단계)이 쓴다. **적용 전에는 해당 화면만 "사용할 수 없음" 으로
 나오고 나머지는 전부 정상 동작한다.**
 
 - [ ] `git pull` → `pip install -e .`
-- [ ] `020` ~ `026` 을 **번호순으로** `tms_owner` 로 적용
+- [ ] `020` ~ `028` 을 **번호순으로** `tms_owner` 로 적용
 - [ ] `tms-config-check` → `benchmark_schedule` · `catalog_definition` ·
-      `catalog_deployment` · `cluster_node` 테이블,
-      `BENCHMARK_SCHEDULE_CHANGE` · `CATALOG_DEPLOY` ·
-      `CLUSTER_NODE_CHANGE` 액션, `config` snapshot kind 를 확인한다
+      `catalog_deployment` · `cluster_node` · `config_change` ·
+      `config_deployment` 테이블, `BENCHMARK_SCHEDULE_CHANGE` ·
+      `CATALOG_DEPLOY` · `CLUSTER_NODE_CHANGE` · `CONFIG_DEPLOY` 액션,
+      `config` snapshot kind 를 확인한다
 
 > ⛔ **앞 번호를 다시 돌리지 않는다.** `020` 도 감사 액션 제약을 `DROP` 후
 > 다시 만든다 — 위의 경고가 그대로 적용된다.
@@ -343,6 +344,61 @@ tms-import-inventory --config /etc/tms/config.yaml
       바꾸고 인벤토리를 손으로 쓰는 것 — 즉 이 전환은 B 에서 실질적으로 편도다.
       그래서 개발 클러스터에서 먼저 한다*
 
+### 1-5-5. V-15 — 설정 편집 `[027/028 적용 후 · ⚠️ V-12 가 선행 · D-018 3단계]`
+
+⛔ **V-12 가 진짜 선행이다.** 오타 검사는 클러스터가 기동 시 스스로 찍은
+프로퍼티 이름 목록과 대조하는데, 그 목록은 V-12 의 스캔이 만든다.
+**Known properties 열이 비어 있으면 이 기능은 아무것도 내보내지 않는다** —
+건너뛰는 게 아니라 거부한다. 검사를 끈 채로 배포하는 것이 오타 하나로
+전 노드를 못 뜨게 하는 그 사고이기 때문이다 (T1-8-1).
+
+**선행 설정**
+
+- [ ] `docs/templates/deploy-config.yml` 을 `/etc/tms/ansible/` 에 설치
+      <br>*⛔ **네 번째 파일**이다. restart · collect-config · deploy-catalog 와
+      전부 다른 경로여야 하고, 겹치면 기동을 거부한다*
+- [ ] `trino_etc` · `trino_user` · `trino_group` 을 맞춘다
+- [ ] `config.yaml`:
+      ```yaml
+      cluster_ops:
+        config_deploy:
+          playbook: /etc/tms/ansible/deploy-config.yml
+      ```
+- [ ] ⛔ `config_scan` 이 꺼져 있으면 **기동이 거부된다.** 이름 목록의 출처가 없다
+- [ ] ⛔ `development_clusters` 가 비어 있어도 **기동이 거부된다**
+
+**확인 — 개발 클러스터에서, 무해한 값으로**
+
+- [ ] `/cluster-config` → 아래 **Changes to config.properties** 패널
+- [ ] Known properties 가 0 이면 → **"아무것도 배포할 수 없다" 배너**가 뜬다.
+      먼저 V-12 를 마친다
+- [ ] New change → 예: `task.concurrency=16` / Deploy to = **the workers only**
+- [ ] ⛔ 일부러 오타를 낸다 (`task.concurrncy`) → **빨간 줄로 거부**되고
+      개발 클러스터 버튼도 비활성이다
+- [ ] ⛔ `http-server.https.keystore.key=hunter2` → **거부되고 `${ENV:VAR}` 를
+      쓰라고 말한다**
+- [ ] 개발 클러스터 버튼만 활성, 운영 버튼은 **비활성 + 이유가 툴팁에**
+- [ ] 개발 클러스터에 배포 → **노드에서 직접 확인한다**:
+      ```bash
+      grep task.concurrency /opt/trino/etc/config.properties
+      ls -l /opt/trino/etc/config.properties.tms-previous
+      ```
+- [ ] ⛔ **다른 줄이 그대로인가.** 특히 `keystore` 계열 값이
+      `[REDACTED]` 로 바뀌지 **않았는지** 확인한다 — 통째로 쓰지 않고
+      합치는 이유가 이것이다
+- [ ] ⛔ **아직 아무 일도 안 일어났다.** 클러스터는 여전히 옛 값으로 돈다
+- [ ] 안전 재시작 → 재시작 후 값이 반영된다
+- [ ] 운영 버튼이 **활성화**됐다
+- [ ] 초안을 고친다 → **다시 비활성**이 된다 (증명이 지워진다)
+- [ ] 감사 로그에 `CONFIG_CHANGE` · `CONFIG_DEPLOY` 가 사유와 함께
+
+**⚠️ 일부러 깨뜨려 보는 것은 개발 클러스터에서만**
+
+- [ ] 맞는 이름에 틀린 값 (`node-scheduler.include-coordinator=fasle`) → 배포는
+      통과한다 → 재시작 → **코디네이터가 안 뜬다.** 이름 검사가 볼 수 없는
+      것이고, **개발 클러스터 게이트가 있는 이유**다.
+      되돌리려면 노드에서 `config.properties.tms-previous` 를 되돌리고 재시작
+
 ### 1-6. V-6 — 감사 append-only 재확인
 
 - [ ] `tms_app` 으로 `UPDATE restart_sequence_event` / `DELETE` → **둘 다 실패**
@@ -538,6 +594,7 @@ Gateway 2대가 PostgreSQL 하나를 공유하는데 그 DB 가 VM1 에 얹혀 �
                V-12 설정 조회·드리프트 (D-2 전환과 같이)
                V-13 카탈로그 배포 ⚠️ 개발 클러스터에서 먼저
                V-14 노드 목록 이관 ⚠️ 임포트 → source 전환 순서
+               V-15 설정 편집 ⚠️ V-12 가 끝나야 시작할 수 있다
                W-1 실측 [피크 시간대]  ← R1 DoD 가 닫힌다
                §1-9 끝나고 · §4 보드 정리
 

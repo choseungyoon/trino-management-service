@@ -20,7 +20,7 @@ did not ask it to touch.
 |---|---|
 | [Watching a cluster](observing.md) | Overview, live queries, health checks, workload |
 | [Gateway](gateway.md) | Which backends exist and how they map to clusters |
-| [Cluster configuration](cluster-config.md) | What each node actually has in `etc/`, and where nodes disagree |
+| [Cluster configuration](cluster-config.md) | What each node has in `etc/`, where nodes disagree, and editing `config.properties` |
 
 ## Changing
 

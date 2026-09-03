@@ -68,7 +68,7 @@ def main(port=None):
     app, _trino = build_app(workload_enabled=True, resource_groups=True,
                             fleet_jobs=True, benchmark=True, restarts=True,
                             config_scan=True, catalogs=True,
-                            node_list=True,
+                            node_list=True, config_edit=True,
                             password=password, session_secret=secret)
 
     scheme = "https" if tls else "http"
@@ -81,6 +81,8 @@ def main(port=None):
         USER, PASSWORD if password == PASSWORD else "(TMS_DEMO_PASSWORD)"))
     print("", flush=True)
     print("  Configuration     /cluster-config?cluster=prod-a", flush=True)
+    print("                    one change is proved on prod-b; one has a", flush=True)
+    print("                    misspelt property name and is refused.", flush=True)
     print("  Catalogs          /catalogs", flush=True)
     print("                    lake_iceberg has not been proved on the", flush=True)
     print("                    development cluster, so its prod button is off.", flush=True)

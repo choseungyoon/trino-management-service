@@ -135,6 +135,7 @@ def main(out_dir):
     with serve(workload_enabled=True, resource_groups=True,
                fleet_jobs=True, benchmark=True, restarts=True,
                config_scan=True, catalogs=True, node_list=True,
+               config_edit=True,
                # On, so the Gateway screen shows its tables rather than only
                # the "integration is off" banner.
                gateway={"enabled": True, "base_url": "https://gw.invalid:8080"},

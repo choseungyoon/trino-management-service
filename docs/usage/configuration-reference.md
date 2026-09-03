@@ -222,21 +222,31 @@ cluster_ops:
   catalog_deploy:                                  # catalogs screen
     playbook: /etc/tms/ansible/deploy-catalog.yml
     timeout_seconds: 900
+
+  config_deploy:                                   # cluster-config screen
+    playbook: /etc/tms/ansible/deploy-config.yml
+    timeout_seconds: 900
 ```
 
-### Three playbooks, three purposes
+### Four playbooks, four purposes
 
-They must be **three different files**, and TMS refuses to start if two of them
+They must be **four different files**, and TMS refuses to start if two of them
 point at the same path.
 
 | | |
 |---|---|
 | `ansible.playbook` | **Restarts.** Driven by the safe sequence, which drains first |
 | `config_scan.playbook` | **Reads only.** No task in it changes a node |
-| `catalog_deploy.playbook` | **Writes a file.** Does not restart — restarting is the sequence's job |
+| `catalog_deploy.playbook` | **Writes a catalog file.** Does not restart |
+| `config_deploy.playbook` | **Merges edits into config.properties.** Does not restart |
 
 Keeping them apart is what lets you confirm which is which by reading one short
-file. Templates for the second and third are in `docs/templates/`.
+file. Templates for the last three are in `docs/templates/`.
+
+> `config_deploy` also requires `config_scan` to be on, and TMS refuses to
+> start otherwise. The scan is where the list of valid property names comes
+> from, and without it TMS cannot tell a typo from a real property — a typo
+> stops Trino from starting.
 
 ### `restart_mode: ansible`
 
@@ -256,10 +266,11 @@ Shared by the config scan and catalog deployment:
 |---|---|
 | Config scan | A node that did not answer is not reported as drift there |
 | Catalogs | Where a catalog must be proved before it can go anywhere else |
+| Config changes | Same — and the same reason: a bad value stops every node it reaches |
 
-> With `catalog_deploy` on and this list empty, **TMS refuses to start**. A
-> gate with nowhere to run is worse than no gate, because people believe it is
-> there.
+> With `catalog_deploy` or `config_deploy` on and this list empty, **TMS
+> refuses to start**. A gate with nowhere to run is worse than no gate,
+> because people believe it is there.
 
 ---
 

@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import { ApiError, api } from "../api";
 import { ClusterTabs, useCluster } from "../components/ClusterTabs";
+import { ConfigChangesPanel } from "../components/ConfigChangesPanel";
 import { Icon } from "../components/Icon";
 import { relativeTime } from "../format";
 import { useApi } from "../useApi";
@@ -241,6 +242,11 @@ export function ClusterConfig() {
             </section>
           </>
         ) : null}
+
+        {/* Below the scan, because a change is written against what the scan
+            found - the property names it collected are what the typo check
+            compares to. */}
+        <ConfigChangesPanel cluster={cluster} canManage={data?.can_scan ?? false} />
       </main>
     </>
   );

@@ -83,6 +83,13 @@ ACTION_CATALOG_DEPLOY = "CATALOG_DEPLOY"
 #: - "who took this worker off the list" has to stay answerable.
 ACTION_CLUSTER_NODE_CHANGE = "CLUSTER_NODE_CHANGE"
 
+#: Editing a config.properties change set, and sending one to a cluster. Two
+#: types because they carry different weight: the first writes a row in TMS,
+#: the second writes a file on every node - and an unknown property name there
+#: stops the server from starting.
+ACTION_CONFIG_CHANGE = "CONFIG_CHANGE"
+ACTION_CONFIG_DEPLOY = "CONFIG_DEPLOY"
+
 ALLOWED_ACTION_TYPES = frozenset(
     [
         ACTION_QUERY_KILL,
@@ -101,6 +108,8 @@ ALLOWED_ACTION_TYPES = frozenset(
         ACTION_CATALOG_CHANGE,
         ACTION_CATALOG_DEPLOY,
         ACTION_CLUSTER_NODE_CHANGE,
+        ACTION_CONFIG_CHANGE,
+        ACTION_CONFIG_DEPLOY,
     ]
 )
 
@@ -112,6 +121,7 @@ TARGET_RESOURCE_GROUP = "resource_group"
 TARGET_BENCHMARK_SET = "benchmark_query_set"
 TARGET_CATALOG = "catalog"
 TARGET_NODE_LIST = "cluster_node"
+TARGET_CONFIG_CHANGE = "config_change"
 
 # The reason is forwarded to Trino and shown to the user whose query was killed,
 # so it is capped and flattened to a single line.

@@ -253,6 +253,33 @@ class CatalogDeployConfig:
 
 
 @dataclass(frozen=True)
+class ConfigDeployConfig:
+    """Editing config.properties on nodes (FR-CO-03, D-018 step 3).
+
+    ⛔ A fourth playbook, and the fourth different file. Restart, read-only
+    scan, catalog write and config edit each do one thing, and keeping them
+    apart is what lets an operator confirm which is which by reading one short
+    file rather than by trusting a name.
+
+    ⛔ It merges edits into an existing file; it never writes the file whole.
+    The scan redacts credential-shaped values, so TMS's copy holds `[REDACTED]`
+    where the secrets are - writing that copy back would replace working
+    passwords with that literal string.
+
+    ⛔ It does not restart. Trino reads config.properties at startup, so a
+    deploy changes nothing until the safe sequence runs, and that one drains
+    first.
+    """
+
+    playbook: str = ""
+    timeout_seconds: float = 900.0
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.playbook)
+
+
+@dataclass(frozen=True)
 class ClusterOpsConfig:
     """The safe restart sequence (FR-CO-02).
 
@@ -267,6 +294,7 @@ class ClusterOpsConfig:
     ansible: AnsibleConfig = field(default_factory=AnsibleConfig)
     config_scan: ConfigScanConfig = field(default_factory=ConfigScanConfig)
     catalog_deploy: CatalogDeployConfig = field(default_factory=CatalogDeployConfig)
+    config_deploy: ConfigDeployConfig = field(default_factory=ConfigDeployConfig)
 
 
 @dataclass(frozen=True)
@@ -757,9 +785,47 @@ def _build_cluster_ops(raw: Dict[str, Any], whole: Dict[str, Any]) -> ClusterOps
                 "cannot check one in advance - the development cluster is the "
                 "only check there is.")
 
+    edit_raw = raw.get("config_deploy") or {}
+    config_deploy = ConfigDeployConfig(
+        playbook=str(edit_raw.get("playbook") or ""),
+        timeout_seconds=float(edit_raw.get("timeout_seconds", 900)),
+    )
+    if config_deploy.enabled:
+        if config_deploy.timeout_seconds <= 0:
+            raise ConfigError(
+                "cluster_ops.config_deploy.timeout_seconds must be positive")
+        # ⛔ Four playbooks, four files. Any overlap puts one file's behaviour
+        # behind another's name, and the restart case is the dangerous one: a
+        # restart inside a deploy is the path around the drain.
+        for other, what in ((ansible.playbook, "restart"),
+                            (scan.playbook, "config scan"),
+                            (catalog_deploy.playbook, "catalog deploy")):
+            if other and config_deploy.playbook == other:
+                raise ConfigError(
+                    "cluster_ops.config_deploy.playbook must not be the {} "
+                    "playbook. Each of these does one thing, and being able to "
+                    "read one short file to find out which is the point."
+                    .format(what))
+        # ⛔ The config scan is not optional here: its output is the list of
+        # property names a deploy checks a typo against, and an unknown name
+        # stops every node it reaches from starting.
+        if not scan.enabled:
+            raise ConfigError(
+                "cluster_ops.config_deploy is on but cluster_ops.config_scan is "
+                "not. The scan is where the list of valid property names comes "
+                "from - without it TMS cannot tell a typo from a real property, "
+                "and a typo stops Trino from starting.")
+        if not scan.development_clusters:
+            raise ConfigError(
+                "cluster_ops.config_deploy is on but no development cluster is "
+                "listed in cluster_ops.config_scan.development_clusters. A bad "
+                "value stops every node it reaches from starting; the "
+                "development cluster is where that is found out.")
+
     return ClusterOpsConfig(restart_mode=mode, drain_timeout_seconds=drain_timeout,
                             ansible=ansible, config_scan=scan,
-                            catalog_deploy=catalog_deploy)
+                            catalog_deploy=catalog_deploy,
+                            config_deploy=config_deploy)
 
 
 def build_config(raw: Dict[str, Any], where: str = "config.secret.yaml") -> Config:

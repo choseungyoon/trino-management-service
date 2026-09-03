@@ -306,6 +306,53 @@ cluster_ops:
     extra_vars: {}
     #   ansible_ssh_private_key_file: /etc/tms/ssh/trino-nodes.pem
 
+  # ⛔ Four playbooks, four files. TMS refuses to start if two of these point
+  # at the same path. Being able to tell which one writes by reading one short
+  # file is the point — the restart one is the dangerous one to confuse,
+  # because a restart inside a deploy skips the drain.
+  #
+  # Templates for all three below are in docs/templates/.
+
+  # FR-CO-01 — reading each node's configuration back. Reads only; there is no
+  # task in collect-config.yml that changes a node. Off unless set.
+  config_scan:
+    playbook: ""
+    #   /etc/tms/ansible/collect-config.yml
+    timeout_seconds: 600
+    # Clusters whose node count changes with whatever is being tested, so a
+    # node that did not answer is not reported as drift. Also where a catalog
+    # or a configuration change has to be proved before it may go anywhere
+    # else (DECISIONS.md D-018).
+    development_clusters: []
+
+  # FR-CATALOG — writing catalog files onto nodes. Does not restart: Trino
+  # reads static catalogs at startup only, so a deploy changes nothing until
+  # the safe sequence runs, and that one drains first.
+  #
+  # ⛔ With this on and development_clusters empty, TMS refuses to start. A bad
+  # catalog stops every node it reaches from booting and TMS cannot check one
+  # in advance, so the development cluster is the only check there is.
+  catalog_deploy:
+    playbook: ""
+    #   /etc/tms/ansible/deploy-catalog.yml
+    timeout_seconds: 900
+
+  # FR-CO-03 — editing config.properties from the console (D-018 step 3).
+  #
+  # ⛔ Merges edits; never writes the file whole. The scan above redacts
+  # credential-shaped values, so TMS's copy of a node's config.properties holds
+  # the literal string [REDACTED] where the secrets are. Writing that copy back
+  # would replace working passwords with it on every node at once.
+  #
+  # ⛔ Requires config_scan. That is where the list of valid property names
+  # comes from, and an unknown name stops Trino from starting — without the
+  # list TMS cannot tell a typo from a real property, so it refuses to start
+  # rather than deploy unchecked.
+  config_deploy:
+    playbook: ""
+    #   /etc/tms/ansible/deploy-config.yml
+    timeout_seconds: 900
+
 health:
   # Consecutive polls a test must hold a state before the transition is
   # recorded. Stops a single spike from generating an event.
