@@ -433,6 +433,41 @@ class LinkHubTest(unittest.TestCase):
         ids = [link["id"] for link in service.links(VIEWER)["links"]]
         self.assertIn("query_history", ids)
 
+    def _grafana(self, template):
+        service, _, _, _ = build_service(config_overrides={
+            "deeplinks": {"grafana": {"cluster_dashboard": template}}})
+        return [link for link in service.links(VIEWER)["links"]
+                if link["id"].startswith("grafana")]
+
+    def test_a_configured_grafana_dashboard_appears(self):
+        """⛔ It never did. The dashboard URL is a per-cluster template, and
+        the hub rendered it with an empty cluster - which produces no URL at
+        all, so the link was missing however it was configured."""
+        links = self._grafana(
+            "https://grafana.invalid/d/trino?var-cluster={cluster}")
+        self.assertEqual([link["url"] for link in links], [
+            "https://grafana.invalid/d/trino?var-cluster=prod-a",
+            "https://grafana.invalid/d/trino?var-cluster=prod-b",
+        ])
+        self.assertEqual([link["label"] for link in links],
+                         ["Grafana (prod-a)", "Grafana (prod-b)"])
+
+    def test_a_template_without_a_cluster_placeholder_is_one_link(self):
+        # It renders identically for every cluster; a column of identical
+        # links naming clusters it does not select would be a lie.
+        links = self._grafana("https://grafana.invalid/d/trino")
+        self.assertEqual(len(links), 1)
+        self.assertEqual(links[0]["label"], "Grafana")
+
+    def test_every_link_carries_an_icon(self):
+        # The sidebar reads `icon` off each entry. The server never sent one,
+        # so every tool rendered with the fallback glyph.
+        service, _, _, _ = build_service()
+        links = service.links(VIEWER)["links"]
+        self.assertTrue(links)
+        for link in links:
+            self.assertTrue(link.get("icon"), link)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

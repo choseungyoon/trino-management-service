@@ -1,7 +1,7 @@
-# BOLTS — Bolt 이력 및 계획
+# BOLTS — 과거 Bolt 이력
 
-> **소유자**: `orchestrator`
-> TEAMS.md §5 순서: ① 계획 제시 → **인간 승인** → ② `trino-expert` 선행 검증 → ③ 담당 에이전트 실행 → ④ `reviewer` 게이트 → ⑤ 인간 최종 확인
+> 완료된 AI-DLC 작업의 기록이다. 현재 계획이나 다음 작업은 여기서 읽지 않는다.
+> 현재 상태는 `TODO.md`, 개발 절차는 `TEAMS.md`가 주인이다.
 
 ---
 

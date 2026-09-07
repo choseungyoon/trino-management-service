@@ -159,15 +159,15 @@ Design notes are in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 These are enforced in code and in review, not just stated.
 
-1. **Never on the query path.** TMS reads Trino; it never proxies a query. If
-   the event listener buffer fills, events are dropped rather than blocking a
-   coordinator.
+1. **Never on the query path.** TMS reads Trino; it never proxies a query. The
+   separate completed-query history system remains outside this repository.
 2. **Never render missing data as healthy.** Stale wears a badge, unknown
    outranks good, and a permission problem names the fix rather than showing an
    empty list.
-3. **Every write is a ceremony.** A reason is required, the target is shown
-   before you confirm, and the audit row is written or the write does not
-   happen.
+3. **Operational writes are a ceremony.** A reason is required, the target is
+   shown before confirmation, and the audit row is written or the action is
+   refused. D-013 defines the work-board exception; stopping future benchmark
+   work is the documented safe-stop exception.
 4. **Destructive actions cannot skip their sequence.** There is no endpoint
    that stops traffic without draining, and none that deploys and restarts in
    one act.
@@ -181,7 +181,10 @@ These are enforced in code and in review, not just stated.
 
 ## Status
 
-In production use. Interfaces are still moving; treat this as pre-1.0.
+In internal verification before launch. The intended users are the two or three
+operators who run the department's Trino clusters; planned TMS maintenance may
+make the console temporarily unavailable, but must never interrupt query traffic.
+Interfaces are still moving; treat this as pre-1.0.
 
 | | |
 |---|---|
@@ -197,9 +200,9 @@ working document rather than user documentation, and in Korean.
 
 ## Contributing
 
-Read [`CLAUDE.md`](CLAUDE.md) first — it holds the rules that a change is
-reviewed against, including the two that reject the most work: *do not assert
-an unverified Trino fact*, and *do not build a non-goal*.
+Read [`docs/TEAMS.md`](docs/TEAMS.md) first. Codex plans and reviews; Claude
+implements approved slices on feature branches. `AGENTS.md` and `CLAUDE.md`
+contain their role-specific instructions.
 
 ```bash
 venv/bin/pip install -e ".[dev]"

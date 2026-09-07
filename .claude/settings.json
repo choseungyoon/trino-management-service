@@ -2,5 +2,20 @@
   "enabledPlugins": {
     "frontend-design@claude-plugins-official": true,
     "superpowers@claude-plugins-official": true
+  },
+  "permissions": {
+    "allow": [
+      "Bash(./scripts/codex-review.sh *)",
+      "Bash(./scripts/push-current-feature.sh)"
+    ],
+    "deny": [
+      "Bash(git push --force*)",
+      "Bash(git push -f*)",
+      "Bash(git push --delete*)",
+      "Bash(git push origin main)",
+      "Bash(git reset --hard*)",
+      "Bash(git clean*)",
+      "Bash(git rebase*)"
+    ]
   }
 }

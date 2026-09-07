@@ -1,4 +1,4 @@
-# FRONTEND_PLAN — 화면 × 필요한 API
+# FRONTEND_PLAN — 화면 × 필요한 API (완료된 전환 기록)
 
 
 > **✅ 수행 완료 (2026-08-27).** 화면 12/12, API 47개, `src/tms/web/` 삭제.

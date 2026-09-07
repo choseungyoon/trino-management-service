@@ -181,27 +181,54 @@ class TmsService:
         }
 
     def links(self, principal: Principal) -> Dict[str, Any]:
-        """Link hub. Entries with no configured URL are omitted entirely."""
+        """Link hub. Entries with no configured URL are omitted entirely.
+
+        ⛔ The Grafana dashboard is per cluster, so it produces one entry per
+        cluster the way the Trino UI does. It is configured as a template
+        holding `{cluster}` - rendering it without one produced no URL at all,
+        which is why the link never appeared however it was configured.
+        """
         deeplinks = self.config.deeplinks
-        candidates = [
-            ("grafana", "Grafana", build_grafana_url(deeplinks.grafana_cluster_dashboard, "")),
-            ("superset", "Superset", deeplinks.superset_url),
-            ("query_history", "Query History", deeplinks.query_history_home_url),
+        candidates = []
+
+        for cluster in self.config.clusters:
+            url = build_grafana_url(deeplinks.grafana_cluster_dashboard, cluster.name)
+            if url:
+                candidates.append(("grafana_" + cluster.name,
+                                   "Grafana ({})".format(cluster.name), url, "grafana"))
+
+        candidates += [
+            ("superset", "Superset", deeplinks.superset_url, "superset"),
+            ("query_history", "Query History", deeplinks.query_history_home_url,
+             "history"),
         ]
         if self.config.gateway.enabled and self.config.gateway.base_url:
-            candidates.append(("gateway_ui", "Trino Gateway", self.config.gateway.base_url))
+            candidates.append(("gateway_ui", "Trino Gateway",
+                               self.config.gateway.base_url, "trino"))
         for cluster in self.config.clusters:
             if cluster.trino_ui_url:
                 candidates.append(
-                    ("trino_ui_" + cluster.name, "Trino UI ({})".format(cluster.name), cluster.trino_ui_url)
+                    ("trino_ui_" + cluster.name,
+                     "Trino UI ({})".format(cluster.name), cluster.trino_ui_url,
+                     "trino")
                 )
-        return {
-            "links": [
-                {"id": link_id, "label": label, "url": url}
-                for link_id, label, url in candidates
-                if url
-            ]
-        }
+
+        # A template with no `{cluster}` in it renders the same URL for every
+        # cluster. The config check warns about that; here it would be a column
+        # of identical links, so the duplicates are dropped and the survivor
+        # loses the cluster name it does not actually select.
+        links, seen = [], set()
+        for link_id, label, url, icon in candidates:
+            if not url or url in seen:
+                continue
+            seen.add(url)
+            links.append({"id": link_id, "label": label, "url": url, "icon": icon})
+        if deeplinks.grafana_cluster_dashboard and \
+                "{cluster}" not in deeplinks.grafana_cluster_dashboard:
+            for link in links:
+                if link["id"].startswith("grafana_"):
+                    link["label"] = "Grafana"
+        return {"links": links}
 
     # -------------------------------------------------------- FR-QUERY-LIVE
 

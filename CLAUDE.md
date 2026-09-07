@@ -1,274 +1,66 @@
-# CLAUDE.md — TMS 프로젝트 컨텍스트
-
-> 이 파일은 Claude Code가 매 세션 시작 시 읽는 진입점이다. **모든 에이전트는 작업 전 이 파일을 읽는다.**
-
----
-
-## 프로젝트 개요
-
-**TMS (Trino Management Service)** — Starburst Enterprise를 사용할 수 없는 환경에서, OSS Trino로 5만 사용자 규모 서비스를 안정 운영하기 위한 자체 관리 플랫폼.
-
-**방법론**: AI-DLC (Inception → Construction → Operations, Bolt 단위)
-
----
-
-## 환경 사실 (변경 시 이 파일을 갱신할 것)
-
-| 항목 | 값 |
-|---|---|
-| Trino 버전 | **477** |
-| 클러스터 | 2개 (코디네이터 1 + **워커 11** 각각, 2026-08-13 확인). `node.environment` 는 **클러스터마다 다른 값** |
-| 노드 사양 | 서버당 RAM **560GB**, JVM `-Xmx 250G`, `memory.heap-headroom-per-node 30GB` → 워커 쿼리 풀 220GB, **클러스터 총 2,420GB** |
-| 메모리 상한 | **`query.max-memory` 적용 완료 (2026-08-15).** 이전 값 4016GB 는 클러스터 총량보다 커서 상한이 없는 상태였다. ⚠️ 힙이 아직 250G 면 클러스터가 2,420GB 이므로 900GB = **37%** 다 — 힙을 400G 로 올리면 24% 가 된다. `query.max-memory-per-node` 는 176GB 유지 (270GB 는 힙 400G 를 요구한다) |
-| 리소스 그룹 | **db 매니저** (D-010, 2026-08-14 사내 적용). TMS PostgreSQL 의 `trino_resource_groups` schema. 값 변경은 `UPDATE` → 10초 반영, 재시작 없음. **group provider 없음** (`etc/group-provider.properties` 부재) → `userGroup`/`user_group_regex` 셀렉터는 영구 미매칭 |
-| Gateway | **버전 19** (2026-08-07 확인), 2대, PostgreSQL 공유 (현재 VM1에 co-located = **SPOF**) |
-| Gateway 설정 | 백엔드는 **Gateway UI로 등록**. **라우팅 그룹 미사용**(= 기본 랜덤 라우팅). `databaseCache` 활성, **`expireAfterWrite: 10m`** (⚠️ DB 장애 10분 초과 시 라우팅 실패 — §T2-4) |
-| LB | IP HASH (**세션 어피니티로 교체 예정 — 임시 우회책**) |
-| 인프라 | VM + systemd (**K8s 미사용, 확정**) |
-| 노드 목록 | `fleet.source` 로 정한다 (D-019). `inventory`(기본) = 손으로 고치는 파일. `tms` = **코디네이터에게 물어서 채우고 TMS 가 인벤토리 파일을 생성한다** — 이때 두 `inventories` 맵이 비어 있어야 하고 아니면 기동 거부. 옮길 때는 `tms-import-inventory` 를 **먼저** |
-| 증설 | 수동/스크립트 (**확정**) |
-| 접근제어 | OPA policy-as-code, 플랫폼팀 Git 관리 (**확정**) |
-| 스토리지 | Ceph S3 (Spooling), Iceberg + HMS |
-| 규모 | **현재 약 50명**, 목표 5만 사용자 (2026-08-08 확인) |
-| 운영 단계 | **아직 운영 서비스 아님** — 설정 변경이 용이한 시기 |
-| Python | 3.9+ 호환 필수 |
-| 백엔드 | FastAPI + systemd |
-| 프론트 | **React 19 SPA.** `frontend/` 를 Vite 로 빌드해 `src/tms/ui/assets/` 에 **커밋하고** FastAPI 가 `/` 에서 서빙한다 — **런타임 Node 없음** (D-016, 전환 완료 2026-08-27). 인증은 **서버가 설정하는 세션 쿠키** — `localStorage` 토큰으로 바꾸지 않는다. ⛔ **프론트를 고치면 `npm --prefix frontend run build` 하고 산출물을 같이 커밋한다** — 안 하면 서버는 옛 번들을 계속 서빙한다 |
-
-**사내 제약**
-- 외부 PyPI 직접 접근 불가 → Artifactory 프록시 경유
-- **npm 레지스트리는 사내에 구축돼 있다** (2026-08-26 확인). React·Vue·Next 를 쓰는 사내 과제가 다수 — **프론트엔드 프레임워크는 제약 사항이 아니다.** D-011 의 근거 ① 은 이것으로 무효가 됐다
-- 외부 도구에 코드 붙여넣기 금지 (오류 메시지만 공유 가능)
-
----
-
-## 절대 규칙 (위반 시 작업 반려)
-
-### 1. 검증 없이 단정하지 않는다
-**Trino 477 공식 문서에서 확인하지 않은 config property, API 경로, SPI 시그니처를 제안하거나 코드에 넣지 않는다.**
-버전 간 삭제·변경이 잦다. **과거에 존재하지 않는 property를 제안해 클러스터 기동 실패를 유발한 이력이 있다.**
-확인 불가 시 "확인 불가"라고 쓴다. 추측으로 채우지 않는다.
-
-### 2. NFR-ISOLATION — 쿼리 경로 불침범
-TMS가 완전히 다운되어도 모든 쿼리는 정상 실행되어야 한다.
-- 쿼리 실행 프록시 코드 작성 금지
-- EventListener는 **비동기 + 버퍼 + 백프레셔**. 저장소 다운 시 **이벤트를 버릴지언정 코디네이터를 블로킹하지 않는다**
-- External Routing Service는 실패 시 `defaultRoutingGroup`으로 폴백
-
-### 3. 쓰기 액션은 예외 없이
-`reason` 파라미터 필수 (없으면 400) + 감사 기록 + 확인 절차. 관리자 역할 한정.
-
-### 4. 비목표를 침범하지 않는다
-아래는 **만들지 않는다.** "있으면 좋을 것 같아서" 추가하는 것을 금지한다.
-
-| 비목표 | 대체 |
-|---|---|
-| 웹 SQL 에디터 | Superset SQL Lab |
-| 메트릭 차트/대시보드 자체 구현 | Grafana |
-| 알림 엔진 자체 구현 | Alertmanager |
-| 로그 수집·인덱싱·검색 자체 구현 | Loki / OpenSearch |
-| 권한 관리 UI (RBAC 편집) | OPA + Git PR |
-| 데이터 카탈로그 / 데이터 프로덕트 / LLM 어시스턴트 | 범위 밖 |
-| 클러스터 간 정적 가중치 라우팅 | `QueryCountBasedRouterProvider` (least-loaded) |
-
-**웹 SQL 에디터의 경계는 입력이 아니라 출력이다.** 벤치마크 쿼리 세트 화면(FR-BM-06)에는 SQL 텍스트 박스가 있다. 그것이 비목표를 어기지 않는 이유는 **결과 행을 어디에서도 표시하지 않기 때문**이다 — 실행이 돌려주는 것은 밀리초뿐이고, Trino 가 만든 행은 세어서 버린다. 결과를 보여 달라는 요구가 나오면 그건 기능 추가가 아니라 이 비목표를 다시 여는 것이다 (D-014).
-
-### 5. 파괴적 액션의 안전 시퀀스
-클러스터/컴포넌트 재시작은 **반드시**: routing group 비활성화 → 유입 중단 확인 → 실행 쿼리 drain → 재시작 → 헬스 확인 → 재활성화.
-**이 시퀀스를 건너뛰는 경로는 구현하지 않는다.**
-워커 제거는 **graceful shutdown 선행 필수**.
-
-### 6. 코드 주석은 **영어로, 짧게**
-
-**목표는 오픈소스다.** 사내 문맥을 모르는 사람이 읽는다고 가정한다.
-
-| 주석에 쓴다 | 주석에 쓰지 않는다 |
-|---|---|
-| 이 줄이 왜 이 모양인지 (1~3줄) | 결정의 근거와 검토한 대안 → `DECISIONS.md` |
-| 실측한 사실 (버전·종료코드·실제 응답) | 무엇을 시도했다가 말았는지 |
-| ⛔ 잘못 고치면 깨지는 것 (4~5줄까지 허용) | `FR-BM-04`·`D-009`·"절대규칙 5" 같은 **사내 문서 코드** |
-
-**사내 문서 번호를 코드에 넣지 않는다.** 외부 독자에게는 아무 뜻이 없다. 규칙의 내용을 한 문장으로 쓴다 — 예: "절대규칙 5 를 우회한다" 대신 "nothing here checks that the cluster was drained".
-
-**6줄을 넘는 주석 블록은 신호다.** 그 내용은 대개 결정 기록이고, 결정은 `DECISIONS.md` 에 산다.
-
-### 7. 인간 결정 영역을 침범하지 않는다
-`[NEEDS-HUMAN-DECISION]` 태그 발견 시 **즉시 중단하고 질문**한다.
-
----
-
-## 문서 구조
-
-> **전량이다.** 여기 없는 문서는 없다. 하나를 추가한다면 이 표에도 추가한다 — 목록에 없는 문서는 아무도 읽지 않고, 아무도 읽지 않는 문서는 조용히 틀려진다.
->
-> **읽는 순서**: `CLAUDE.md` → (기술 사실이 필요하면) `TRINO_VERIFIED.md` → (다음 할 일이면) `TODO.md` → 나머지는 필요할 때.
-
-### 항상
-
-| 파일 | 내용 |
-|---|---|
-| `CLAUDE.md` | 이 파일. 절대 규칙 · 환경 사실 |
-| `docs/TRINO_VERIFIED.md` | **검증 완료 사실만 기록** (trino-expert 소유). **여기 없는 property/API/SPI 는 코드에 넣지 않는다** |
-| `docs/TODO.md` | **사람이 해야만 진행되는 것 전량.** 사내에서 할 것 · 결정 · 타 팀 + 권장 순서. `NEXT_STEPS.md` 와 `runbooks/onsite-checklist.md` 를 여기 합쳤다 (2026-08-27) |
-| `docs/WORK_BOARD.md` | TMS 작업 보드(`/work`)의 스냅샷. **자동 생성 (`tms-work-export`) — 손으로 고치지 않는다.** 상태가 `TODO.md` 와 어긋나면 `TODO.md` 가 이긴다 |
-
-### 무엇을 만들 것인가
-
-| 파일 | 언제 읽나 |
-|---|---|
-| `docs/REQUIREMENTS.md` | 구현 착수 시. **릴리스 계획은 부록 B 가 최신** (부록 A = v0.2 추가분) |
-| `docs/BACKLOG.md` | 작업 범위 확인 시. 항목별 SETUP/BUILD/DELEGATE/REJECT 판정 |
-| `docs/DESIGN_R2.md` | R2 착수 시. 설계 + 착수 가능 여부 판정 |
-| `docs/DESIGN_WL07.md` | 리소스 그룹 편집(FR-WL-07~10). **검증 규칙 전량(V1~V11 · W1~W5)은 여기가 출처** |
-| `docs/FRONTEND_PLAN.md` | **프론트 전환 착수 시.** 화면 12개 × 필요한 API 목록 + `views.py` 의 어떤 로직이 넘어가는지 (D-016) |
-| `docs/FRONTEND_PROGRESS.md` | **전환 작업을 이어받을 때 여기부터.** 어디까지 했나 · 옮기면서 정한 것 · 화면을 옮길 때의 규칙 |
-
-### 어떻게 만들었나 (구현 참조)
-
-| 파일 | 언제 읽나 |
-|---|---|
-| `docs/ARCHITECTURE.md` | 컴포넌트 경계·배포 단위·성능 예산 확인 시 |
-| `docs/API_R1.md` | 엔드포인트 추가/변경 시 |
-| `docs/HEALTH_TESTS.md` | 헬스 테스트 추가·임계값 조정 시 |
-| `docs/AUDIT_MODEL.md` | 감사 대상 액션 추가 시 |
-| `docs/PERF_MEASUREMENT.md` | NFR-PERF-03 부하 판단 시 |
-
-### 왜 그렇게 정했나
-
-| 파일 | 언제 읽나 |
-|---|---|
-| `docs/DECISIONS.md` | 결정을 되돌리거나 재확인할 때 (D-001~) |
-| `docs/BOLTS.md` | 진행 상태·이력 확인 시 |
-| `docs/TEAMS.md` | 역할·승인 게이트 확인 시 |
-| `docs/MARKET_RESEARCH.md` | 설계 판단 근거 필요 시 (SEP/Cloudera/Datadog) |
-
-### 사용자에게 보여 주는 것 (영문 · 오픈소스 독자용)
-
-> **독자가 다르다.** 위의 문서들은 이 팀이 읽고, 아래는 **사내 문맥을 모르는 Trino 운영자**가 읽는다. 그래서 영문이고, 사내 고유명사·사람 이름·`D-018` 같은 문서 번호를 본문에 쓰지 않는다 (링크는 괜찮다).
->
-> ⛔ **기능을 만들면 여기도 고친다.** 화면을 추가하고 usage 문서를 안 쓰면, 그 기능은 만든 사람만 아는 기능이 된다.
-
-| 파일 | 무엇 |
-|---|---|
-| `README.md` | 서비스 소개 · 무엇을 하고 무엇을 **일부러 안 하는가** · 빠른 시작 |
-| `docs/usage/README.md` | usage 문서 색인 + 모든 화면에 공통인 규약 |
-| `docs/usage/install.md` | 설치 · DB · 서비스 계정 · 첫 기동 |
-| `docs/usage/configuration-reference.md` | `config.yaml` 키 전량 |
-| `docs/usage/observing.md` | Overview · Live Queries · Health · Workload |
-| `docs/usage/safe-restart.md` · `fleet.md` | 재시작 시퀀스 · 노드 인벤토리 |
-| `docs/usage/cluster-config.md` · `catalogs.md` · `resource-groups.md` | 설정 조회 · 카탈로그 배포 · 리소스 그룹 편집 |
-| `docs/usage/benchmark.md` · `gateway.md` · `audit.md` · `work-board.md` | 나머지 |
-
-### 손에 들고 하는 것 (런북)
-
-| 파일 | 언제 읽나 |
-|---|---|
-| `docs/runbooks/deploy.md` | 사내 실환경 최초 배포 (git pull → DB → 설정 → systemd → Trino 연결) |
-| `docs/runbooks/upgrade-r2-r3.md` | 운영 중 업데이트 배포 |
-| `docs/runbooks/db-setup.md` | PostgreSQL 초기 구축 |
-| `docs/runbooks/local-account-setup.md` | 로컬 계정 (AD 연동 전까지) |
-| `docs/runbooks/gateway-config-request.md` | 운영팀 협의 시. **로컬 19 실측 기반** — `monitorType` 은 `METRICS` (UI_API 는 401) |
-| `docs/runbooks/resource-groups-db.md` | 리소스 그룹 file → db 전환 (D-010) + 메모리 재설정. **한 번에 한 클러스터씩** |
-| `docs/runbooks/benchmark.md` | 벤치마크 하네스(FR-BM) 사용. **TMS 는 클러스터를 라우팅에서 빼 주지 않는다** — 확인하고 거부만 한다. 쿼리 세트는 설정이 아니라 **화면**에서 만든다 (§2, D-014) |
-| `docs/runbooks/executequery-grant.md` | `tms-svc` 에 `ExecuteQuery` 부여 (D-012). **부여 전 OPA 카탈로그 규칙 확인이 조건** |
-| `docs/templates/` | 채워 넣는 파일 (클러스터 인벤토리 등) |
-
-### 데이터 대기 / 나중
-
-| 파일 | 언제 읽나 |
-|---|---|
-| `docs/WORKLOAD_PROFILE.md` | 사이징·SLO 논의 시. **데이터 미수집** — SLO 목표값을 막고 있음 |
-| `docs/AIOPS.md` | R6 이후 |
-
-### `docs/archive/` — 현재 상태가 아니다
-
-**착수 범위·우선순위를 여기서 읽지 않는다.** 수행이 끝난 기록이며, 이후 실측에 뒤집힌 내용이 있다. 각 파일 첫머리에 무엇이 뒤집혔는지 적어 두었다. 남겨 둔 이유는 `BACKLOG.md`·`REQUIREMENTS.md` 판정의 출처이기 때문이다.
-
-| 파일 | 무엇 |
-|---|---|
-| `docs/archive/BOLT_0.md` | Bolt 0 지시서 (수행 완료) |
-| `docs/archive/BOLT_0_RESULT.md` | Bolt 0 판정 결과. **§3 의 `monitorType: UI_API` 권고는 틀렸다** |
-| `docs/archive/mockups-r1.html` | R1 UI 목업. 실물은 `frontend/src/` |
-
----
-
-## 현재 상태 (2026-08-27 갱신)
-
-**단계**: R1 실환경 배포 완료 → Bolt 4 안전 재시작(FR-CO-02) → Fleet(FR-FL-01/03) → 리소스 그룹 db 전환(D-010) 사내 적용 완료 + 편집 화면(FR-WL-07~10) → 벤치마크 하네스(FR-BM-01/03/04) + 쿼리 세트 화면 관리(FR-BM-06, D-014) → **React SPA 전환 완료 (D-016, 화면 12/12, `src/tms/web/` 삭제)** → 노드 목록을 TMS 가 소유(D-019) → **설정 편집(D-018 3단계) — `config.properties` 를 화면에서 고쳐 배포한다. 파일을 통째로 쓰지 않고 합친다**
-
-**사내 미적용분**: 마이그레이션 `020`~`028` — 벤치마크 스케줄(D-017) · 설정 조회 · 카탈로그 배포 · 노드 목록(D-019) · 설정 편집(D-018 3단계). `010`~`019` 는 전량 적용됐다 (2026-08-26). 순서와 게이트는 `docs/TODO.md`.
-
-### ⛔ 프론트 전환 완료 (2026-08-27) — 화면을 고칠 때 읽을 것
-
-`src/tms/web/` 는 **없다.** Jinja 템플릿 41개 · htmx · `tms.js` · `views.py` · `chart.py` 전부 삭제됐고, 콘솔은 `frontend/` 의 React SPA 다.
-
-| 어디를 고치나 | 무엇 |
-|---|---|
-| 화면 | `frontend/src/screens/*.tsx` · 공통은 `components/` |
-| 스타일 | `frontend/src/tms.css` — **승인된 디자인 시스템이다. 클래스 이름을 지어내지 않는다** (`tests/test_console_styles.py` 가 대조한다) |
-| API | `src/tms/api/routes/*.py` — 규칙은 서비스 계층에 있고 라우트는 나르기만 한다 |
-| 서빙 | `src/tms/ui/mount.py` |
-
-**옮기기 전에 묻는다: "이건 API 가 해야 하나?"** 무엇이 어떤 상태인지, 어떤 숫자가 어떻게 묶이는지, 어떤 문장이 붙는지는 **서버 지식**이다. 클라이언트에 쓰면 두 번째 정의가 생기고, 그 둘은 반드시 어긋난다. 지금까지 그렇게 되돌린 것은 `docs/FRONTEND_PROGRESS.md` 의 표에 전량 있다.
-
-**⛔ 빌드 산출물을 커밋한다.** 배포 호스트에 Node 가 없다 — 저장소에 없는 것은 서버에도 없다.
-
-**착수 전에 `docs/WORK_BOARD.md` 를 읽는다.** 관리자가 `/work` 화면에서 올린 요청과 각 항목의 현재 상태가 거기에 있다. 파일은 `tms-work-export` 가 만든다 — 보드는 사내망 DB 에 있고, 사외에서 읽을 방법은 이 파일뿐이다.
-
-**둘의 경계 — 겹치는 게 아니라 나뉜다.**
-
-| 문서 | 무엇의 주인 |
-|---|---|
-| `docs/WORK_BOARD.md` (= `/work`) | **상태**. 무엇이 결정 대기·차단·진행 중인가. 관리자 요청의 접수처 |
-| `docs/TODO.md` | **사람이 해야만 진행되는 것**의 상세 — 왜 사람이어야 하는지, 무엇을 확인해야 하는지 |
-| `docs/DECISIONS.md`·`REQUIREMENTS.md`·`BACKLOG.md` | **근거**. 왜 그렇게 정했나 |
-
-보드와 문서가 어긋나면 **문서가 이긴다.** 보드는 상태만 갖는다 — 여기에 근거를 복사해 두면 두 개의 진실이 생기고, 그게 부록 B 와 `BACKLOG.md` 가 어긋났던 이유다.
-
-### 재시작 실행 방식 — 켜기 전에 읽을 것
-
-`cluster_ops.restart_mode` 는 **기본 `manual`** 이다. `ansible` 로 바꾸면 **TMS 호스트가 모든 Trino 노드에 SSH 접근**을 갖는다. 편의가 아니라 보안 결정이며 D-009 에 기록돼 있다. Ansible 이 설치돼 있다는 이유로 켜지 않는다.
-
-**독립된 deactivate 토글은 만들지 않는다.** 유입 차단은 안전 시퀀스의 1단계로만 도달할 수 있다 — 별도 토글이 있으면 그것이 곧 절대규칙 5 를 건너뛰는 경로다.
-
----
-
-**이전 단계**: Bolt 0(검증) 완료 → R1 착수 승인 → Bolt 1/2 (R1 설계·구현)
-**미해소 Blocker**: **0건** — B6는 2026-08-07 부분 해소(버전 19 · `databaseCache` 활성 확인). 백엔드 목록 등록 방식만 운영팀 회신 대기이며 R1을 막지 않는다. B1/B2/B3/B5 해소, B4는 R1 범위 밖으로 이월.
-
-### ⛔ R1 범위 변경 (2026-08-06 인간 결정)
-
-**FR-QUERY-HISTORY를 R1에서 제외한다.** 이미 별도 프로젝트로 구현되어 운영 중이다. 추후 두 프로젝트를 통합한다.
-
-| 영향 | 내용 |
-|---|---|
-| R1 범위 | FR-PORTAL, **FR-QUERY-LIVE**, FR-CLUSTER-HEALTH, FR-AUDIT-ACTION, FR-LOG-DEEPLINK (5개) |
-| `src/event-listener/` | **R1에서 만들지 않는다** |
-| `data-pipeline-dev` | R1 배정 작업 없음 |
-| B4 | R1을 막지 않음. 통합 시점으로 이월 |
-| FR-LD-01 | R1 딥링크 진입점은 **실행 중** 쿼리·노드·헬스로 한정. 완료 쿼리는 기존 시스템 소관 |
-
-**금지**: 기존 프로젝트가 이미 하는 일(EventListener 수집, 완료 쿼리 저장/검색)을 TMS에 다시 만들지 않는다.
-
----
-
-## ⚠️ 실측에 뒤집힌 가정 (기억할 것)
-
-**전부 "문서·통념이 맞다고 여겼다가 재 봤더니 아니었던" 것들이다.** 근거는 모두 `TRINO_VERIFIED.md`.
-
-### Bolt 0 검증에서 (2026-08-04)
-
-- **런타임 로그 레벨 변경은 OSS Trino 477에 존재한다** — REST가 아니라 JMX MBean `io.airlift.log:name=Logging`. FR-LOGLEVEL은 폐기가 아니라 축소 존치.
-- **TMS는 RMI 없이 HTTP로 JMX를 읽을 수 있다** — `GET /v1/jmx/mbean/{objectName}` (`MANAGEMENT_READ`). 관측성 전반의 수집 경로.
-- **Gateway charset 버그(B1)는 업스트림에서 이미 수정됐다** — Gateway 19. 조치는 개발이 아니라 업그레이드.
-- **`ALTER CATALOG`는 Trino 477에 없다.** 카탈로그 "변경" 기능을 만들지 않는다.
-- **Gateway 19가 리소스 그룹 관리 기능을 제거했다.** FR-WORKLOAD의 데이터 소스는 Trino다.
-
-### 로컬 실환경 실측에서 (2026-08-10~11)
-
-- **`GET /v1/node` 는 477 에 없다 (404).** "보조 소스"가 아니라 소스가 아니다.
-- **`system.runtime.nodes` 는 `PERMISSION_DENIED`** — `ExecuteQuery` 가 필요하고 TMS 는 의도적으로 갖고 있지 않다. 노드 조인 여부는 개수 비교로만 판정한다 (D-1 미결).
-- **`trino.metadata:name=DiscoveryNodeManager` 는 477 에 없다** (`trino.node:name=CoordinatorNodeManager` 로 개명). → **Gateway 19 의 `monitorType: JMX` 는 477 에서 못 쓴다.**
-- **Gateway 19 `monitorType: UI_API` 는 401** — `/ui/api/stats` 는 폼 로그인 전용. **쓸 수 있는 값은 `METRICS`.** (`archive/BOLT_0_RESULT.md` §3 의 UI_API 권고는 이걸로 폐기됐다)
-- **Gateway 19 는 백엔드 활성/비활성 시 `invalidateBackendCache()` 를 호출한다** — 안전 시퀀스 1단계에서 `databaseCache.expireAfterWrite: 10m` 을 기다릴 필요가 없다.
-- **ansible-core 는 쓰기 가능한 `HOME` 없이 import 단계에서 죽는다 (exit 5).** `ProtectHome=true` 아래에서 `restart_mode: ansible` 을 쓰려면 `HOME`/`ANSIBLE_HOME` 을 `StateDirectory` 로 돌려야 한다 (구현됨).
+# Claude Code implementation instructions
+
+Before implementation, read:
+
+1. `README.md`
+2. `docs/DECISIONS.md`
+3. `docs/TODO.md`
+4. `docs/TEAMS.md`
+5. Relevant design/API/runbook files
+6. `docs/TRINO_VERIFIED.md` for every Trino, Gateway, or OPA claim
+
+The product owner has final authority. Codex owns planning and independent review. Claude owns
+application implementation, tests, deterministic verification, review fixes, and feature-branch
+delivery.
+
+Start approved work with `/develop <approved task>`. Implement one smallest complete vertical slice,
+checkpoint it locally, invoke `scripts/codex-review.sh --base main`, address every finding, and push
+only the reviewed feature branch. Never push feature work directly to `main`.
+
+## Non-negotiable implementation rules
+
+- TMS is never on the query path. If TMS stops, queries must continue.
+- Only facts verified for Trino 477 in `docs/TRINO_VERIFIED.md` may enter code or operational advice.
+- Every Trino/cluster operational write requires an administrator, a non-blank `reason`, confirmation
+  in the UI, and an audit record. The work board follows D-013; aborting a benchmark is the
+  documented safe-stop exception. If a required action cannot be tracked safely, refuse it.
+- Restart order is fixed: stop intake, confirm it stopped, drain, restart, verify health, restore
+  traffic. Worker removal requires graceful shutdown first.
+- Do not add a SQL editor, metrics dashboard, alert engine, log store/search, RBAC editor, data
+  catalog, LLM assistant, or static weighted routing.
+- External dependencies are optional and bounded by timeouts. Missing or stale data is never healthy.
+- Python remains 3.9 compatible. Keep comments short and in English.
+- The repository is public. Never commit credentials, internal hosts, IPs, or private URLs.
+- The React console uses the server session cookie; never move authentication to `localStorage`.
+- Frontend changes must run `npm --prefix frontend run build` and commit
+  `src/tms/ui/assets/`, because deployment hosts have no Node runtime.
+- A `[NEEDS-HUMAN-DECISION]` tag blocks work only when the current slice depends on it.
+
+The intended audience is two or three internal Trino operators. Planned TMS maintenance may make
+the console temporarily unavailable; it must not affect query traffic.
+
+## Source boundaries
+
+- API transport: `src/tms/api/routes/`
+- Business rules: services and domain modules under `src/tms/`
+- Trino/Gateway clients: `src/tms/clients/`
+- React screens: `frontend/src/screens/`; shared UI: `frontend/src/components/`
+- Approved CSS vocabulary: `frontend/src/tms.css`; do not invent unused class names
+- Built console: `src/tms/ui/assets/`
+- Current human/onsite work: `docs/TODO.md`
+- Durable decisions: `docs/DECISIONS.md`
+- Verified version-specific facts: `docs/TRINO_VERIFIED.md`
+
+Prefer existing helpers, standard library, native browser behavior, and installed dependencies.
+Do not add abstractions or configuration for hypothetical future use.
+
+## Minimum verification
+
+```bash
+venv/bin/python -m pytest -q
+npm --prefix frontend run lint        # when frontend code changes
+npm --prefix frontend run build       # when frontend code changes; commit output
+```
+
+Use the relevant integration, browser, or onsite check when the behavior cannot be proven by the
+default suite. Ruff is not a merge gate until its existing baseline is cleaned separately.

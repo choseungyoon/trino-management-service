@@ -1,59 +1,24 @@
-# 브라우저 테스트
+# Browser tests
 
-`tms.js` 는 파이썬 커버리지에 잡히지 않는다. 자바스크립트이기 때문이다. 그런데 이 파일이 하는 일은 전부 **점진적 향상**이라, **조용히 죽어 있어도 아무것도 실패하지 않는** 종류의 코드다.
+These tests cover behavior that TypeScript and FastAPI unit tests cannot prove once React is running
+in a browser:
 
-실제로 그런 일이 있었다. 자동 새로고침 타이머가 아예 시작되지 않고 있었는데(`refresh_seconds` 배선 누락), 파이썬 테스트는 전부 초록이었다. 사용자가 "새로고침 안 하면 갱신이 안 된다"고 알려주기 전까지 아무도 몰랐다.
+- login and expired-session redirect over HTTPS;
+- blank-reason and double-click protection for query kill;
+- native dialog behavior;
+- polling without blanking the current table;
+- theme persistence;
+- every registered console route rendering without a browser error.
 
-이 계층은 그 사각지대를 메운다.
-
----
-
-## 무엇을 검증하나
-
-| 항목 | 왜 여기서만 잡히나 |
-|---|---|
-| 자동 새로고침이 **실제로** 페이지를 다시 로드하는가 | 속성이 렌더되는 것과 타이머가 도는 것은 다른 문제다 |
-| 입력 중에는 새로고침이 **미뤄지는가** | 장애 대응 중 문장 쓰다가 페이지가 날아가면 안 된다 |
-| 파괴적 액션 버튼이 **한 번만** 동작하는가 | 더블클릭으로 kill 이 두 번 나가면 안 된다 |
-| 빈 사유가 **왕복 없이** 거부되는가 | 서버 400 은 파이썬으로 검증되지만, 브라우저 단 차단은 아니다 |
-| 상세 드로어가 `<dialog>` 로 열리는가 | 목록의 스크롤·필터를 잃지 않는 것이 목적이다 |
-| 신선도 라벨이 **계속 세는가** | 멈추면 오래된 나이가 그대로 굳는다 |
-| 테마 토글이 **첫 클릭에** 동작하는가 | 서버/클라이언트 기본값 불일치가 여기서 드러났다 |
-| 어느 화면에서도 콘솔 에러가 없는가 | 에러 하나가 이후 모든 리스너를 멈춘다 |
-| **htmx 조각이 제자리에 갈아끼워지는가** (`rg_editing.py`) | 속성으로 쓰인 동작은 파이썬 커버리지에 안 잡힌다 |
-| **거부됐을 때 입력한 값이 남는가** | 저장소에서 다시 그리면 조용히 사라진다. 실제로 그랬다 |
-
----
-
-## 실행
+They use an in-memory FastAPI harness and a stub Trino client. PostgreSQL and a real Trino cluster
+are not required. HTTPS is intentional because the session cookie is `Secure`.
 
 ```bash
-<venv>/bin/pip install playwright
-<venv>/bin/playwright install chromium
-
-<venv>/bin/python -m unittest tests.browser.ui_behaviour -v   # 약 25초
-<venv>/bin/python -m unittest tests.browser.rg_editing -v     # 약 11초
+venv/bin/pip install -e ".[browser]"
+venv/bin/python -m playwright install chromium
+venv/bin/python -m unittest tests.browser.ui_behaviour -v
 ```
 
-`rg_editing.py` 는 리소스 그룹 편집 화면 전용이다. 이 화면만 동작이 htmx
-속성에 들어 있어서, 파이썬 테스트가 전부 초록이어도 화면이 죽어 있을 수 있다.
-**실제로 그렇게 500 을 하나 잡았다** — 빈 사유가 400 이 아니라 500 을 내고
-있었고, 감사 가드의 예외가 ApiError 가 아니라서였다. 파일명이 `test_` 로 시작하지 않으므로 **`unittest discover` 는 건너뛴다** (`tests/integration/` 과 같은 규약). 기본 스위트를 느리게 만들지 않기 위해서다.
-
----
-
-## 인프라가 필요 없다
-
-`harness.py` 가 인메모리 저장소 + 스텁 Trino 로 앱을 띄운다. **PostgreSQL 도 Trino 도 필요 없고 CPU 부하도 없다.**
-
-> 이건 의도적이다. 초기 로컬 데모는 실제 `tpch.sf100` 쿼리를 계속 돌려서 코어 6개를 점유했다. 검증 도구가 검증 대상보다 무거우면 안 된다.
-
-HTTPS 로 뜨는 것도 의도적이다 — **세션 쿠키가 `Secure`** 라서 평문 HTTP 로는 브라우저가 쿠키를 저장하지 않고 로그인 단계에서 전부 실패한다. 하네스가 기동 시 자체 서명 인증서를 만들고, 테스트는 `ignore_https_errors=True` 로 붙는다.
-
----
-
-## 사내 환경에서는
-
-Playwright 는 Chromium 바이너리를 CDN 에서 내려받는다. **사내망에서는 막힐 수 있다.** 그 경우 이 계층은 로컬 개발 도구로만 쓰고, 사내에서는 파이썬 스위트(`tests/`)와 배포 후 수동 확인(`runbooks/deploy.md` §11)에 의존한다.
-
-여기서 잡은 버그는 어차피 코드로 고쳐져 파이썬 테스트나 코드 자체에 반영되므로, 사내에서 이 계층을 못 돌려도 손실은 제한적이다.
+The module is outside the default suite because Chromium must be downloaded and the corporate
+network may block it. Real PostgreSQL and Trino checks remain under `tests/integration/` and the
+onsite checklist in `docs/TODO.md`.

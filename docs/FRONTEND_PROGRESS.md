@@ -1,4 +1,4 @@
-# FRONTEND_PROGRESS — 전환 진행 상황
+# FRONTEND_PROGRESS — 전환 진행 기록 (완료)
 
 > **자동 갱신 아님.** 작업하면서 손으로 적는다. 계획은 `FRONTEND_PLAN.md`, 결정은 `DECISIONS.md` D-016.
 >

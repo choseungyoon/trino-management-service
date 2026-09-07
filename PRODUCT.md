@@ -8,28 +8,20 @@ web
 
 ## Stack
 
-FastAPI backend (already built, `src/tms/`). Frontend delegated: server-rendered
-HTML + vanilla JS or a light framework, chosen at build time — must work behind
-the existing FastAPI app (`src/tms/web/`), no separate Node deployment.
-
-⛔ **Superseded on 2026-08-26 by DECISIONS.md D-016**: the frontend is being
-rebuilt as a **React 19 SPA**, Vite-built to static assets that FastAPI serves.
-What survives from the line above is the part that mattered — **no Node process
-at runtime**; the deploy unit stays `pip install` + `systemctl restart`. What
-is deliberately given up, and the mitigations that go with it, is written out
-in D-016.
+FastAPI backend (`src/tms/`) and a React 19 SPA (`frontend/`). Vite writes the
+static bundle into `src/tms/ui/assets/`, which is committed and served by
+FastAPI. There is no Node process at runtime; deployment remains `pip install`
+plus systemd. See DECISIONS.md D-016.
 
 ## Users
 
-Platform team operators running OSS Trino for internal users at a scale where
+Two or three platform team operators running OSS Trino for internal users at a scale where
 one person can no longer hold every cluster's state in their head. Primary
 scene: an operator at a desk (often during an incident or a
-capacity review), multiple monitoring tools open, needs to answer "can the
+capacity review), multiple monitoring tools open, need to answer "can the
 clusters take queries right now, who is running what, and what did we do about
 it" in seconds. Roles: viewer (read-only), operator (can kill queries), admin
-(can tune health tests, export audit). UI language: **English** (confirmed
-2026-08-06); backend advice strings are currently Korean and will need English
-equivalents.
+(can tune health tests, export audit). UI language is **English**.
 
 ## Product Purpose
 

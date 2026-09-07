@@ -173,7 +173,13 @@ def build_app(workload_enabled=False, seed=None, gateway=None,
         "trino": {"user": "tms-svc", "password": "pw"},
         "database": {"url": "postgresql://u:p@h:5432/d"},
         "collector": {"query_poll_interval_seconds": 5, "stale_threshold_seconds": 600},
-        "deeplinks": {"superset_url": "https://superset.invalid/"},
+        "deeplinks": {
+            "superset_url": "https://superset.invalid/",
+            # Per cluster, so the hub renders one entry each - the same
+            # shape as the Trino UI links.
+            "grafana": {"cluster_dashboard":
+                        "https://grafana.invalid/d/trino?var-cluster={cluster}"},
+        },
         "workload": {"enabled": workload_enabled},
         "gateway": gateway or {},
         "resource_groups": {"enabled": bool(resource_groups)},

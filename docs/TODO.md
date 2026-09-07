@@ -1,632 +1,144 @@
-# TODO — 사람이 해야만 진행되는 것 전량
+# TODO — current human and onsite work
 
-> **갱신 2026-08-27** · 소유자: Platform Owner
-> **이 프로젝트의 "내가 할 일" 목록은 이 문서 하나다.** 예전에는 `NEXT_STEPS.md`(무엇을)와
-> `runbooks/onsite-checklist.md`(어떤 순서로)로 나뉘어 있었고, 같은 항목이 두 곳에서 서로 다른
-> 상태를 말하고 있었다. 둘을 합치고 끝난 것은 지웠다.
->
-> **여기에 없는 것**: 명령의 원본(각 런북), 결정의 근거(`DECISIONS.md`), 코드 작업 이력(`BOLTS.md`).
-> 같은 명령을 두 곳에 적으면 한쪽이 조용히 낡는다.
->
-> `docs/WORK_BOARD.md` 는 이 문서의 경쟁자가 아니다 — 사내 보드(`/work`)의 **자동 생성 스냅샷**이고,
-> 사외에서 보드를 읽을 유일한 방법이다. 상태가 어긋나면 **이 문서가 이긴다.**
+> Updated 2026-09-05. This file contains only work that needs a person, the internal network, or a
+> real cluster. Product decisions belong in `DECISIONS.md`; completed construction belongs in
+> `BOLTS.md`. `WORK_BOARD.md` is generated from the internal board and may be older than this file.
 
----
+## Current verification status
 
-## 0. 한 장 요약
-
-| 구분 | 남은 것 | 성격 |
+| Area | Verified onsite | Still unverified |
 |---|---|---|
-| 🔴 **막고 있는 것** | 1건 (V-10) | 이게 안 되면 나머지가 전부 같은 원인이다 |
-| **결정** (D) | 2건 | 답이 나와야 코드가 움직인다. **사내에 안 들어가도 된다** |
-| **사내 확인** (V) | 6건 | 사내에서 눈으로 봐야 아는 것 |
-| **작업** (W) | 6건 | 절차·설정·타 팀 협조 |
-
-**지금 값이 큰 것 3개**
-
-1. 🔴 **V-10 콘솔이 뜨는가** — 화면이 통째로 바뀌었고 사내 실데이터로는 처음이다
-2. 🔴 **W-5 Gateway DB 분리** — 현존하는 단일 장애점. 사용자가 늘기 전이 가장 싸다
-3. **W-1 NFR-PERF-03 실측** — R1 DoD 를 닫는 마지막 항목
-
----
-
-## 1. 다음에 사내에 들어가면 — 이 순서로
-
-**한 번에 하나씩, 게이트를 통과하고 다음으로 간다. 위에서 막히면 아래는 볼 필요가 없다.**
-
-### 이미 끝난 것 — 다시 하지 않는다
-
-| | 상태 |
-|---|---|
-| 마이그레이션 `010`~`019` | ✅ 전량 적용 (`018`/`019` 는 2026-08-26) |
-| React 콘솔 기동 · 벤치마크 실행 · 추이 차트 | ✅ 2026-08-27 사내 확인 |
-| 작업 보드 초기 적재 · 검증 (V-7) | ✅ |
-| Gateway 설정 · API 계정 (구 W-2) | ✅ |
-| 벤치마크 실행 확인 | ✅ 클러스터에서 도는 것까지 확인 |
-| 롤백 준비 · 기동 회귀 확인 | ✅ |
-
-> ⛔ **앞 번호 마이그레이션을 다시 돌리지 않는다.** `010`·`012`·`016`·`018` 은 각각 감사 액션
-> 제약을 `DROP` 후 다시 만든다. 나중 번호를 적용한 뒤 앞 번호를 재실행하면 **뒤에 추가된 액션이
-> 사라지고**, 그 결과는 화면 오류가 아니라 **기능이 조용히 멈추는 것**이다 (감사 못 남기는 쓰기는
-> 절대규칙 3 으로 거부된다). 2026-08-24 로컬 실측이며 추정이 아니다.
-
----
-
-### 🔴 1-0. 마이그레이션 `020` ~ `028` `[먼저]`
-
-`020`/`021` 은 벤치마크 주기 실행(FR-BM-07 · D-017)이, `022` 는 설정 조회
-(FR-CO-01 · D-018)가, `023`/`024` 는 카탈로그 배포(FR-CATALOG · D-018 2단계)가,
-`025`/`026` 은 노드 목록(D-019)이, `027`/`028` 은 설정 편집(D-018 3단계)이 쓴다. **적용 전에는 해당 화면만 "사용할 수 없음" 으로
-나오고 나머지는 전부 정상 동작한다.**
-
-- [ ] `git pull` → `pip install -e .`
-- [ ] `020` ~ `028` 을 **번호순으로** `tms_owner` 로 적용
-- [ ] `tms-config-check` → `benchmark_schedule` · `catalog_definition` ·
-      `catalog_deployment` · `cluster_node` · `config_change` ·
-      `config_deployment` 테이블, `BENCHMARK_SCHEDULE_CHANGE` ·
-      `CATALOG_DEPLOY` · `CLUSTER_NODE_CHANGE` · `CONFIG_DEPLOY` 액션,
-      `config` snapshot kind 를 확인한다
-
-> ⛔ **앞 번호를 다시 돌리지 않는다.** `020` 도 감사 액션 제약을 `DROP` 후
-> 다시 만든다 — 위의 경고가 그대로 적용된다.
-
-### 🔴 1-1. V-10 — 콘솔이 뜨는가 `[다른 무엇보다 먼저]`
-
-**2026-08-27 에 화면이 통째로 바뀌었다** (D-016). 서버 렌더 Jinja 콘솔은 삭제됐고 `/` 는
-커밋된 React 번들이다. **사내 실데이터로는 한 번도 돌려 본 적이 없다.**
-
-D-016 이 명시적으로 포기한 것이 여기서 처음 현실이 된다: **번들이 못 뜨면 빈 화면이다.**
-서버 렌더에는 없던 실패 모드다.
-
-- [ ] `git pull` → `pip install -e .` (Artifactory 프록시 경유)
-- [ ] `ls venv/bin/tms-*` → `tms-api` `tms-collector` `tms-config-check` `tms-work-export`
-      <br>*콘솔 스크립트는 설치 시점에 만들어진다. `git pull` 만으로는 안 생긴다 (`-e` 여도)*
-- [ ] `systemctl restart tms-collector tms-api` → `journalctl -u tms-api -n 50`
-- [ ] 브라우저로 `/` → **로그인 화면이 그려지는가**
-- [ ] 로그인 → Overview 가 그려지는가
-- [ ] 왼쪽 내비게이션 **12개 항목이 각각 열리는가** (하나라도 빈 화면이면 거기서 멈춘다)
-- [ ] `curl -sk https://<host>:8500/health` → `{"status":"ok"}`
-      <br>*⛔ 이건 프로브지 화면이 아니다. 헬스 **화면**은 `/cluster-health` 다*
-
-**빈 화면이 나오면** — 개발자 도구 Network 에서 `/static/index-*.js` 를 본다.
-
-| | 원인 | 조치 |
-|---|---|---|
-| `404` | `pip install` 이 번들을 안 넣었다 | `deploy.md` §UI 파일 문제. **되돌릴 일이 아니다** |
-| `200` 인데 빈 화면 | 알 수 없다 | **되돌린다** (아래) |
-
-**되돌리는 방법**: `git checkout f3cec7a~1` — 컷오버 직전이다. 서버 렌더 콘솔이 그대로 있고
-React 콘솔은 `/app` 에 있다. 되돌렸다면 그 이유가 D-016 의 "뒤집는 조건 1" 이므로 기록한다.
-
-**주소가 바뀐 것들** — 북마크와 사내 위키를 고친다:
-
-| 전 | 후 |
-|---|---|
-| `/clusters/<c>/health` | `/cluster-health?cluster=<c>` — ⛔ `/health` 는 liveness 프로브다 |
-| `/clusters/<c>/resource-groups` | `/resource-groups?cluster=<c>` |
-| `/clusters/<c>/fleet` | `/fleet?cluster=<c>` |
-| `/clusters/<c>/restart` | `/restart?cluster=<c>` |
-| `/benchmarks/sets` | `/benchmark/sets` |
-| `/benchmarks/<id>` | `/benchmark/runs/<id>` |
-
-> ⛔ **번들은 저장소에 커밋돼 있다.** 배포 호스트에 Node 는 없고 필요하지도 않다.
-> 화면이 옛날 그대로라면 `pip install` 이 안 된 것이지 빌드가 필요한 것이 아니다.
-
-> **게이트**: 콘솔이 안 뜨면 아래 V 항목은 전부 같은 원인이다. 여기서 멈춘다.
-
----
-
-### 1-2. V-2 — Fleet 이 실제로 노드를 보는가
-
-- [ ] `/fleet?cluster=<c>` — 노드 목록과 코디네이터 버전이 나오는가
-- [ ] 전 워커가 "No answer" 면 → `node_url_template` 포트·스킴, 또는 **TMS 호스트 → 워커 HTTP 포트 방화벽**
-- [ ] 손으로 먼저: `curl -sk https://<워커>:8443/v1/info` (인증 불필요)
-- [ ] 인벤토리 워커 수와 `expected_workers` 가 맞는가 (`tms-config-check` 가 경고한다)
-
-### 1-3. V-3 — Workload 가 그룹을 보는가
-
-- [ ] `/workload` — 그룹 트리, 컬럼 클릭 랭킹, 그룹 클릭 → 쿼리 목록
-- [ ] 비어 있으면 → 마이그레이션 003, `resource-groups.json` 의 `jmxExport`, 또는 아직 아무 그룹도 쿼리를 안 받음
-- [ ] ⛔ **`jmxExport` 누락과 "아직 활동 없음"은 화면에서 구별되지 않는다.** 설정 파일을 직접 확인해야 한다
-
-### 1-4. V-9 — 리소스 그룹 편집 `[마이그레이션 010/011 은 이미 올라가 있다]`
-
-**⚠️ 이 화면의 쓰기는 프로덕션 쿼리 수용 제어를 바꾼다.** 10초 안에 코디네이터에 반영되고,
-재시작이라는 관문이 없다. 처음에는 **영향 없는 그룹 하나**로 연습한다.
-
-**선행 설정**
-
-- [ ] Trino 가 **이미 `db` 매니저를 쓰고 있는지 먼저 확인** — 아직 `file` 이면 고칠 대상이 없다
-- [ ] `tms_app` 에 `trino_resource_groups` schema 권한 (`resource-groups-db.md` 의 3줄 GRANT)
-- [ ] `resource_groups.enabled: true`, `schema:` 를 코디네이터의 `?currentSchema=` 와 일치
-- [ ] `group_provider_configured: false` — **`etc/group-provider.properties` 가 없으므로 이게 정확한 값이다.**
-      `false` 여야 편집 화면이 `user_group_regex` 셀렉터를 만들 때 경고한다
-
-**확인**
-
-- [ ] 좌측 네비에 **Resource Groups**, 설정 트리가 실행 중인 그룹과 대조된다
-- [ ] 값 하나 수정 → 사유 요구 → 저장 → **10초 내 반영**
-- [ ] 일부러 잘못된 값(동시 실행 0) → **거부되고 입력한 값이 사라지지 않는다**
-- [ ] 이력 화면에 리비전 · **되돌리기** → 이전 트리 복원 + 되돌리기 자체가 새 리비전
-- [ ] 감사 로그에 `RESOURCE_GROUP_CHANGE` / `RESOURCE_GROUP_REVERT` 가 사유와 함께
-- [ ] `user_group_regex` 셀렉터를 만들어 보면 **경고가 뜬다**
-- [ ] `tms_app` 으로 `UPDATE resource_group_revision` / `DELETE` → **둘 다 실패**
-      <br>*실패하지 않으면 `011` 이 안 들어갔다. 이력이 고쳐질 수 있으면 이력이 아니다*
-
-### 1-5. V-8 — 벤치마크 나머지 `[실행 자체는 확인됨]`
-
-돌아가는 것은 봤다. **아직 안 본 것은 차트와 비교, 그리고 세트를 고쳤을 때 과거가 안전한가**다.
-
-- [ ] `/benchmark` 에 클러스터가 전부 나오고, 운영 중인 것은 **`Serving traffic`** 으로
-      표시되며 이유가 문장으로 붙는다. **체크박스는 잠기지 않는다** (D-015)
-- [ ] 실행 목록의 `Cluster was` 열 · 실행 화면의 노란 배너
-- [ ] ⛔ 같은 클러스터에 하나 더 실행 → **거부** (두 실행이 서로를 측정한다)
-- [ ] 같은 세트를 **다른 클러스터**에서 실행 → 실행 화면에서 비교 → 쿼리별 차이와 판정
-- [ ] ⛔ `Quiet` 실행과 `Serving traffic` 실행을 비교 → **조건이 다르다는 경고**.
-      이게 게이트를 대신하는 안전장치다
-- [ ] **차트** — `/benchmark/sets/<키>/queries/<이름>/history` 에서 추이가 그려지는가
-      <br>*클러스터당 실행이 2건 미만이면 선을 안 그리고 표만 보여 준다. 그게 정상이다*
-- [ ] 쿼리 하나의 SQL 을 고친 뒤 **고치기 전 실행을 다시 연다** → 그 실행이 쓴 SQL 은 그대로다
-- [ ] 고치기 전후 실행을 비교 → 그 행에 **변경됨** 표시
-- [ ] 실행 중에 같은 세트를 고쳐 본다 → **거부**
-- [ ] `DELETE FROM ...` 저장 → **거부**. `-- 무해함` 다음 줄에 숨겨도 → **거부**
-- [ ] 사유 없이 저장 → **거부**. 감사에 `BENCHMARK_QUERY_CHANGE`
-- [ ] `tms_app` 으로 `UPDATE benchmark_result` / `DELETE` → **둘 다 실패**
-
-### 1-5-1. V-11 — 벤치마크 스케줄 `[020/021 적용 후 · 새 기능]`
-
-⛔ **사람이 없는 시각에 운영 클러스터에 쓰는 유일한 기능이다** (D-017). 처음에는
-**가벼운 세트 · 반복 1회 · 하루 주기**로 시작한다.
-
-- [ ] `/benchmark/schedules` → 상단 경고가 보이고, 스케줄 표가 그려진다
-- [ ] 스케줄 생성 → 사유 없이 저장 시 **거부**
-- [ ] 최소 주기(15분) 미만 → **거부되고 이유가 "용량" 을 말한다**
-- [ ] 다음 실행 시각이 맞고, 그 시각에 **실제로 실행이 생긴다**
-- [ ] 그 실행의 감사 기록에 **스케줄을 만든 사람**과 **스케줄의 사유**가 남는다
-- [ ] 실행 목록에서 그 행이 **"on a schedule"** 로 표시된다
-- [ ] 실행 중인 클러스터에 회차가 오면 → **건너뛰고, 실패로 세지 않는다**
-      (`consecutive_failures` 가 0 그대로)
-- [ ] 스케줄 편집·삭제에 `BENCHMARK_SCHEDULE_CHANGE` 가 사유와 함께 남는다
-- [ ] 스케줄 삭제 → **그 스케줄이 만든 실행은 그대로 남는다**
-- [ ] `tms_app` 으로 `UPDATE benchmark_schedule` → 성공해야 한다
-      (설정이지 증거가 아니다)
-
-> **자동 정지는 일부러 재현하지 않아도 된다.** 3회 연속 실패해야 걸리고,
-> 그 상태는 화면에 **"paused by TMS"** 로 사유와 함께 나온다.
-
-> ⚠️ **무거운 세트를 운영 클러스터에 돌리는 것 자체가 부하다.** 가벼운 세트 · 반복 1회로
-> 시작한다. 재려던 느려짐을 스스로 만들 수 있다 (D-015).
-
-### 1-5-2. V-12 — 설정 조회 · 드리프트 `[022 적용 후 · 새 기능]`
-
-⛔ **읽기만 한다.** `docs/templates/collect-config.yml` 에는 노드를 바꾸는
-태스크가 하나도 없다. 배포는 아직 만들지 않았다 (D-018 2·3단계).
-
-**선행 — ansible 전환과 같이 한다 (§2 D-2)**
-
-- [ ] `docs/templates/collect-config.yml` 를 `/etc/tms/ansible/` 에 설치
-- [ ] `trino_etc` · `trino_log` 를 실제 경로에 맞춘다 (파일 상단 주석)
-- [ ] `config.yaml` 에 경로를 넣는다:
-      ```yaml
-      cluster_ops:
-        config_scan:
-          playbook: /etc/tms/ansible/collect-config.yml
-          development_clusters: [<개발 클러스터 이름>]
-      ```
-- [ ] 손으로 먼저 한 번: `ansible-playbook -i <인벤토리> collect-config.yml`
-      → `TMS-CONFIG-SCAN {...}` 줄이 호스트마다 하나씩 나오는가
-
-**확인**
-
-- [ ] `/cluster-config` → **Read the nodes** → 노드 표가 채워진다
-- [ ] ⛔ **코디와 워커의 차이가 드리프트로 안 나온다** (역할별로 비교한다)
-- [ ] 워커끼리 값이 다르면 **나온다** — 없으면 일부러 한 대만 고쳐 본다
-- [ ] `etc/node.properties` 는 **Expected differences** 로 따로 나온다
-- [ ] ⛔ **카탈로그는 체크섬만** 나온다. 내용도 비밀번호도 화면에 없다
-- [ ] Known properties 열에 숫자가 채워진다 (수백 개)
-      <br>*비어 있으면 `trino_log` 경로가 틀렸거나 로그가 로테이션된 것이다 —
-      이게 3단계 배포의 오타 검사 재료다*
-- [ ] 조회자 계정 → 표는 보이고 **Read the nodes 버튼이 없다**
-- [ ] 개발 클러스터에서 워커 한 대를 내리고 스캔 → **드리프트로 안 나온다**
-
-### 1-5-3. V-13 — 카탈로그 배포 `[023/024 적용 후 · ⚠️ 가장 위험한 신규 기능]`
-
-⛔ **잘못된 카탈로그 하나가 배포된 모든 노드를 못 뜨게 한다** (T1-9-1). 그래서
-개발 클러스터가 먼저다. **개발 클러스터에서 처음 시도한다.**
-
-**선행 설정**
-
-- [ ] `docs/templates/deploy-catalog.yml` 을 `/etc/tms/ansible/` 에 설치
-      <br>*⛔ collect-config.yml 과 **다른 파일**이다. 하나는 읽고 하나는 쓴다*
-- [ ] `trino_etc` · `trino_user` · `trino_group` 을 맞춘다
-- [ ] `config.yaml`:
-      ```yaml
-      cluster_ops:
-        catalog_deploy:
-          playbook: /etc/tms/ansible/deploy-catalog.yml
-      ```
-- [ ] ⛔ `development_clusters` 가 비어 있으면 **기동이 거부된다.** 증명할 곳이
-      없으면 모든 배포가 곧장 운영으로 가기 때문이다
-
-**확인 — 개발 클러스터에서, 무해한 카탈로그로**
-
-- [ ] `/catalogs` → New catalog → 예: `probe_memory` / `memory` / 프로퍼티 없음
-- [ ] ⛔ `connection-password=hunter2` 를 넣어 본다 → **거부되고 `${ENV:VAR}` 를
-      쓰라고 말한다**
-- [ ] 개발 클러스터 버튼만 활성, 운영 버튼은 **비활성 + 이유가 툴팁에**
-- [ ] 개발 클러스터에 배포 → 파일이 전 노드에 생긴다
-      (`ls /opt/trino/etc/catalog/`)
-- [ ] ⛔ **아직 아무 일도 안 일어난다.** `SHOW CATALOGS` 에 안 나온다 —
-      기동 시에만 읽히기 때문이다
-- [ ] 안전 재시작 실행 → 재시작 후 `SHOW CATALOGS` 에 나온다
-- [ ] 운영 버튼이 **활성화**됐다
-- [ ] 초안을 고친다 → **다시 비활성**이 된다 (증명이 지워진다)
-- [ ] 감사 로그에 `CATALOG_CHANGE` · `CATALOG_DEPLOY` 가 사유와 함께
-
-**⚠️ 일부러 깨뜨려 보는 것은 개발 클러스터에서만**
-
-- [ ] 없는 커넥터 이름으로 배포 → 재시작 → **코디네이터가 안 뜬다.**
-      이게 이 게이트가 있는 이유다. 되돌리려면 파일을 지우고 다시 재시작한다
-      (`/catalogs` → Show → Remove from a cluster)
-
-### 1-5-4. V-14 — 노드 목록을 TMS 가 갖는다 `[025/026 적용 후 · 새 기능 · D-019]`
-
-**무엇이 바뀌나**: 워커가 늘거나 줄 때 서버에 들어가 인벤토리를 고치는 일이
-없어진다. 코디네이터에게 물어서 채우고, TMS 가 인벤토리 파일을 **생성**한다.
-
-⛔ **`ExecuteQuery` 가 선행이다** (D-012). 없으면 스캔이 안 되고 전부 수동이 된다.
-
-**두 가지 출발점이 있다. 자기 것을 고른다.**
-
-| | 어느 쪽인가 |
-|---|---|
-| **A. Fleet 을 이미 쓰고 있다** — 인벤토리 파일이 있다 | 임포트가 **먼저**다 |
-| **B. Fleet 을 켠 적이 없다** — 인벤토리 파일이 없다 | 임포트할 게 없다. **건너뛴다** |
-
-#### A 인 경우 — 임포트가 먼저
-
-⛔ **`fleet.source` 를 바꾸기 전에** 한다. 스캔은 지금 살아 있는 노드만 찾고,
-**안 살아 있는 노드가 정확히 옮길 가치가 있는 항목**이다.
-
-```bash
-tms-import-inventory --config /etc/tms/config.yaml --dry-run
-tms-import-inventory --config /etc/tms/config.yaml
-```
-
-#### B 인 경우 — 목록은 비어서 시작한다
-
-⛔ **비어 있는 동안 재시작은 거부된다.** 노드가 0개인 인벤토리에 대고
-`ansible-playbook` 을 돌리면 아무 호스트도 못 찾고 **종료 코드 0** 으로 끝난다 —
-아무것도 안 하고 "재시작 성공" 이 된다. 이미 유입을 끊고 드레인까지 끝낸
-클러스터에 대해서다. 그래서 TMS 는 유입을 끊기 **전에** 거부한다.
-
-즉 **첫 스캔이 사실상의 초기화**다. 순서를 바꾸지 않는다:
-
-1. 설정 → 기동 → `/fleet` → **Scan the coordinator**
-2. 목록이 채워진 것을 눈으로 확인
-3. 그 다음에야 재시작·설정 배포를 쓴다
-
-**공통 설정**
-
-- [ ] `config.yaml`: `fleet.enabled: true`, `fleet.source: tms`,
-      `node_url_template` 지정, **`fleet.inventories` 와
-      `cluster_ops.ansible.inventories` 를 둘 다 비운다**
-      <br>*안 비우면 기동이 거부된다 — 답이 두 개인 상태를 남기지 않는다*
-- [ ] `systemctl restart tms-api tms-collector`
-      <br>*기동 시 TMS 가 `<state_dir>/inventory/` 에 파일을 만든다. B 라면
-      빈 파일이다 — 파일 자체가 없으면 재시작 실행기가 아예 안 만들어지고
-      조용히 manual 로 되돌아간다*
-- [ ] `tms-config-check`
-      <br>*B 에서 "노드가 0개다" 경고가 나오는 것이 정상이다. 첫 스캔 후 사라진다*
-
-**확인 — 개발 클러스터에서 먼저**
-
-- [ ] `/fleet` → Node list 패널
-      <br>*A: 임포트된 노드가 전부, **added by tms-import***
-      <br>*B: 비어 있고 "Scan the coordinator" 안내가 나온다*
-- [ ] **Scan the coordinator** → 살아 있는 노드가 `discovered` 로 채워진다
-      <br>*⛔ 인벤토리 별칭(`trino-w1`)이 IP 로 **바뀌지 않아야** 한다.
-      바뀌면 Ansible 이 그 별칭으로 못 찾는다*
-- [ ] 워커 1대를 내린다 → 다시 스캔 → **목록에서 사라지지 않고** "no answer" 가 된다
-      <br>*⛔ B 라면 이 확인은 **첫 스캔 다음**이다. 스캔 전에는 목록이 비어
-      있으므로 "사라지지 않는다" 를 볼 대상 자체가 없다*
-- [ ] `cat <state_dir>/inventory/<cluster>.ini` → 내린 워커가 **여전히 있다**
-      <br>*이게 이 설계의 전부다 — 죽은 노드도 설정을 받아야 한다*
-- [ ] 안전 재시작을 걸어 본다 → 생성된 인벤토리로 돈다
-- [ ] 손으로 노드를 하나 추가 → 사유 필수 → 파일에 반영된다
-- [ ] 제거 → 사유 필수 → 감사 로그에 `CLUSTER_NODE_CHANGE`
-
-**⚠️ 운영 클러스터로 넘어가기 전에**
-
-- [ ] 생성된 인벤토리와 기존 인벤토리를 **눈으로 대조**한다 (`diff`)
-- [ ] 기존 인벤토리 파일은 **지우지 말고** 남겨 둔다 — 되돌릴 때 필요하다
-      <br>*B 라면 되돌릴 파일이 없다. 되돌리려면 `fleet.source: inventory` 로
-      바꾸고 인벤토리를 손으로 쓰는 것 — 즉 이 전환은 B 에서 실질적으로 편도다.
-      그래서 개발 클러스터에서 먼저 한다*
-
-### 1-5-5. V-15 — 설정 편집 `[027/028 적용 후 · ⚠️ V-12 가 선행 · D-018 3단계]`
-
-⛔ **V-12 가 진짜 선행이다.** 오타 검사는 클러스터가 기동 시 스스로 찍은
-프로퍼티 이름 목록과 대조하는데, 그 목록은 V-12 의 스캔이 만든다.
-**Known properties 열이 비어 있으면 이 기능은 아무것도 내보내지 않는다** —
-건너뛰는 게 아니라 거부한다. 검사를 끈 채로 배포하는 것이 오타 하나로
-전 노드를 못 뜨게 하는 그 사고이기 때문이다 (T1-8-1).
-
-**선행 설정**
-
-- [ ] `docs/templates/deploy-config.yml` 을 `/etc/tms/ansible/` 에 설치
-      <br>*⛔ **네 번째 파일**이다. restart · collect-config · deploy-catalog 와
-      전부 다른 경로여야 하고, 겹치면 기동을 거부한다*
-- [ ] `trino_etc` · `trino_user` · `trino_group` 을 맞춘다
-- [ ] `config.yaml`:
-      ```yaml
-      cluster_ops:
-        config_deploy:
-          playbook: /etc/tms/ansible/deploy-config.yml
-      ```
-- [ ] ⛔ `config_scan` 이 꺼져 있으면 **기동이 거부된다.** 이름 목록의 출처가 없다
-- [ ] ⛔ `development_clusters` 가 비어 있어도 **기동이 거부된다**
-
-**확인 — 개발 클러스터에서, 무해한 값으로**
-
-- [ ] `/cluster-config` → 아래 **Changes to config.properties** 패널
-- [ ] Known properties 가 0 이면 → **"아무것도 배포할 수 없다" 배너**가 뜬다.
-      먼저 V-12 를 마친다
-- [ ] New change → 예: `task.concurrency=16` / Deploy to = **the workers only**
-- [ ] ⛔ 일부러 오타를 낸다 (`task.concurrncy`) → **빨간 줄로 거부**되고
-      개발 클러스터 버튼도 비활성이다
-- [ ] ⛔ `http-server.https.keystore.key=hunter2` → **거부되고 `${ENV:VAR}` 를
-      쓰라고 말한다**
-- [ ] 개발 클러스터 버튼만 활성, 운영 버튼은 **비활성 + 이유가 툴팁에**
-- [ ] 개발 클러스터에 배포 → **노드에서 직접 확인한다**:
-      ```bash
-      grep task.concurrency /opt/trino/etc/config.properties
-      ls -l /opt/trino/etc/config.properties.tms-previous
-      ```
-- [ ] ⛔ **다른 줄이 그대로인가.** 특히 `keystore` 계열 값이
-      `[REDACTED]` 로 바뀌지 **않았는지** 확인한다 — 통째로 쓰지 않고
-      합치는 이유가 이것이다
-- [ ] ⛔ **아직 아무 일도 안 일어났다.** 클러스터는 여전히 옛 값으로 돈다
-- [ ] 안전 재시작 → 재시작 후 값이 반영된다
-- [ ] 운영 버튼이 **활성화**됐다
-- [ ] 초안을 고친다 → **다시 비활성**이 된다 (증명이 지워진다)
-- [ ] 감사 로그에 `CONFIG_CHANGE` · `CONFIG_DEPLOY` 가 사유와 함께
-
-**⚠️ 일부러 깨뜨려 보는 것은 개발 클러스터에서만**
-
-- [ ] 맞는 이름에 틀린 값 (`node-scheduler.include-coordinator=fasle`) → 배포는
-      통과한다 → 재시작 → **코디네이터가 안 뜬다.** 이름 검사가 볼 수 없는
-      것이고, **개발 클러스터 게이트가 있는 이유**다.
-      되돌리려면 노드에서 `config.properties.tms-previous` 를 되돌리고 재시작
-
-### 1-6. V-6 — 감사 append-only 재확인
-
-- [ ] `tms_app` 으로 `UPDATE restart_sequence_event` / `DELETE` → **둘 다 실패**
-
-### 1-7. W-1 — NFR-PERF-03 프로덕션 실측 `[R1 DoD 마지막 항목 · 피크 시간대]`
-
-**왜**: 지금 프로덕션 코디네이터에 5초마다 폴링을 넣고 있는데 **그 비용을 실측한 적이 없다.**
-Workload 를 켜면 폴링마다 MBean 열거 1회 + 그룹당 읽기 1회가 추가된다.
-
-```bash
-cd /etc/trino-management-service && sudo -u tms git pull
-read -rs TMS_TRINO_PASSWORD && export TMS_TRINO_PASSWORD
-sudo -E /etc/trino-management-service/venv/bin/python scripts/measure_production_load.py \
-  --coordinator https://<trino-a>:8443 --coordinator https://<trino-b>:8443 \
-  --pairs 6 --window 120
-unset TMS_TRINO_PASSWORD
-```
-
-- **피크 시간대에** 돌린다. 한가할 때 재면 의미가 없다. 약 24분. 내부 CA 미신뢰면 `--insecure`
-- 종료 코드 0=충족 / 1=초과(주기 상향으로 대응) / **2=판정 불가 → 닫지 말 것**
-
-- [ ] 실측 → `PERF_MEASUREMENT.md` §0 "잠정" 제거 → **R1 DoD 닫힘**
-- [ ] 결과에 따라 `workload.poll_interval_seconds` 확정
-
-### 1-8. V-5 — Graceful shutdown 실증 `[워커 1대 · W-3 선행]`
-
-**⚠️ 미해소 G-4.** 공식 문서는 graceful shutdown 에 대해 `allow-all`/`file` 만 언급하고
-**OPA 를 언급하지 않는다.** OPA 로 인가된다는 결론은 소스 근거이므로 실증이 필요하다.
-
-- [ ] 워커 한 대에 `access-control.properties` + Rego `WriteSystemInformation` 적용
-- [ ] Fleet 화면에서 shutdown → **드레인 → 종료까지 관찰**
-- [ ] **쿼리 실패 0건 확인** (FR-FL-03 의 AC)
-- [ ] 최소 `2 × shutdown.grace-period` + 실행 중 task 시간. 기본값이면 4분 이상 —
-      **그 전에 "멈췄다"고 판단하지 말 것**
-
----
-
-### 1-9. 끝나고
-
-- [ ] `tms-work-export` 재실행 → `docs/WORK_BOARD.md` 갱신 → 커밋
-- [ ] **보드 정리** (§4 의 목록 그대로)
-- [ ] 막힌 것이 있으면 상태를 `blocked` 로 옮기고 **무엇이 막는지** 를 적는다
-- [ ] 안 켠 것이 있으면 그것도 보드에 남긴다 — **안 켠 것과 못 켠 것은 다르다**
-
----
-
-## 2. 결정 (D) — 사내에 안 들어가도 답할 수 있다
-
-### 🆕 D-5. 컷오버를 유지할 것인가
-
-2026-08-27 에 서버 렌더 콘솔(`src/tms/web/`)을 삭제했다. D-016 의 계획된 마지막 단계이고,
-그 결정문이 *"두 벌을 동시에 유지하는 것이 이 결정이 피하려는 바로 그것"* 이라고 적고 있다.
-
-**컷오버가 아니었으면 못 찾았을 버그 4개**가 나왔다 — 특히 `GET /api/v1/restarts/{id}` 가
-executor 를 폴링하지 않던 것은 **D-2 를 켜는 순간 터졌을 버그**다.
-
-**권고: 되돌리지 않는다.** 다만 V-10 에서 콘솔이 안 뜨면 그 자리에서 되돌린다 (§1-1 의 표).
-
-- [ ] V-10 결과를 보고 확정
-
-### ~~D-2. 재시작 실행을 Ansible 자동화로 전환할 것인가~~ — ✅ **해소 (2026-08-27): 전환한다**
-
-전 Trino 노드 SSH 통신 확인 완료 → `cluster_ops.restart_mode: ansible`. 기록은 `DECISIONS.md` D-009 의 2026-08-27 추가분.
-
-**켜기 전 준비** (사내에서 할 것, §1 에도 있다):
-
-- [ ] Ansible 설치 · `binary` 는 **절대경로**
-- [ ] SSH 키는 `/etc/tms/ssh/` — `ProtectHome=true` 라 `/home/tms/.ssh` 는 못 읽는다
-- [ ] 유닛 재배포로 `StateDirectory=trino-management-service` 반영
-      <br>*(ansible-core 는 쓰기 가능한 `HOME` 없이 import 단계에서 죽는다 — exit 5)*
-- [ ] `tms-config-check` 로 확인
-- [ ] `manual` 로 한 번 완주해 본 뒤에 전환 (게이트는 두 모드가 동일하다)
-
-> 절차: `upgrade-r2-r3.md` §4-3-1
->
-> ⛔ **이제 이 권한 위에 설정·카탈로그 배포까지 얹힌다** (D-018). SSH 가 쓰이는
-> 경로가 하나에서 여럿으로 늘었다는 뜻이므로, 보안 담당과 공유한 범위가
-> "재시작" 이었다면 다시 이야기해야 한다.
-
-### D-4. 다음 개발 슬라이스
-
-| 후보 | 상태 | 막는 것 |
-|---|---|---|
-| **FR-CO-01** 설정 조회·변경 | 🔄 **착수** (D-018 1단계) | — |
-| **FR-FLEET-DRIFT** config 체크섬 | 부분 | 노드별 체크섬 수집용 새 플레이북 — **사람이 써야 한다** |
-| FR-FL-02 미조인 워커 식별 | 착수 가능 | ~~D-1~~ 해소됨 (D-012, `ExecuteQuery` 부여) |
-| FR-SLO | 막힘 | 목표값(인간 결정) + 워크로드 데이터 |
-| FR-CATALOG | 보류 | `catalog.management=dynamic` (experimental) 도입 결정 |
-| ~~FR-GW-04~~ | ⛔ **미충족 확정** — Gateway 가 캐시 적중 신호를 내지 않는다 | Gateway 쪽 엔드포인트 |
-
-**FR-CO-01 착수 (2026-08-27).** D-018 의 1단계 = 조회 + 드리프트. 2단계(카탈로그 배포)와
-3단계(`config.properties` 편집)는 1단계가 만들어 내는 **유효 프로퍼티 목록**을 안전장치로
-쓰므로 순서를 바꾸지 않는다.
-
-- [x] 다음 슬라이스 = FR-CO-01 (D-018)
-
-**D-019 는 절반만 했다 (2026-08-31).** 노드 목록(클러스터 *안*)은 TMS 가 갖게 됐다.
-**클러스터 목록**은 D-008 그대로 Gateway 가 주인이고, TMS 에는 아직 화면이 없다 —
-클러스터 추가·삭제는 여전히 Gateway UI 에서 한다.
-
-D-008 부기가 이미 허용한 것: *TMS 가 Gateway API 를 호출하는* CRUD. 만들면 그
-모양이어야 하고, TMS 자체 목록을 만드는 것이 아니다. 선행 조건 두 가지:
-
-- `gateway.enabled: true` (지금 `false`)
-- ⚠️ Gateway 에는 읽기 전용 역할이 없다 — 백엔드를 **읽는** `API` 계정은 **쓸 수도** 있다.
-  TMS 에 쓰기 화면을 만드는 것은 그 자격증명의 노출면을 넓히는 결정이다
-
-- [ ] 다음 슬라이스로 할지 결정 (지금은 안 함)
-
----
-
-## 3. 작업 (W) — 절차 · 설정 · 타 팀
-
-### 🔴 W-5. Gateway DB 를 VM1 에서 분리 + HA `[현존 SPOF · 최우선]`
-
-Gateway 2대가 PostgreSQL 하나를 공유하는데 그 DB 가 VM1 에 얹혀 있다.
-**VM1 이 죽으면 두 Gateway 가 동시에 DB 를 잃는다.**
-
-`databaseCache`(10분)는 안전망이지 대체재가 아니다 — 캐시되는 것은 **백엔드 목록뿐**이고
-만료되면 라우팅이 멈춘다.
-
-- [ ] DB 별도 호스트 분리 + HA
-- [ ] W-7(LB 교체)의 선행 조건
-
-> **지금이 가장 싼 시기다.** 사용자 약 50명이고 아직 운영 서비스가 아니다.
-> "위험하니 나중에" 가 아니라 **"쉬울 때 미리"** 다. 이것만은 아래 순서와 무관하게 따로 굴린다.
-
-### W-3. 워커 OPA 배포 `[타 팀 · V-5 의 선행]`
-
-- [ ] **모든 워커에** `etc/access-control.properties` — 문서 원문: *"These configuration must be present on all workers."*
-- [ ] Rego 에 TMS 계정 `WriteSystemInformation` 허용
-- [ ] ⚠️ **신규 실패 모드**: 워커 OPA 가 죽으면 shutdown 이 거부된다 → 워커 OPA 헬스를 감시 대상에 포함
-
-### W-4. 딥링크 채우기
-
-비어 있으면 **링크가 렌더링되지 않는다** (죽은 링크를 만들지 않는 의도된 동작). 아는 것부터.
-
-- [ ] `query_history.query_url_template` / `home_url`
-- [ ] `superset_url`
-- [ ] `grafana.cluster_dashboard` — **W-6 이후**
-- [ ] `log.template` — **W-6 이후**. FR-LOG-DEEPLINK 의 전제다
-
-### W-6. Prometheus + Grafana / 로그 수집
-
-- [ ] node_exporter + Prometheus + Grafana — "부하가 늘고 있나"를 판정할 근거가 지금 없다.
-      `prometheus_scraper` 계정은 이미 있다. **FR-BM-02 의 전제**
-- [ ] Loki 또는 OpenSearch — **FR-LOG-DEEPLINK 의 전제**
-
-### W-7. 운영 위생
-
-- [ ] 팀원 계정 추가 (`scripts/hash_password.py`), 최초 로그인 후 비밀번호 변경,
-      **새 해시를 `config.secret.yaml` 에 반영** (빠뜨리면 재시작 시 임시 비밀번호로 되돌아간다)
-- [ ] ⛔ **계정 공유 금지** — 공유하면 감사 로그의 `actor` 가 전부 같아져 "누가 죽였나"에 답할 수 없다
-- [ ] nginx 인증서가 사내 CA 발급분인지 + 만료일·갱신 절차
-- [ ] LB IP HASH → 세션 어피니티 교체 (**W-5 이후**)
-
----
-
-## 4. 보드 정리 `[사내에서 /work 로, 5분]`
-
-**사외에서는 손댈 수 없다.** 보드는 사내망 DB 에 있다.
-
-- [ ] `W-11` Vite + React 스캐폴드 → **done**
-- [ ] `W-12` 화면 12개를 React 로 이전 → **done**
-- [ ] `W-8` 마이그레이션 010~019 적용 → **done**
-- [ ] `W-2` Gateway API 역할 계정 → **done**
-- [ ] `V-8` 벤치마크 검증 → **in_progress** (실행은 확인, 비교·차트 남음)
-- [ ] `D-2` → **done** (ansible 전환 확정) · `D-5`(컷오버 유지) 를 새로 올린다
-- [ ] `FR-CO-01` · `FR-FD-01` · `FR-FD-02` → **in_progress** (D-018 1단계)
-- [ ] 근거 문서 경로가 `docs/NEXT_STEPS.md` / `docs/runbooks/onsite-checklist.md` 인 항목들
-      → **`docs/TODO.md`** 로 고친다 (둘 다 이 문서로 합쳐졌다)
-
----
-
-## 5. 이월 (지금은 하지 않음)
-
-| 항목 | 조건 |
-|---|---|
-| AD 연동 (D-007) | 로컬 계정은 임시. AD 사양 확보 후 |
-| 쿼리 히스토리 프로젝트 통합 (D-001) | R1 안정화 후. B4(저장소 선정)도 이 시점 |
-| OPA 데이터 권한 연동 | 도입 시 **NFR-PERF-03 재측정 필요** |
-| FR-SLO | 목표값(인간 결정) + 워크로드 데이터 둘 다 필요 |
-| FR-BM-02 / FR-BM-05 | W-6(Prometheus) · 히스토리 프로젝트 통합이 각각 선행 |
-
----
-
-## 6. 권장 순서
-
-```
-사내 들어가면  🔴 020/021 마이그레이션 → V-10 콘솔이 뜨는가  ← 게이트
-               V-2 / V-3  (Fleet · Workload 가 실제로 보는가)
-               V-9 리소스 그룹 편집 · V-8 벤치마크 나머지 · V-11 스케줄
-               V-12 설정 조회·드리프트 (D-2 전환과 같이)
-               V-13 카탈로그 배포 ⚠️ 개발 클러스터에서 먼저
-               V-14 노드 목록 이관 ⚠️ 임포트 → source 전환 순서
-               V-15 설정 편집 ⚠️ V-12 가 끝나야 시작할 수 있다
-               W-1 실측 [피크 시간대]  ← R1 DoD 가 닫힌다
-               §1-9 끝나고 · §4 보드 정리
-
-사외에서       D-5 컷오버 유지 여부 (V-10 결과를 보고)
-               D-4 다음 슬라이스
-               → 셋 다 회의 없이 답할 수 있다
-
-따로 굴린다    🔴 W-5 Gateway DB 분리 — 위 순서와 무관하게
-               W-3 워커 OPA (→ V-5 graceful shutdown 실증)
-               W-6 Prometheus / 로그 (→ W-4 딥링크)
-```
-
----
-
-## 부록. 기능을 끄는 법 (문제가 나면 먼저 이것)
-
-네 기능 모두 **기존 화면과 독립**이다. 문제가 나면 기능만 끄는 것이 먼저다.
-
-| 증상 | 조치 |
-|---|---|
-| 벤치마크만 문제 | `benchmark.enabled: false` → `tms-api` 재시작 |
-| 스케줄만 문제 | 화면에서 해당 스케줄을 **끈다**. 전부 끄려면 `benchmark.enabled: false` — 스케줄은 벤치마크의 일부다 |
-| 설정 조회만 문제 | `cluster_ops.config_scan.playbook` 을 비운다 → 재시작. 화면이 사라지고 **다른 것은 아무 영향 없다** (읽기 전용이라 노드에 남긴 것도 없다) |
-| 카탈로그 배포만 문제 | `cluster_ops.catalog_deploy.playbook` 을 비운다 → 재시작. ⛔ **이미 올라간 파일은 그대로 남는다** — 지우려면 손으로 지우고 재시작하거나, 끄기 전에 화면에서 제거한다 |
-| 리소스 그룹 편집만 문제 | `resource_groups.enabled: false` → 재시작. **Trino 의 db 매니저와는 무관하다** — 화면만 사라지고 쿼리 수용은 그대로 돈다 |
-| Fleet 작업만 문제 | `fleet.jobs` 를 비운다 → 재시작 |
-| 보드만 문제 | 보드는 항상 켜져 있다. DB 를 못 읽으면 화면이 "보드를 읽을 수 없다" 를 표시하고 **다른 화면은 영향받지 않는다** |
-| 콘솔이 통째로 빈 화면 | §1-1 의 표 |
-| 기존 화면 회귀 | 코드 롤백 (`upgrade-r2-r3.md` §11) |
-
-**마이그레이션은 되돌리지 않는다.** `010`~`019` 는 새 테이블과 감사 액션을 더할 뿐 기존 테이블의
-컬럼을 바꾸지 않는다. 코드를 이전 커밋으로 되돌려도 그 테이블은 그냥 안 쓰일 뿐이다.
-
-⛔ **되돌리겠다고 앞 번호 마이그레이션을 다시 돌리지 않는다.** §1 의 이유로, 그건 롤백이 아니라
-감사 액션 목록을 깎는 것이다.
+| Database | Migrations `001` through `028` applied | Grant/append-only negative checks listed below |
+| Console | Fleet, Workload, and Benchmark render with internal data | Catalog, Configuration, Safe Restart completion |
+| Fleet | Fleet data renders; an idle worker accepted shutdown and stopped | Graceful drain with running tasks; query failures remain zero |
+| Workload | Resource-group activity tree renders | Distinguishing missing `jmxExport` from no activity |
+| Resource Groups | Configured groups render | Edit, validation refusal, history, revert, audit, DB grants |
+| Benchmark | Runs, schedules, scheduled execution, and charts render | Negative/concurrency and append-only checks below |
+| Catalog | Not verified | Ansible setup, development deployment, restart, promotion gate |
+| Configuration | Not verified | Ansible scan, drift, merged deployment, restart, promotion gate |
+| Safe Restart | Not completed | Ansible setup and the complete traffic/drain/health sequence |
+
+TMS is in internal verification before launch. It is used by two or three Trino operators. Planned
+console downtime is acceptable; interrupting query traffic is not.
+
+## 1. Configure Ansible once
+
+Catalog, Configuration, and automated Safe Restart are blocked by the same missing setup. Complete
+this before testing any of those screens.
+
+- [ ] Install the approved restart playbook and `docs/templates/collect-config.yml`,
+      `deploy-catalog.yml`, and `deploy-config.yml` under `/etc/tms/ansible/`.
+- [ ] Set each template's `trino_etc`, `trino_log`, `trino_user`, and `trino_group` for the real
+      hosts.
+- [ ] Put the absolute playbook paths, inventory paths, state directory, and SSH material in the
+      secret/internal configuration. Do not commit internal paths or hosts.
+- [ ] Run each playbook manually against the development cluster first.
+- [ ] Run `tms-config-check`, then restart `tms-api` and `tms-collector`.
+
+The security decision to give the TMS host SSH access is already recorded in D-009. Do not add a
+second execution path or user-selectable playbook.
+
+## 2. Configuration scan and drift
+
+- [ ] Open `/cluster-config`, run **Read the nodes**, and confirm every expected node appears.
+- [ ] Confirm coordinator/worker role differences are not reported as drift.
+- [ ] Change one development worker and confirm peer drift is reported.
+- [ ] Confirm `node.properties` appears as expected differences.
+- [ ] Confirm catalogs expose checksums only, never file contents or secrets.
+- [ ] Confirm known-property counts are populated from Trino logs.
+- [ ] Confirm viewers can read results but cannot start a scan.
+- [ ] Stop one development worker and confirm its absence is not reported as configuration drift.
+
+## 3. Catalog deployment
+
+Use a harmless catalog on the development cluster first.
+
+- [ ] Create a `memory` catalog draft and confirm literal secret values are rejected in favor of
+      `${ENV:VAR}` references.
+- [ ] Confirm production deployment stays disabled until the exact draft succeeds in development.
+- [ ] Deploy to development and verify the file exists on every node.
+- [ ] Complete Safe Restart and verify the catalog appears after restart.
+- [ ] Confirm editing the draft clears its development proof.
+- [ ] Confirm `CATALOG_CHANGE` and `CATALOG_DEPLOY` audit records include the reason.
+- [ ] Test a broken connector only on development and prove the documented recovery path.
+
+## 4. Configuration editing and deployment
+
+- [ ] Create a development-only `config.properties` change and confirm unknown property names are
+      refused.
+- [ ] Confirm literal secrets are refused in favor of `${ENV:VAR}`.
+- [ ] Deploy to development and verify the intended lines changed while every unrelated line,
+      especially keystore settings, stayed intact.
+- [ ] Restart safely and confirm the setting took effect.
+- [ ] Confirm production deployment stays disabled until the exact change succeeds in development.
+- [ ] Confirm editing the change clears its development proof.
+- [ ] Confirm `CONFIG_CHANGE` and `CONFIG_DEPLOY` audit records include the reason.
+- [ ] Verify that a valid property name with an invalid value fails at Trino startup only on the
+      development cluster, then recover using the documented rollback.
+
+## 5. Safe Restart
+
+- [ ] Start on the development cluster and confirm the Gateway backend is deactivated before drain.
+- [ ] Keep a query running and confirm restart is blocked while the query remains.
+- [ ] Let it finish and confirm the configured Ansible restart runs only after the cluster is empty.
+- [ ] Confirm traffic is not restored until health is `GOOD`.
+- [ ] Exercise abort before and after drain; both must restore Gateway traffic.
+- [ ] Force-drain only with a test query and a second explicit reason; confirm the warning and audit.
+- [ ] Simulate playbook failure and confirm the cluster remains visibly out of rotation until an
+      operator chooses recovery.
+
+## 6. Resource Group writes
+
+Use an unused group first; changes reach Trino within the DB refresh interval.
+
+- [ ] Edit one value and confirm the reason is required and the change appears within 10 seconds.
+- [ ] Submit an invalid value and confirm it is refused without losing the entered form values.
+- [ ] Create/delete a group and selector; confirm missing group-provider support produces a warning.
+- [ ] Confirm history, revert, and the revert's own new revision.
+- [ ] Confirm `RESOURCE_GROUP_CHANGE` and `RESOURCE_GROUP_REVERT` audit records.
+- [ ] As `tms_app`, confirm update/delete of revision history is denied.
+
+## 7. Fleet and graceful shutdown
+
+The completed idle-node test proves only the shutdown request and process stop.
+
+- [ ] Run a controlled query with tasks on one development worker.
+- [ ] Start shutdown from Fleet and observe drain through process exit.
+- [ ] Confirm zero query failures and allow at least twice Trino's configured shutdown grace period.
+- [ ] Confirm `NODE_SHUTDOWN` audit details identify the node, actor, and reason.
+- [ ] If `fleet.source: tms` is enabled, separately verify scan, generated inventory, retention of an
+      unreachable node, manual add/remove, and the `CLUSTER_NODE_CHANGE` audit trail.
+
+## 8. Benchmark safety checks
+
+The positive execution, schedule, and chart paths are verified.
+
+- [ ] Confirm a second concurrent run on the same cluster is refused.
+- [ ] Compare equivalent runs across clusters and confirm differing traffic conditions are warned.
+- [ ] Edit a query and confirm old runs retain their original SQL and comparisons mark the change.
+- [ ] Confirm query-set edits are refused while the set is running.
+- [ ] Confirm write SQL remains refused even when hidden after comments.
+- [ ] Confirm schedule edits/deletes and runs carry the creating actor and reason in audit records.
+- [ ] As `tms_app`, confirm benchmark result update/delete is denied.
+
+## 9. Remaining operational work
+
+- [ ] Recheck append-only grants for audit and restart event tables as `tms_app`.
+- [ ] Measure NFR-PERF-03 during peak traffic and update `PERF_MEASUREMENT.md`; set the workload poll
+      interval from evidence.
+- [ ] Move the Gateway database off VM1 and provide HA before depending on it for production routing.
+- [ ] Deploy worker OPA policy required for graceful shutdown and monitor worker OPA availability.
+- [ ] Configure Grafana/Prometheus and Loki/OpenSearch, then fill the external deep-link templates.
+- [ ] Add named operator accounts; do not share an admin identity because it destroys audit value.
+- [ ] Replace LB IP hash with the chosen session-affinity policy after Gateway DB HA.
+- [ ] Regenerate `WORK_BOARD.md` with `tms-work-export` inside the network and align board statuses.
+
+## Deferred decisions
+
+These do not block the current verification work:
+
+- SLO targets wait for the production workload measurement.
+- Dynamic catalog storage (`catalog.store=file` versus `memory`) remains an R4 decision; current
+  file deployment and restart testing does not require it.
+- Completed-query history stays in the existing external project unless integration requirements
+  reopen that decision.
