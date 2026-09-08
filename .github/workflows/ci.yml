@@ -1,0 +1,87 @@
+# Deterministic checks only. Everything here runs on a fresh checkout with no
+# secrets, no Trino, no Gateway, no PostgreSQL, no SSH and no Ansible.
+#
+# ⛔ This does not replace the onsite checklist in docs/TODO.md. Real
+# PostgreSQL grants, SSH reach, Ansible runs, systemd units and browser
+# behaviour are verified by a person on the real environment. CI protects the
+# checks a machine can repeat; it makes no claim about the rest.
+name: CI
+
+on:
+  push:
+    branches: [main, 'feat/**']
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (Python 3.9)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # ⛔ 3.9 is the floor declared in pyproject, not a convenience. Several
+      # target hosts still ship it, so the suite has to keep passing there -
+      # a 3.10+ construct that works on a developer laptop would be found by
+      # a deployment otherwise.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install
+        run: python -m pip install --upgrade pip && python -m pip install -e ".[dev]"
+
+      # The default suite needs no infrastructure by design; anything that does
+      # lives in the onsite checklist instead. On 3.9 pytest folds subTest
+      # results into the parent test, so the count reads as tests only - a
+      # failing subTest still fails the run.
+      - name: Tests
+        run: python -m pytest -q
+
+  frontend:
+    name: Frontend (build and committed bundle)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        run: npm --prefix frontend ci
+
+      - name: Type check
+        run: npm --prefix frontend run lint
+
+      - name: Build
+        run: npm --prefix frontend run build
+
+      # ⛔ The deploy host has no Node, so the console is served from the
+      # bundle committed under src/tms/ui/assets. A frontend change whose build
+      # output was not committed ships a server that keeps serving the old
+      # screen, and nothing else would notice.
+      #
+      # `git status --porcelain` rather than `git diff`: a rebuild renames the
+      # hashed chunk, so the new file is untracked and a diff alone would miss
+      # it.
+      - name: Committed bundle is current
+        run: |
+          if [ -n "$(git status --porcelain -- src/tms/ui/assets)" ]; then
+            echo "::error::src/tms/ui/assets is stale. Run 'npm --prefix frontend run build' and commit the result."
+            git status --porcelain -- src/tms/ui/assets
+            git diff -- src/tms/ui/assets
+            exit 1
+          fi
+          echo "The committed bundle matches a fresh build."

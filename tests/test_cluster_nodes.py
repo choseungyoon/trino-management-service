@@ -17,7 +17,7 @@ from tms.core.audit import (  # noqa: E402
     InMemoryAuditRepository,
 )
 from tms.core.config import build_config  # noqa: E402
-from tms.fleet import nodes
+from tms.fleet import importer, nodes
 from tms.fleet.inventory import parse_inventory
 from tms.fleet.nodeservice import NodeListService
 from tms.fleet.nodestore import (
@@ -212,3 +212,46 @@ class ServiceTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ImportPlanTest(unittest.TestCase):
+    """`tms-import-inventory` — the one-time carry of a hand-maintained
+    inventory into the node list (D-019).
+
+    ⛔ Worth a regression test because of what it feeds. The node list renders
+    the Ansible inventory that restart and configuration deployment target, and
+    this command seeds it. A host it silently drops is a node that stops
+    receiving configuration; a host it adds twice is a duplicated deploy
+    target. Neither is visible at import time - the operator sees a count.
+    """
+
+    def setUp(self):
+        self.directory = tempfile.mkdtemp()
+
+    def _inventory(self, text, name="prod-a.ini"):
+        path = os.path.join(self.directory, name)
+        with open(path, "w") as handle:
+            handle.write(text)
+        return path
+
+    def test_hosts_already_listed_are_skipped_rather_than_duplicated(self):
+        path = self._inventory("[coordinator]\nc1\n\n[worker]\nw1\nw2\n")
+        plan = importer.plan({"prod-a": path}, {"prod-a": ["c1", "w1"]})
+        self.assertEqual([n.host for n in plan["add"]["prod-a"]], ["w2"])
+        self.assertEqual(sorted(plan["skip"]["prod-a"]), ["c1", "w1"])
+
+    def test_an_empty_node_list_imports_every_host_with_its_role(self):
+        path = self._inventory(
+            "[coordinator]\nc1 ansible_host=10.0.0.1\n\n[worker]\nw1\n")
+        added = importer.plan({"prod-a": path}, {})["add"]["prod-a"]
+        self.assertEqual([(n.host, n.address, n.role) for n in added],
+                         [("c1", "10.0.0.1", "coordinator"), ("w1", "w1", "worker")])
+
+    def test_a_missing_file_is_reported_and_never_read_as_an_empty_cluster(self):
+        # ⛔ The dangerous silent case. A wrong path that returned "nothing to
+        # add" reads exactly like "already imported", and the operator would
+        # switch fleet.source to tms with an empty list.
+        missing = os.path.join(self.directory, "not-here.ini")
+        plan = importer.plan({"prod-a": missing}, {})
+        self.assertEqual(plan["unreadable"], [("prod-a", missing)])
+        self.assertNotIn("prod-a", plan["add"])
