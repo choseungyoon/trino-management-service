@@ -295,8 +295,6 @@ class ShippedConfigTest(unittest.TestCase):
             self.assertNotIn(forbidden, body, "{} must not appear in a public repo".format(forbidden))
 
 
-if __name__ == "__main__":
-    unittest.main(verbosity=2)
 
 
 class FleetSourceTest(unittest.TestCase):
@@ -341,3 +339,7 @@ class FleetSourceTest(unittest.TestCase):
     def test_an_unknown_source_is_refused(self):
         with self.assertRaises(ConfigError):
             build_config(self.base(source="database"))
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

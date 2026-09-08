@@ -211,8 +211,6 @@ class LiveViewTest(unittest.TestCase):
         self.assertEqual("pending", statuses[RESTARTING])
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 class DiscoveryGateTest(unittest.TestCase):
@@ -234,3 +232,7 @@ class DiscoveryGateTest(unittest.TestCase):
         # nothing to confirm.
         self.assertFalse(counts_disagree({}))
         self.assertFalse(counts_disagree({"inventory_size": 12}))
+
+
+if __name__ == "__main__":
+    unittest.main()

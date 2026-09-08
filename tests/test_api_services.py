@@ -469,8 +469,6 @@ class LinkHubTest(unittest.TestCase):
             self.assertTrue(link.get("icon"), link)
 
 
-if __name__ == "__main__":
-    unittest.main(verbosity=2)
 
 
 class WorkloadJoinTest(unittest.TestCase):
@@ -555,3 +553,7 @@ class WorkloadJoinTest(unittest.TestCase):
             summary={"running": 41, "queued": 5, "long_running": 2, "total": 46}))
         self.assertEqual(
             46, service.list_queries(VIEWER, "prod-a")["data"]["summary"]["total"])
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

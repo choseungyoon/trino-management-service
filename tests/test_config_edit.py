@@ -188,7 +188,7 @@ class TypoGateTest(unittest.TestCase):
             {"key": "some.removed.property", "action": "unset"}])
         service.deploy(ADMIN, change["id"], "dev-a", reason="cleaning up")
         wait(service, "dev-a")
-        # ⛔ Same gap as the catalog removal test: `wait` returns on failure too.
+        # ⛔ `wait` returns on failure too, so the state has to be asserted.
         self.assertEqual("SUCCEEDED",
                          service.repository.recent_deployments(limit=1)[0]["state"])
 

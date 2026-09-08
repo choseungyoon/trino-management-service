@@ -373,8 +373,6 @@ class RedactionTest(unittest.TestCase):
         self.assertEqual(text, redact(text))
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 class EmptyInventoryTest(unittest.TestCase):
@@ -416,3 +414,7 @@ class EmptyInventoryTest(unittest.TestCase):
         executor = self._executor("[coordinator]\nc1\n\n[worker]\n")
         executor.preflight("prod-a")
         self.assertIn("prod-a.ini", " ".join(executor.build_command("prod-a")))
+
+
+if __name__ == "__main__":
+    unittest.main()

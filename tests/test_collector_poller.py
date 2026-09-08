@@ -452,8 +452,6 @@ class SnapshotTest(unittest.TestCase):
         self.assertEqual(summary["total"], 4)
 
 
-if __name__ == "__main__":
-    unittest.main(verbosity=2)
 
 
 class ResourceGroupSchedulingTest(unittest.TestCase):
@@ -493,3 +491,7 @@ class ResourceGroupSchedulingTest(unittest.TestCase):
         client.mbean_names = ["java.lang:type=Memory"]
         snapshot = make_poller(client, resource_group_interval=15.0).poll_resource_groups()
         self.assertIn("jmxExport", snapshot.advice)
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

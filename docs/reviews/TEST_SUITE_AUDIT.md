@@ -108,6 +108,38 @@ Driving the same fixture with a playbook exiting 2 gave `deployment state: FAILE
 still passed. **Done**: one assertion added to each. Re-running the catalog test under a failing
 playbook now yields `AssertionError: 'SUCCEEDED' != 'FAILED'`.
 
+### ⛔ 49 tests were invisible to direct invocation — fixed
+
+Found while acting on a review finding about the file this slice touched, then checked across the
+whole suite rather than only where it was reported.
+
+Every test file ends with `if __name__ == "__main__": unittest.main()`. In 14 files that guard sat
+*before* one or more `class …Test` definitions, so `unittest.main()` ran at that line and never saw
+the classes below it:
+
+```
+venv/bin/python tests/test_bench_trend.py   → Ran 10 tests … OK
+venv/bin/python -m pytest tests/test_bench_trend.py  → 18 collected
+```
+
+| File | Ran directly | Collected | Hidden |
+|---|---|---|---|
+| `test_bench_trend.py` | 10 | 18 | 8 |
+| `test_api_services.py` | 39 | 45 | 6 |
+| `test_api_work_fleet.py` | 10 | 15 | 5 |
+| `test_collector_poller.py`, `test_collector_service.py`, `test_config.py`, `test_health_observed.py` | | | 4 each |
+| `test_configscan.py`, `test_console_styles.py` | | | 3 each |
+| `test_ansible_executor.py`, `test_collector_units.py`, `test_configcheck.py` | | | 2 each |
+| `test_fleet.py`, `test_restart_service.py` | | | 1 each |
+| **total** | **249** | **298** | **49** |
+
+CI was never affected — pytest imports the module, so `__main__` never runs and all 912 are
+collected. The damage is developer-facing and is exactly the false confidence this audit is for: a
+green `OK` while a third of a file never executed.
+
+**Done**: the guard moved to the end of file in all 14 files. Pure statement reordering; no test
+logic changed. Every file now reports the same count both ways, verified programmatically.
+
 ## 5. Tests that mock away the behaviour under test
 
 **Result: none found, and the suite's design is the reason.**
@@ -200,6 +232,7 @@ here; the measurement corrected them.
 |---|---|---|
 | 12 structurally similar groups (§3) | keep — different inputs, proven non-equivalent | closed |
 | Two blind removal tests (§4) | strengthen | **done** |
+| 49 tests hidden from direct invocation (§4) | move the `__main__` guard | **done** |
 | `test_read_only_starts_are_accepted`, `test_storage_failure…` (§4) | keep as-is | closed |
 | `importer.plan()` (§7) | add regression test | **done** |
 | `work/export.py`, `bench/ticker.py`, `deeplinks.py` (§7) | add later | open |

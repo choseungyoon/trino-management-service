@@ -89,8 +89,6 @@ class SummariseTest(unittest.TestCase):
         self.assertEqual(150.0, stats["avg"])
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 class BucketTest(unittest.TestCase):
@@ -172,3 +170,7 @@ class MeanLineTest(unittest.TestCase):
 
     def test_a_series_with_no_points_has_no_line(self):
         self.assertEqual([], build([row(1, "a", 100, state="FAILED")])["series"])
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -114,8 +114,6 @@ class TruncateUtf8Test(unittest.TestCase):
         self.assertEqual(truncate_utf8("", 100), ("", False))
 
 
-if __name__ == "__main__":
-    unittest.main(verbosity=2)
 
 
 class SnapshotKindDriftTest(unittest.TestCase):
@@ -156,3 +154,7 @@ class SnapshotKindDriftTest(unittest.TestCase):
         for kind in (KIND_QUERIES, KIND_JMX, KIND_INFO, KIND_HEALTH,
                      KIND_RESOURCE_GROUPS, KIND_GATEWAY, KIND_FLEET):
             self.assertIn(kind, ALLOWED_KINDS)
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

@@ -187,8 +187,6 @@ class ValidNamesTest(unittest.TestCase):
         self.assertEqual([], result["valid_names"])
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 class TransportTest(unittest.TestCase):
@@ -230,3 +228,7 @@ class TransportTest(unittest.TestCase):
         })])[0]
         self.assertEqual({"a": "1"}, node["properties"])
         self.assertEqual(["a", "b", "c"], node["valid_names"])
+
+
+if __name__ == "__main__":
+    unittest.main()

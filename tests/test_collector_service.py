@@ -94,8 +94,6 @@ class SingletonLockTest(unittest.TestCase):
         self.assertEqual(COLLECTOR_ADVISORY_LOCK_KEY, 0x746D7301)
 
 
-if __name__ == "__main__":
-    unittest.main(verbosity=2)
 
 
 class RecordingHealthWriter:
@@ -164,3 +162,7 @@ class GatewayHealthWiringTest(unittest.TestCase):
         service, writer, _repo = self._service(snapshot=None)
         service._evaluate_health("prod-a")
         self.assertIsNone(writer.calls[0]["gateway_backends"])
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

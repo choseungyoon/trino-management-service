@@ -421,8 +421,6 @@ class FleetReadTest(unittest.TestCase):
             service.get_fleet(ADMIN, "nope")
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 class LimitsTest(unittest.TestCase):
@@ -438,3 +436,7 @@ class LimitsTest(unittest.TestCase):
         # Granted (D-012): saying otherwise contradicts the identify button and
         # the node scan, both of which run exactly this query.
         self.assertNotIn("does not hold", withal)
+
+
+if __name__ == "__main__":
+    unittest.main()

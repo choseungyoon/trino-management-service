@@ -210,19 +210,16 @@ class ServiceTest(unittest.TestCase):
                                           "prod-a")["can_scan"])
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 class ImportPlanTest(unittest.TestCase):
     """`tms-import-inventory` — the one-time carry of a hand-maintained
     inventory into the node list (D-019).
 
-    ⛔ Worth a regression test because of what it feeds. The node list renders
-    the Ansible inventory that restart and configuration deployment target, and
-    this command seeds it. A host it silently drops is a node that stops
-    receiving configuration; a host it adds twice is a duplicated deploy
-    target. Neither is visible at import time - the operator sees a count.
+    ⛔ The node list renders the Ansible inventory that restart and
+    configuration deployment target, and this command seeds it. A host dropped
+    here stops receiving configuration; a host added twice becomes a duplicated
+    deploy target. Neither is visible at import time - the operator sees a count.
     """
 
     def setUp(self):
@@ -255,3 +252,7 @@ class ImportPlanTest(unittest.TestCase):
         plan = importer.plan({"prod-a": missing}, {})
         self.assertEqual(plan["unreadable"], [("prod-a", missing)])
         self.assertNotIn("prod-a", plan["add"])
+
+
+if __name__ == "__main__":
+    unittest.main()

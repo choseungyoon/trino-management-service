@@ -155,8 +155,6 @@ class FleetApiTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("can_identify", response.json()["data"])
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 @unittest.skipUnless(WEB_DEPS, "fastapi/httpx not installed")
@@ -252,3 +250,7 @@ class OverviewAddressTest(unittest.IsolatedAsyncioTestCase):
         # The address is still there - it answers "which host", which is the
         # other half of what the card is for.
         self.assertEqual("https://prod-a.invalid:8443", card["coordinator_url"])
+
+
+if __name__ == "__main__":
+    unittest.main()

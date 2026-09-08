@@ -166,8 +166,8 @@ class DevelopmentGateTest(unittest.TestCase):
         service.deploy(ADMIN, draft["id"], "prod-a", reason="clean up",
                        action="remove")
         wait(service, "prod-a")
-        # ⛔ `wait` only returns when the run is over, not when it worked. The
-        # test passed against a playbook exiting 2 until this line existed.
+        # ⛔ `wait` returns when the run ends, not when it succeeded, so the
+        # state has to be asserted separately.
         self.assertEqual("SUCCEEDED",
                          service.repository.recent_deployments(limit=1)[0]["state"])
 

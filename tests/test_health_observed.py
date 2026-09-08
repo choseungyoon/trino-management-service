@@ -80,8 +80,6 @@ class ObservedSegmentsTest(unittest.TestCase):
                 self.assertNotIn("<", part["text"])
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 class BottleneckTextTest(unittest.TestCase):
@@ -121,3 +119,7 @@ class BottleneckTextTest(unittest.TestCase):
             "HardConcurrencyLimit": 4, "MaxQueuedQueries": 100})
         self.assertEqual("concurrency_limit", row["bottleneck"])
         self.assertEqual("At concurrency limit", row["bottleneck_text"])
+
+
+if __name__ == "__main__":
+    unittest.main()

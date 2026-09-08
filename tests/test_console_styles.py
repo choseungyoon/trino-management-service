@@ -81,8 +81,6 @@ class StylesheetTest(unittest.TestCase):
         self.assertNotIn("totally-invented-class", declared_classes())
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 class ClusterSelectionTest(unittest.TestCase):
@@ -147,3 +145,7 @@ class FutureTimeTest(unittest.TestCase):
             {}, offenders,
             "these rewrite the past-tense helper's words instead of using "
             "untilTime(): {}".format(offenders))
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -188,8 +188,6 @@ class ExitCodeTest(unittest.TestCase):
             self.assertEqual(1, run_cli(["--config", path, "--offline"]))
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 class MigrationCoverageTest(unittest.TestCase):
@@ -239,3 +237,7 @@ class MigrationCoverageTest(unittest.TestCase):
             self.assertTrue(
                 pathlib.Path(root, "migrations", name).is_file(),
                 "config-check refers to {} which is not in migrations/".format(name))
+
+
+if __name__ == "__main__":
+    unittest.main()
