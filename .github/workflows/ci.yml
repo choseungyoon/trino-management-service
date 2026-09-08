@@ -25,13 +25,13 @@ jobs:
     name: Backend (Python 3.9)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # ⛔ 3.9 is the floor declared in pyproject, not a convenience. Several
       # target hosts still ship it, so the suite has to keep passing there -
       # a 3.10+ construct that works on a developer laptop would be found by
       # a deployment otherwise.
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.9'
           cache: pip
@@ -51,9 +51,9 @@ jobs:
     name: Frontend (build and committed bundle)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
           cache: npm
