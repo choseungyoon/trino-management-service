@@ -1,7 +1,8 @@
 # API_R1 — R1 엔드포인트 명세
 
-> **Bolt 1 산출물 (U8)** · 작성 2026-08-06 · 상태: **인간 승인 대기**
-> 기준: `ARCHITECTURE.md`, `HEALTH_TESTS.md`, `AUDIT_MODEL.md`
+> **분류: 구현된 R1 API의 설계 참조. 현재 작업 목록이 아니다.**
+> 작성 2026-08-06 · 현재 route와 변경된 계약은 code, DECISIONS.md, REQUIREMENTS.md가
+> 우선한다. 기준: `ARCHITECTURE.md`, `HEALTH_TESTS.md`, `AUDIT_MODEL.md`
 
 ---
 

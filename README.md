@@ -128,6 +128,10 @@ to configure.
 | [Audit](docs/usage/audit.md) | What is recorded, and how to export it |
 | [Configuration reference](docs/usage/configuration-reference.md) | Every `config.yaml` key |
 
+Project planning and contributor documents start at
+[`docs/README.md`](docs/README.md); that index separates current instructions from historical
+design records.
+
 ---
 
 ## How it is built
@@ -193,14 +197,15 @@ Interfaces are still moving; treat this as pre-1.0.
 | Python | 3.9 and up |
 | PostgreSQL | 14 and up |
 
-What is being worked on next is in [`docs/TODO.md`](docs/TODO.md) — again a
-working document rather than user documentation, and in Korean.
+Product priority is in [`docs/ROADMAP.md`](docs/ROADMAP.md). Internal-network and human
+verification still open is kept separately in [`docs/TODO.md`](docs/TODO.md).
 
 ---
 
 ## Contributing
 
-Read [`docs/TEAMS.md`](docs/TEAMS.md) first. Codex plans and reviews; Claude
+Read [`docs/README.md`](docs/README.md) and [`docs/TEAMS.md`](docs/TEAMS.md) first. Codex plans
+and reviews; Claude
 implements approved slices on feature branches. `AGENTS.md` and `CLAUDE.md`
 contain their role-specific instructions.
 

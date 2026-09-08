@@ -1,6 +1,7 @@
 # ARCHITECTURE — R1
 
-> **Bolt 1 산출물 (U1, U2, U4, U6, U7)** · 작성 2026-08-06 · 상태: **인간 승인 대기**
+> **분류: 구현된 architecture의 참조 기준. 현재 작업 목록이 아니다.**
+> Bolt 1 작성 2026-08-06 · 이후 결정과 현재 code가 이 문서보다 우선한다.
 > 모든 Trino/Gateway 연동점은 `TRINO_VERIFIED.md` 항목을 인용한다. 인용 없는 API는 쓰지 않는다.
 
 ---

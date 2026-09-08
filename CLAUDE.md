@@ -1,13 +1,9 @@
 # Claude Code implementation instructions
 
-Before implementation, read:
-
-1. `README.md`
-2. `docs/DECISIONS.md`
-3. `docs/TODO.md`
-4. `docs/TEAMS.md`
-5. Relevant design/API/runbook files
-6. `docs/TRINO_VERIFIED.md` for every Trino, Gateway, or OPA claim
+Before implementation, follow `docs/README.md` and the current work order in
+`docs/prompts/CLAUDE_NEXT.md`. Read the one plan named there, only its referenced decisions and
+relevant design/API/runbook files, and `docs/TRINO_VERIFIED.md` for every Trino, Gateway, or OPA
+claim. Historical Bolt, backlog, and generated-board files are not implementation instructions.
 
 The product owner has final authority. Codex owns planning and independent review. Claude owns
 application implementation, tests, deterministic verification, review fixes, and feature-branch
@@ -47,6 +43,8 @@ the console temporarily unavailable; it must not affect query traffic.
 - React screens: `frontend/src/screens/`; shared UI: `frontend/src/components/`
 - Approved CSS vocabulary: `frontend/src/tms.css`; do not invent unused class names
 - Built console: `src/tms/ui/assets/`
+- Current product order: `docs/ROADMAP.md`
+- Current approved plan: the file named by `docs/prompts/CLAUDE_NEXT.md`
 - Current human/onsite work: `docs/TODO.md`
 - Durable decisions: `docs/DECISIONS.md`
 - Verified version-specific facts: `docs/TRINO_VERIFIED.md`

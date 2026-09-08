@@ -1,13 +1,11 @@
 # Codex planning and review instructions
 
-Before planning or reviewing work, read:
+Before planning or reviewing work, follow the reading route in `docs/README.md`.
 
-1. `README.md`
-2. `docs/DECISIONS.md`
-3. `docs/TODO.md`
-4. `docs/TEAMS.md`
-5. Relevant design/API/runbook files
-6. `docs/TRINO_VERIFIED.md` for every Trino, Gateway, or OPA claim
+Always read `README.md`, `docs/ROADMAP.md`, the active plan, and the decisions referenced by that
+plan. Read only the relevant design/API/runbook files. Read `docs/TODO.md` when onsite work is in
+scope, and `docs/TRINO_VERIFIED.md` for every Trino, Gateway, or OPA claim. Historical Bolt,
+backlog, and generated-board files are not current instructions.
 
 The product owner has final authority. Codex owns planning, source-of-truth document updates after
 an explicit decision, and independent code review. Claude owns implementation and review fixes.
@@ -40,7 +38,8 @@ the console temporarily unavailable; it must not affect query traffic.
 Plan one smallest complete slice at a time. State the operator outcome, affected invariants,
 acceptance conditions, files likely to change, deterministic checks, and any required onsite
 verification. A durable product or architecture decision needs product-owner approval and a
-`docs/DECISIONS.md` update before implementation.
+`docs/DECISIONS.md` update before implementation. Codex keeps `docs/ROADMAP.md` and the active
+plan aligned; Claude does not choose roadmap priority.
 
 ## Review priority
 

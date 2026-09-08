@@ -2,6 +2,9 @@
 
 <!-- impeccable:product-schema 1 -->
 
+> **Document role:** frontend product/design profile used by UI tooling. Product scope and priority
+> are owned by README.md, docs/REQUIREMENTS.md, and docs/ROADMAP.md.
+
 ## Platform
 
 web

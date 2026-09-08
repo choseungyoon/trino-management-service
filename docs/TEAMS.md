@@ -9,23 +9,27 @@
   delivers feature branches.
 
 The retired AI-DLC role simulation is historical context in `BOLTS.md`; it is not the current
-development process.
+development process. `README.md` is the document map and `ROADMAP.md` is the only product-priority
+list.
 
 ## Sources of truth
 
 | Question | Source |
 |---|---|
 | What the product is and deliberately is not | `README.md` |
+| Which work happens next | `ROADMAP.md` |
 | Accepted durable decisions | `DECISIONS.md` |
+| How the current slice is implemented | active file under `plans/` |
 | Verified Trino 477, Gateway, and OPA facts | `TRINO_VERIFIED.md` |
 | Human and onsite work still open | `TODO.md` |
 | Current board snapshot from the internal database | `WORK_BOARD.md` |
 | Feature behavior and API details | relevant design, API, usage, and runbook file |
 | Completed historical construction | `BOLTS.md` and `archive/` |
 
-`TODO.md` wins over an older `WORK_BOARD.md`. Never edit `WORK_BOARD.md` manually; regenerate it with
-`tms-work-export` inside the network. If a durable decision conflicts with dependent prose, update
-`DECISIONS.md` first and then align the dependent document.
+`ROADMAP.md` owns product order. `TODO.md` owns onsite detail and wins over an older
+`WORK_BOARD.md`. Never edit `WORK_BOARD.md` manually; regenerate it with `tms-work-export`
+inside the network. If a durable decision conflicts with dependent prose, update `DECISIONS.md`
+first and then align the dependent document.
 
 ## Default development loop
 

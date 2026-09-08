@@ -1,6 +1,7 @@
 # AUDIT_MODEL — FR-AUDIT-ACTION 데이터 모델 및 강제 방식
 
-> **Bolt 1 산출물 (U5)** · 작성 2026-08-06 · 상태: **인간 승인 대기**
+> **분류: 구현된 audit invariant의 설계 참조. 현재 작업 목록이 아니다.**
+> Bolt 1 작성 2026-08-06 · 현재 decision과 code가 세부 schema보다 우선한다.
 > 출처 모델: Cloudera Manager 설정 변경 감사 + "Reason for change" 필수 입력 (`MARKET_RESEARCH.md`)
 
 ---

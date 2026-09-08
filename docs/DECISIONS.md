@@ -1,8 +1,19 @@
 # DECISIONS — 의사결정 기록
 
-> **소유자**: `orchestrator`
+> **관리**: Codex service PM · **최종 승인**: Product Owner
 > 되돌리기 비용이 큰 결정만 기록한다. 결정한 사람, 날짜, 근거, 뒤집는 조건을 남긴다.
 > 형식: 결정은 **번복 가능**하다. 단 번복하려면 여기 적힌 근거가 무효가 되었음을 보여야 한다.
+
+현재 plan이 참조하는 decision만 읽는다. 번호 순서는 중요도가 아니라 기록 순서다.
+
+| 영역 | 현재 적용 decision |
+|---|---|
+| 제품·저장소·인증 | D-001, D-002, D-003, D-004, D-005, D-007 |
+| cluster·Gateway·Ansible | D-008, D-009, D-012, D-019, D-020 |
+| workload·config·catalog | D-010, D-018 |
+| 작업 추적 | D-013 |
+| benchmark | D-014, D-015, D-017 |
+| frontend | D-016. D-011은 D-016으로 대체됨 |
 
 ---
 
@@ -43,7 +54,7 @@ Trino 배포 archive 구조, 대상 버전의 Java 요구사항, node별 설치�
 2. in-place 작업 동안 잔여 cluster capacity가 실제 traffic을 감당하지 못하거나 허용할 수 없는 서비스 영향이 반복되면 Blue/Green 또는 추가 capacity 확보를 선행한다.
 3. 지원하려는 Trino 버전 사이에 안전한 in-place 복구가 검증되지 않으면 해당 버전 조합을 차단한다.
 
-**구현 계획**: `PLAN_INPLACE_UPGRADE.md`
+**구현 계획**: `plans/INPLACE_UPGRADE.md`
 
 **관련**: D-009(Ansible 실행 경계), D-013(작업 상태·감사), D-014~017(Benchmark), D-018(설정·카탈로그), `TRINO_VERIFIED.md` T1-2/T1-2-1/T1-8/T1-9
 

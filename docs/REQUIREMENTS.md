@@ -1,16 +1,20 @@
 # TMS Requirements Specification
 
 **프로젝트**: Trino Management Service (TMS)
-**버전**: 0.1 (Draft — 인간 검증 대기)
-**방법론**: AI-DLC Inception 산출물
-**작성 주체**: AI 초안 / **승인권자: Platform Owner (인간)**
+**상태**: 살아 있는 제품 요구사항. 일정과 우선순위는 `ROADMAP.md`가 담당한다.
+**승인권자**: Platform Owner (인간)
+
+> 이 문서는 제품이 해야 할 동작과 경계를 기록한다. 과거 release 표나
+> `[NEEDS-HUMAN-DECISION]` 표시는 현재 작업 순서가 아니다. 충돌하면 `DECISIONS.md`,
+> 현재 plan, 이 문서 순으로 적용한다.
 
 ---
 
 ## 0. 문서 사용 규칙 (AI 에이전트 필독)
 
 0. **Bolt 0 (2026-08-04) 검증 결과가 반영되어 있다.** 취소선(~~`[VERIFY]`~~)이 그어진 항목은 해소된 것이며, 그 아래 "✅ Bolt 0 해소" 블록이 확정된 사실이다. **모든 사실의 출처는 `docs/TRINO_VERIFIED.md`이며, 판정 근거는 `docs/archive/BOLT_0_RESULT.md`다.**
-1. **본 문서는 초안이다.** `[NEEDS-HUMAN-DECISION]` 태그가 붙은 항목은 인간 승인 전 구현 금지.
+1. `[NEEDS-HUMAN-DECISION]`은 현재 plan이 그 결정에 실제로 의존할 때만 구현을
+   차단한다. 역사적이거나 뒤로 미룬 태그는 관련 없는 slice를 막지 않는다.
 2. **`[VERIFY]` 태그가 붙은 기술 가정은 공식 문서로 검증 후 구현한다.** Trino 477 config property는 버전 간 변동이 잦다. 과거 세션에서 존재하지 않는 property를 제안해 기동 실패를 유발한 이력이 있다.
 3. 모든 요구사항은 **검증 가능한 수용 기준(Acceptance Criteria)** 을 가진다. AC가 없는 요구사항은 미완성이다.
 4. 코드 주석은 **영어**로 작성한다.
@@ -646,7 +650,7 @@ _런타임 정보 (실시간 조회 소스)_: Trino 버전, systemd 유닛 상�
 | FR-UP-04 | 성공 release와 artifact/checksum/benchmark/audit history 관리 | 검증 가능한 release만 rollback 선택 가능 |
 | FR-UP-05 | 시작·traffic 복귀·rollback은 관리자, 사유, UI 확인, 감사 기록을 요구 | 누락 시 서버가 거부 |
 
-**근거**: 업그레이드용 VM 확보가 어렵고 작업 빈도가 낮으며 저트래픽 시간대를 선택할 수 있다는 운영 제약을 D-020으로 승인했다. 대상 클러스터의 계획된 downtime을 받아들이되, 다른 active backend와 고정된 안전 순서로 query traffic 영향을 제한한다. 구현 상세는 `PLAN_INPLACE_UPGRADE.md`를 따른다.
+**근거**: 업그레이드용 VM 확보가 어렵고 작업 빈도가 낮으며 저트래픽 시간대를 선택할 수 있다는 운영 제약을 D-020으로 승인했다. 대상 클러스터의 계획된 downtime을 받아들이되, 다른 active backend와 고정된 안전 순서로 query traffic 영향을 제한한다. 구현 상세는 `plans/INPLACE_UPGRADE.md`를 따른다.
 
 ## FR-LOG-DEEPLINK (P1) — 로그 시스템 컨텍스트 딥링크
 

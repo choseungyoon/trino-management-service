@@ -1,5 +1,9 @@
 # TMS Backlog — 전체 개발 항목 통합 점검
 
+> **분류: 역사적 제품 옵션 평가. 현재 우선순위가 아니다.**
+> 2026-08 시점의 BUILD/SETUP/DELEGATE/REJECT 근거를 보존한다. 현재 작업 순서는
+> `ROADMAP.md`, 구현 방법은 `plans/`, onsite 상태는 `TODO.md`를 사용한다.
+
 **버전**: 0.2 (사용자 제시 8개 항목 반영)
 **판정 기준**: ① 이미 존재하는가 ② 엔진이 지원하는가 ③ 우리가 만들어야 하는가 ④ 만들지 말아야 하는가
 
@@ -53,7 +57,7 @@
 |---|---|---|---|
 | 3-1a | 클러스터 단위 셋업 (워커 수 지정) | **BUILD** | Ansible playbook + 골든 이미지. TMS는 실행 트리거·진행 추적 |
 | 3-1b | Gateway 옵션 및 이중화 셋업 | **BUILD** | 기본값을 이중화로 강제 |
-| 3-2 | 버전 패치 및 업그레이드 | **BUILD (고위험)** | **VM in-place.** D-020과 `PLAN_INPLACE_UPGRADE.md`의 차단·drain·검증·rollback 순서를 강제 |
+| 3-2 | 버전 패치 및 업그레이드 | **BUILD (고위험)** | **VM in-place.** D-020과 `plans/INPLACE_UPGRADE.md`의 차단·drain·검증·rollback 순서를 강제 |
 
 > **경고**: 항목 3은 사실상 미니 Cloudera Manager 구축이다. 범위가 크므로 R3 이후로 배치한다. R1에 넣으면 나머지가 전부 밀린다.
 >

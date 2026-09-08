@@ -1,6 +1,7 @@
 # HEALTH_TESTS — FR-CLUSTER-HEALTH 테스트 카탈로그
 
-> **Bolt 1 산출물 (U3)** · 작성 2026-08-06 · 상태: **인간 승인 대기**
+> **분류: health 판정의 테스트 카탈로그. 현재 작업 목록이 아니다.**
+> Bolt 1 작성 2026-08-06 · 현재 decision, verified facts, code가 우선한다.
 > 출처 모델: Cloudera Manager Health Test (`MARKET_RESEARCH.md`)
 
 ---
