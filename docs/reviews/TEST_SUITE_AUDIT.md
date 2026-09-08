@@ -33,6 +33,20 @@ approved difference from the local baseline required by the plan's acceptance co
 `coverage` was installed **into a throwaway virtualenv only** to produce the numbers below. It is
 not a project dependency and is deliberately not a CI gate.
 
+### CI verified on real runners, including its failure modes
+
+A workflow that has only been read is a workflow nobody has tested. Both jobs were run on GitHub
+Actions from this branch, and then deliberately broken on a throwaway branch that was deleted after.
+
+| Acceptance condition | Evidence |
+|---|---|
+| Both jobs run on a fresh checkout with no secrets | run `34240109512`, both green |
+| Backend matches the local baseline | `Successfully set up CPython (3.9.25)` … `912 passed in 10.98s` |
+| No subtest line on the floor | confirmed — matches the prediction above, and is the approved difference |
+| A failing Python test fails the job | `FAILED tests/test_ci_probe.py::ProbeTest::test_deliberate_failure` … `1 failed, 912 passed` |
+| A stale bundle fails the job | `src/tms/ui/assets is stale` — the guard fired on run `34240276269` |
+| No integration script runs | neither job installs the `[browser]` extra or starts a service |
+
 ## 2. Invariant map
 
 Where the product's non-negotiable rules are actually enforced by a test.
