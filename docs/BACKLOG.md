@@ -53,11 +53,11 @@
 |---|---|---|---|
 | 3-1a | 클러스터 단위 셋업 (워커 수 지정) | **BUILD** | Ansible playbook + 골든 이미지. TMS는 실행 트리거·진행 추적 |
 | 3-1b | Gateway 옵션 및 이중화 셋업 | **BUILD** | 기본값을 이중화로 강제 |
-| 3-2 | 버전 패치 및 업그레이드 | **BUILD (고위험)** | **Blue/Green만 허용.** in-place 업그레이드 금지 |
+| 3-2 | 버전 패치 및 업그레이드 | **BUILD (고위험)** | **VM in-place.** D-020과 `PLAN_INPLACE_UPGRADE.md`의 차단·drain·검증·rollback 순서를 강제 |
 
 > **경고**: 항목 3은 사실상 미니 Cloudera Manager 구축이다. 범위가 크므로 R3 이후로 배치한다. R1에 넣으면 나머지가 전부 밀린다.
 >
-> **업그레이드 전략 확정**: 코디네이터 HA가 없으므로 in-place 업그레이드는 필연적 다운타임 + 쿼리 전멸을 부른다. **신규 클러스터를 목표 버전으로 띄우고 → Gateway routing group에 추가 → 기존 클러스터 비활성화 → drain → 폐기**가 유일하게 안전한 경로다. 이는 앞서 정의한 "확장 단위 = 클러스터" 원칙과 정확히 일치한다.
+> **업그레이드 전략 확정 (D-020)**: 신규 VM 확보가 어려운 환경을 반영해 **대상 Gateway backend 비활성 확인 → drain → 동일 VM 전체 업그레이드 → health/version/benchmark 검증 → 명시적 traffic 복귀** 순서의 cluster-wide in-place 방식을 사용한다. 실패 시 traffic은 차단된 채로 유지하고 직전 known-good release로 rollback한다.
 
 ---
 
@@ -192,12 +192,12 @@
 
 > **FR-CATALOG 도 마찬가지로 미룬 것이 아니라 못 하는 것이다.** `catalog.management=dynamic` 이 experimental 이고 보안 영향이 있으며, **Hive·Iceberg 는 DROP 해도 리소스가 해제되지 않아 재시작이 필요하다** — 주력이 그 둘이므로 "무중단 카탈로그 제거 불가" 가 확정이다. `catalog.store` 선택도 `[NEEDS-HUMAN-DECISION]` 으로 남아 있다.
 
-### R5 — 클러스터를 찍어낸다
+### R5 — 클러스터를 구축하고 업그레이드한다
 
 | ID | 기능 | 출처 |
 |---|---|---|
 | FR-PROVISION | 클러스터 단위 셋업 자동화 | **사용자 3-1** · R4→R5 |
-| FR-UPGRADE | Blue/Green 버전 업그레이드 | **사용자 3-2** · R4→R5 |
+| FR-UPGRADE | VM in-place 버전 업그레이드 | **사용자 3-2** · R4→R5 · D-020 |
 
 ### R6+ — AIOps (별도 문서 `AIOPS.md` 참조)
 

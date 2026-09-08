@@ -6,6 +6,49 @@
 
 ---
 
+## D-020 — Trino 버전 업그레이드는 **VM in-place**로 시작한다
+
+| 항목 | 내용 |
+|---|---|
+| **날짜** | 2026-09-08 |
+| **결정자** | Platform Owner (인간) |
+| **상태** | 계획 승인 |
+| **대체** | 기존 FR-UPGRADE의 Blue/Green 전용 방침 |
+
+**배경**: 업그레이드 때마다 신규 coordinator·worker VM을 확보하기 어렵고 작업 빈도도 낮다. 운영자는 트래픽이 가장 적은 시간대를 선택할 수 있다. 따라서 초기 업그레이드 기능은 새 클러스터를 만드는 Blue/Green이 아니라 기존 VM 전체를 같은 버전으로 교체하는 방식이 현실적이다.
+
+### 결정
+
+1. TMS의 최초 업그레이드 방식은 **클러스터 단위 VM in-place**다. worker별 rolling upgrade와 혼합 버전 운용은 지원하지 않는다.
+2. 대상 Gateway backend를 비활성화하고 실제 유입 중단을 확인한 뒤 drain한다. 다른 active backend가 없거나 운영자가 잔여 클러스터 수용 가능성을 확인하지 않으면 시작하지 않는다.
+3. 업그레이드 전후에 같은 benchmark query set을 실행한다. 성공·회귀 결과를 본 운영자가 traffic 복귀 또는 rollback을 명시적으로 선택한다.
+4. 실패하면 대상 backend는 비활성 상태로 남는다. TMS가 자동으로 traffic을 복귀시키지 않는다.
+5. rollback도 같은 안전 순서를 거쳐 **직전 known-good release**로 되돌리는 in-place 작업이다. 과거 버전 rollback은 그 release가 실제 artifact와 복구 지점을 모두 보유할 때만 허용한다.
+6. 설치·복구는 D-009의 configured Ansible playbook 경계 안에서만 수행한다. UI에서 playbook 경로, host, SSH 계정·비밀번호·키를 입력받지 않는다.
+7. TMS 프로세스가 중단되면 실행을 추측해서 이어가지 않는다. 현재 단계를 `UNKNOWN/BLOCKED`로 보여 주고 운영자 확인 전에는 다음 파괴적 단계를 실행하지 않는다.
+
+### 받아들이는 trade-off
+
+- 작업 동안 대상 클러스터 capacity는 사용할 수 없다. 이는 VM 제약과 낮은 작업 빈도를 고려해 승인한 계획된 downtime이다.
+- TMS console 자체의 계획된 중단은 허용되지만, TMS가 query path에 들어가거나 다른 active backend의 traffic을 방해해서는 안 된다.
+- 초기 버전은 새 배포 플랫폼, 별도 작업 큐, artifact repository를 만들지 않는다. 기존 DB 상태 기록, 로컬 state directory, Ansible, Gateway, Safe Restart, Benchmark를 재사용한다.
+
+### 구현 전 검증
+
+Trino 배포 archive 구조, 대상 버전의 Java 요구사항, node별 설치·복구 절차는 아직 `TRINO_VERIFIED.md`에 검증되어 있지 않다. 이 사실들을 개발 클러스터에서 먼저 재현하고 기록하기 전에는 배포 playbook과 실행 버튼을 구현하지 않는다.
+
+### 뒤집는 조건
+
+1. 업그레이드용 VM 확보가 일상화되면 Blue/Green을 다시 비교한다.
+2. in-place 작업 동안 잔여 cluster capacity가 실제 traffic을 감당하지 못하거나 허용할 수 없는 서비스 영향이 반복되면 Blue/Green 또는 추가 capacity 확보를 선행한다.
+3. 지원하려는 Trino 버전 사이에 안전한 in-place 복구가 검증되지 않으면 해당 버전 조합을 차단한다.
+
+**구현 계획**: `PLAN_INPLACE_UPGRADE.md`
+
+**관련**: D-009(Ansible 실행 경계), D-013(작업 상태·감사), D-014~017(Benchmark), D-018(설정·카탈로그), `TRINO_VERIFIED.md` T1-2/T1-2-1/T1-8/T1-9
+
+---
+
 ## D-019 — 노드 목록은 **코디네이터에게 묻는다.** 손으로 적는 것은 예외뿐이고, 인벤토리 파일은 파생물이 된다
 
 | 항목 | 내용 |

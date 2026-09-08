@@ -638,14 +638,15 @@ _런타임 정보 (실시간 조회 소스)_: Trino 버전, systemd 유닛 상�
 
 ## FR-UPGRADE (P3) — 버전 업그레이드
 
-| ID       | 내용                                                                      | AC                 |
-| -------- | ------------------------------------------------------------------------- | ------------------ |
-| FR-UP-01 | **Blue/Green 방식만 지원.** in-place 금지                                 | in-place 경로 부재 |
-| FR-UP-02 | 신규 클러스터 생성 → 검증 → routing group 전환 → 구 클러스터 drain → 폐기 | 단계별 진행        |
-| FR-UP-03 | 전환 전 FR-BENCHMARK 자동 실행 및 회귀 확인                               | 성능 회귀 시 경고  |
-| FR-UP-04 | 롤백 (routing group을 구 클러스터로 복귀)                                 | 롤백 동작          |
+| ID       | 내용 | AC |
+| -------- | ---- | -- |
+| FR-UP-01 | **클러스터 단위 VM in-place** 업그레이드. rolling·혼합 버전은 지원하지 않는다 | 모든 coordinator·worker가 목표 버전으로 수렴 |
+| FR-UP-02 | artifact 검증 → Gateway 비활성 확인 → drain → 사전 benchmark → 배포 → fresh health/version 확인 → 동일 benchmark → 운영자 traffic 복귀 | 순서 우회 불가 |
+| FR-UP-03 | 실패 시 traffic 차단을 유지하고 직전 known-good release로 rollback | 자동 traffic 복귀 없음, 복구 결과 기록 |
+| FR-UP-04 | 성공 release와 artifact/checksum/benchmark/audit history 관리 | 검증 가능한 release만 rollback 선택 가능 |
+| FR-UP-05 | 시작·traffic 복귀·rollback은 관리자, 사유, UI 확인, 감사 기록을 요구 | 누락 시 서버가 거부 |
 
-**근거**: 코디네이터 HA가 없으므로 in-place 업그레이드는 필연적 다운타임 + in-flight 쿼리 전멸을 부른다. Blue/Green이 유일하게 안전한 경로이며, 이는 "확장 단위 = 클러스터" 원칙과 일치한다.
+**근거**: 업그레이드용 VM 확보가 어렵고 작업 빈도가 낮으며 저트래픽 시간대를 선택할 수 있다는 운영 제약을 D-020으로 승인했다. 대상 클러스터의 계획된 downtime을 받아들이되, 다른 active backend와 고정된 안전 순서로 query traffic 영향을 제한한다. 구현 상세는 `PLAN_INPLACE_UPGRADE.md`를 따른다.
 
 ## FR-LOG-DEEPLINK (P1) — 로그 시스템 컨텍스트 딥링크
 
@@ -681,7 +682,7 @@ FR-LD-01의 "쿼리 상세"는 원래 FR-QUERY-HISTORY 화면을 전제했다. �
 | **R2**  | FR-WORKLOAD, **FR-ROUTING-VIEW**, FR-GATEWAY, FR-SLO, **FR-BENCHMARK**, **FR-BOARD**                    | "성능과 워크로드를 측정·비교할 수 있다"          |
 | **R3**  | FR-FLEET, **FR-CLUSTER-OPS**, FR-FLEET-DRIFT                                                            | "안전하게 조작할 수 있다"                        |
 | **R4**  | **FR-CATALOG**, FR-OPA, FR-LOGLEVEL, **FR-ROUTING-SVC**                                                 | "세밀하게 제어할 수 있다"                        |
-| **R5**  | **FR-PROVISION**, **FR-UPGRADE**                                                                        | "클러스터를 찍어낼 수 있다"                      |
+| **R5**  | **FR-PROVISION**, **FR-UPGRADE**                                                                        | "클러스터를 구축하고 안전하게 업그레이드한다"    |
 | **R6+** | AIOps (`AIOPS.md`)                                                                                      | "스스로 운영한다"                                |
 
 **변경점**: FR-CLUSTER-HEALTH를 R2→R1로 승격. 헬스 판정 결과가 라우팅 제외·AIOps 탐지의 입력이 되므로 가장 먼저 필요하다. FR-BENCHMARK도 R2로 승격 — 클러스터 간 성능 편차 규명이 시급한 실제 과제이기 때문이다.
